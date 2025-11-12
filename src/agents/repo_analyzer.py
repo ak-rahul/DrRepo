@@ -1,5 +1,5 @@
-"""Repository Analyzer Agent - First agent in the workflow."""
-from typing import Dict
+﻿"""Repository Analyzer Agent - First agent in the workflow."""
+from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 from src.tools.github_tool import GitHubTool
@@ -67,7 +67,7 @@ Be thorough, objective, and focus on actionable insights."""
                 content=f"Repository Analysis Complete:\n{llm_analysis}"
             ))
             
-            self._log_execution("✓ Analysis complete")
+            self._log_execution("âœ“ Analysis complete")
             return state
             
         except Exception as e:
@@ -125,3 +125,5 @@ Be thorough, objective, and focus on actionable insights."""
 7. Discoverability: How easy is it to find and understand this project?
 
 Provide a concise but thorough analysis (200-300 words)."""
+
+

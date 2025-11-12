@@ -1,4 +1,4 @@
-"""Reviewer/Critic Agent - Quality checks and validation."""
+﻿"""Reviewer/Critic Agent - Quality checks and validation."""
 from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
@@ -50,7 +50,7 @@ Be thorough, objective, and focus on actionable improvements. Rate each aspect c
                 content=f"Quality Review:\n{review}"
             ))
             
-            self._log_execution("✓ Review complete")
+            self._log_execution("âœ“ Review complete")
             return state
             
         except Exception as e:
@@ -76,14 +76,14 @@ Be thorough, objective, and focus on actionable improvements. Rate each aspect c
 **README Quality Score:** {readme_analysis.get('quality_score', 0):.1f}/100
 
 **Completeness Checklist:**
-- ✓/✗ README Present: {'✓' if readme_analysis['word_count'] > 0 else '✗'}
-- ✓/✗ Installation Guide: {'✓' if readme_analysis['has_installation'] else '✗'}
-- ✓/✗ Usage Instructions: {'✓' if readme_analysis['has_usage'] else '✗'}
-- ✓/✗ Code Examples: {'✓' if readme_analysis.get('has_code_blocks') else '✗'}
-- ✓/✗ Tests: {'✓' if file_structure['has_tests'] else '✗'}
-- ✓/✗ Contributing Guide: {'✓' if readme_analysis['has_contributing'] else '✗'}
-- ✓/✗ License: {'✓' if file_structure['has_license'] else '✗'}
-- ✓/✗ CI/CD: {'✓' if file_structure['has_ci'] else '✗'}
+- âœ“/âœ— README Present: {'âœ“' if readme_analysis['word_count'] > 0 else 'âœ—'}
+- âœ“/âœ— Installation Guide: {'âœ“' if readme_analysis['has_installation'] else 'âœ—'}
+- âœ“/âœ— Usage Instructions: {'âœ“' if readme_analysis['has_usage'] else 'âœ—'}
+- âœ“/âœ— Code Examples: {'âœ“' if readme_analysis.get('has_code_blocks') else 'âœ—'}
+- âœ“/âœ— Tests: {'âœ“' if file_structure['has_tests'] else 'âœ—'}
+- âœ“/âœ— Contributing Guide: {'âœ“' if readme_analysis['has_contributing'] else 'âœ—'}
+- âœ“/âœ— License: {'âœ“' if file_structure['has_license'] else 'âœ—'}
+- âœ“/âœ— CI/CD: {'âœ“' if file_structure['has_ci'] else 'âœ—'}
 
 **Repository Structure:**
 - Has tests: {file_structure['has_tests']}
@@ -173,3 +173,4 @@ Provide honest, constructive criticism with specific examples."""
             file_structure["has_ci"],
         ]
         return (sum(checks) / len(checks)) * 100
+

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Node functions for LangGraph workflow.
 
 This module contains the node functions that execute agent logic
@@ -6,7 +6,7 @@ within the LangGraph workflow. Each node corresponds to a specific
 agent or processing step in the multi-agent system.
 """
 
-from typing import Dict
+from typing import Dict, List
 from src.graph.state import PublicationState
 from src.agents.repo_analyzer import RepoAnalyzerAgent
 from src.agents.metadata_recommender import MetadataRecommenderAgent
@@ -200,7 +200,7 @@ class WorkflowNodes:
             state["final_recommendations"] = final_recommendations
             state["workflow_status"] = "completed"
             
-            logger.info("✓ Synthesis complete - workflow finished successfully")
+            logger.info("âœ“ Synthesis complete - workflow finished successfully")
             return state
             
         except Exception as e:
@@ -222,16 +222,16 @@ class WorkflowNodes:
         # Determine status
         if quality_score >= 80:
             status = "Excellent"
-            status_emoji = "🌟"
+            status_emoji = "ðŸŒŸ"
         elif quality_score >= 70:
             status = "Good"
-            status_emoji = "✅"
+            status_emoji = "âœ…"
         elif quality_score >= 50:
             status = "Fair"
-            status_emoji = "⚠️"
+            status_emoji = "âš ï¸"
         else:
             status = "Needs Improvement"
-            status_emoji = "🔴"
+            status_emoji = "ðŸ”´"
         
         return {
             "overall_quality": f"{quality_score:.1f}/100",
@@ -288,7 +288,7 @@ class WorkflowNodes:
         for section in readme_analysis.get("missing_sections", []):
             if section in missing_critical:
                 action_items.append({
-                    "priority": "🔴 High",
+                    "priority": "ðŸ”´ High",
                     "category": "Documentation",
                     "action": f"Add '{section}' section to README",
                     "impact": "Critical for usability and adoption",
@@ -298,7 +298,7 @@ class WorkflowNodes:
         # High priority: No code examples
         if not readme_analysis.get("has_code_blocks", False):
             action_items.append({
-                "priority": "🔴 High",
+                "priority": "ðŸ”´ High",
                 "category": "Documentation",
                 "action": "Add code examples demonstrating core functionality",
                 "impact": "Essential for user understanding",
@@ -308,7 +308,7 @@ class WorkflowNodes:
         # High priority: Missing license
         if not file_structure.get("has_license", False):
             action_items.append({
-                "priority": "🔴 High",
+                "priority": "ðŸ”´ High",
                 "category": "Legal/Compliance",
                 "action": "Add LICENSE file to repository",
                 "impact": "Required for open source projects",
@@ -318,7 +318,7 @@ class WorkflowNodes:
         # Medium priority: Badges
         if readme_analysis.get("badge_count", 0) < 3:
             action_items.append({
-                "priority": "🟡 Medium",
+                "priority": "ðŸŸ¡ Medium",
                 "category": "Visual/Branding",
                 "action": "Add status badges (build, license, version)",
                 "impact": "Improves professional appearance and trust",
@@ -328,7 +328,7 @@ class WorkflowNodes:
         # Medium priority: Tests
         if not file_structure.get("has_tests", False):
             action_items.append({
-                "priority": "🟡 Medium",
+                "priority": "ðŸŸ¡ Medium",
                 "category": "Quality Assurance",
                 "action": "Create test suite with basic test coverage",
                 "impact": "Essential for production-ready code",
@@ -338,7 +338,7 @@ class WorkflowNodes:
         # Medium priority: CI/CD
         if not file_structure.get("has_ci", False):
             action_items.append({
-                "priority": "🟡 Medium",
+                "priority": "ðŸŸ¡ Medium",
                 "category": "DevOps",
                 "action": "Set up CI/CD pipeline (GitHub Actions)",
                 "impact": "Automates testing and quality checks",
@@ -348,7 +348,7 @@ class WorkflowNodes:
         # Medium priority: Contributing guide
         if not file_structure.get("has_contributing", False):
             action_items.append({
-                "priority": "🟡 Medium",
+                "priority": "ðŸŸ¡ Medium",
                 "category": "Community",
                 "action": "Add CONTRIBUTING.md file",
                 "impact": "Encourages community contributions",
@@ -358,7 +358,7 @@ class WorkflowNodes:
         # Low priority: Images/screenshots
         if readme_analysis.get("image_count", 0) == 0:
             action_items.append({
-                "priority": "🟢 Low",
+                "priority": "ðŸŸ¢ Low",
                 "category": "Visual",
                 "action": "Add screenshots or demo GIF",
                 "impact": "Enhances README appeal",
@@ -369,7 +369,7 @@ class WorkflowNodes:
         if (readme_analysis.get("section_count", 0) > 5 and 
             not readme_analysis.get("has_table_of_contents", False)):
             action_items.append({
-                "priority": "🟢 Low",
+                "priority": "ðŸŸ¢ Low",
                 "category": "Navigation",
                 "action": "Add table of contents to README",
                 "impact": "Improves navigation in long documentation",
@@ -450,3 +450,4 @@ def create_synthesizer_node():
     """Factory function for synthesizer node."""
     nodes = WorkflowNodes()
     return nodes.synthesizer_node
+

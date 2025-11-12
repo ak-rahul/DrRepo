@@ -1,4 +1,4 @@
-"""Fact Checker Agent - Verifies claims against actual repository content."""
+﻿"""Fact Checker Agent - Verifies claims against actual repository content."""
 from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
@@ -60,7 +60,7 @@ Be precise and provide evidence for your findings."""
                 content=f"Fact Check Results:\n{fact_check}"
             ))
             
-            self._log_execution("✓ Fact checking complete")
+            self._log_execution("âœ“ Fact checking complete")
             return state
             
         except Exception as e:
@@ -102,7 +102,7 @@ Be precise and provide evidence for your findings."""
     ) -> str:
         """Create fact-checking prompt."""
         verification_summary = "\n".join([
-            f"- {claim}: {'✓ Verified' if result['found'] else '✗ Not found'}"
+            f"- {claim}: {'âœ“ Verified' if result['found'] else 'âœ— Not found'}"
             for claim, result in verification_results.items()
         ])
         
@@ -146,3 +146,4 @@ Be precise and provide evidence for your findings."""
    - Missing documentation for existing features
 
 Provide a clear, honest fact-check report."""
+

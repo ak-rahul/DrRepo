@@ -1,4 +1,4 @@
-"""Metadata Recommender Agent - Suggests metadata improvements."""
+﻿"""Metadata Recommender Agent - Suggests metadata improvements."""
 from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
@@ -51,7 +51,7 @@ Focus on making the project more discoverable and appealing to the target audien
                 content=f"Metadata Recommendations:\n{recommendations}"
             ))
             
-            self._log_execution("✓ Metadata recommendations generated")
+            self._log_execution("âœ“ Metadata recommendations generated")
             return state
             
         except Exception as e:
@@ -104,3 +104,4 @@ Focus on making the project more discoverable and appealing to the target audien
 5. **Positioning**: How should this project be positioned in the ecosystem?
 
 Format as clear, actionable recommendations with examples."""
+

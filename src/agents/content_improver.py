@@ -1,5 +1,5 @@
-"""Content Improver Agent - Suggests README content improvements."""
-from typing import Dict
+﻿"""Content Improver Agent - Suggests README content improvements."""
+from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 from src.tools.web_search_tool import WebSearchTool
@@ -62,7 +62,7 @@ Focus on making the documentation clear, complete, and professional."""
                 content=f"Content Improvements:\n{improvements}"
             ))
             
-            self._log_execution("✓ Content improvements generated")
+            self._log_execution("âœ“ Content improvements generated")
             return state
             
         except Exception as e:
@@ -98,7 +98,7 @@ Focus on making the documentation clear, complete, and professional."""
 {state.get('readme_content', '')[:600]}...
 
 **Automated Suggestions:**
-{chr(10).join(f"• {s['suggestion']}" for s in markdown_suggestions[:5])}
+{chr(10).join(f"â€¢ {s['suggestion']}" for s in markdown_suggestions[:5])}
 
 **Best Practices Reference:**
 {best_practices_summary}
@@ -122,3 +122,5 @@ Focus on making the documentation clear, complete, and professional."""
 7. **Quick Wins**: 3 easy improvements that would have high impact
 
 Provide specific, actionable recommendations with examples where possible."""
+
+

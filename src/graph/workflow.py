@@ -1,5 +1,5 @@
-"""LangGraph workflow for multi-agent publication assistant."""
-from typing import Dict, Literal
+﻿"""LangGraph workflow for multi-agent publication assistant."""
+from typing import Dict, List, Literal
 from langgraph.graph import StateGraph, END
 from src.graph.state import PublicationState, create_initial_state
 from src.agents.repo_analyzer import RepoAnalyzerAgent
@@ -130,7 +130,7 @@ class PublicationAssistantWorkflow:
             state["final_recommendations"] = final_recommendations
             state["workflow_status"] = "completed"
             
-            self.logger.info("✓ Workflow completed successfully")
+            self.logger.info("âœ“ Workflow completed successfully")
             return state
             
         except Exception as e:
@@ -215,3 +215,5 @@ class PublicationAssistantWorkflow:
             self.logger.error(f"Workflow failed with errors: {final_state['errors']}")
         
         return final_state["final_recommendations"]
+
+
