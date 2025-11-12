@@ -1,10 +1,14 @@
-"""Configuration management for Publication Assistant."""
+﻿"""Configuration management for Publication Assistant."""
 import os
 from typing import Optional
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+# Import logger for validation
+from src.utils.logger import logger
+
 load_dotenv()
+
 
 @dataclass
 class Config:
@@ -12,6 +16,7 @@ class Config:
     
     # API Keys
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")  # Added Groq key
     github_token: str = os.getenv("GITHUB_TOKEN", "")
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
     
@@ -31,13 +36,33 @@ class Config:
     langsmith_tracing: bool = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
     
     def validate(self) -> bool:
-        """Validate required configuration."""
-        required_keys = [
-            self.openai_api_key,
-            self.github_token,
-            self.tavily_api_key
-        ]
-        return all(required_keys)
+        """Validate that required API keys are present."""
+        model_provider = os.getenv('MODEL_PROVIDER', 'openai')
+        
+        # Check based on provider
+        if model_provider == 'groq':
+            # For Groq, only need Groq key
+            required = [
+                ('GROQ_API_KEY', self.groq_api_key),
+                ('GITHUB_TOKEN', self.github_token),
+                ('TAVILY_API_KEY', self.tavily_api_key)
+            ]
+        else:
+            # For OpenAI
+            required = [
+                ('OPENAI_API_KEY', self.openai_api_key),
+                ('GITHUB_TOKEN', self.github_token),
+                ('TAVILY_API_KEY', self.tavily_api_key)
+            ]
+        
+        missing = [key for key, value in required if not value]
+        
+        if missing:
+            logger.error(f"Missing required API keys: {', '.join(missing)}")
+            return False
+        
+        return True
+
 
 # Global config instance
 config = Config()
