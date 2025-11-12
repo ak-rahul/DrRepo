@@ -40,29 +40,12 @@ class PublicationAssistantWorkflow:
         # Set entry point
         workflow.set_entry_point("repo_analyzer")
         
-        # Add edges (workflow flow)
-        workflow.add_edge("repo_analyzer", "parallel_analysis")
-        
-        # Parallel execution of metadata, content, and review
-        workflow.add_conditional_edges(
-            "parallel_analysis",
-            self._route_parallel,
-            {
-                "metadata": "metadata_recommender",
-                "content": "content_improver",
-                "review": "reviewer_critic"
-            }
-        )
-        
-        # All parallel agents converge to fact checker
-        workflow.add_edge("metadata_recommender", "fact_checker")
-        workflow.add_edge("content_improver", "fact_checker")
+        # Sequential workflow: each agent runs in order
+        workflow.add_edge("repo_analyzer", "metadata_recommender")
+        workflow.add_edge("metadata_recommender", "content_improver")
+        workflow.add_edge("content_improver", "reviewer_critic")
         workflow.add_edge("reviewer_critic", "fact_checker")
-        
-        # Fact checker leads to synthesizer
         workflow.add_edge("fact_checker", "synthesizer")
-        
-        # Synthesizer ends workflow
         workflow.add_edge("synthesizer", END)
         
         return workflow.compile()
@@ -86,11 +69,6 @@ class PublicationAssistantWorkflow:
     def _run_fact_checker(self, state: PublicationState) -> PublicationState:
         """Execute fact checker node."""
         return self.fact_checker.execute(state)
-    
-    def _route_parallel(self, state: PublicationState) -> Literal["metadata", "content", "review"]:
-        """Route to parallel execution branches."""
-        # This is simplified - in real implementation, you'd handle true parallelism
-        return "metadata"
     
     def _synthesize_recommendations(self, state: PublicationState) -> PublicationState:
         """Synthesize all agent outputs into final recommendations."""
@@ -130,7 +108,7 @@ class PublicationAssistantWorkflow:
             state["final_recommendations"] = final_recommendations
             state["workflow_status"] = "completed"
             
-            self.logger.info("âœ“ Workflow completed successfully")
+            self.logger.info("✓ Workflow completed successfully")
             return state
             
         except Exception as e:
@@ -215,5 +193,3 @@ class PublicationAssistantWorkflow:
             self.logger.error(f"Workflow failed with errors: {final_state['errors']}")
         
         return final_state["final_recommendations"]
-
-
