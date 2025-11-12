@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  publication-assistant:
+    build: .
+    container_name: publication-assistant
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+    command: ["--help"]
