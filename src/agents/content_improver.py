@@ -5,6 +5,7 @@ from src.agents.base_agent import BaseAgent
 from src.tools.web_search_tool import WebSearchTool
 from src.tools.markdown_tool import MarkdownTool
 
+
 class ContentImproverAgent(BaseAgent):
     """Agent for improving README content and structure."""
     
@@ -62,7 +63,7 @@ Focus on making the documentation clear, complete, and professional."""
                 content=f"Content Improvements:\n{improvements}"
             ))
             
-            self._log_execution("âœ“ Content improvements generated")
+            self._log_execution("✓ Content improvements generated")
             return state
             
         except Exception as e:
@@ -83,6 +84,9 @@ Focus on making the documentation clear, complete, and professional."""
             for practice in best_practices[:3]
         ])
         
+        # Fixed: Changed state to repo_data
+        readme_preview = repo_data.get('readme_content', '')[:600]
+        
         return f"""Suggest content improvements for this README:
 
 **Current README State:**
@@ -95,10 +99,10 @@ Focus on making the documentation clear, complete, and professional."""
 - Missing: {', '.join(readme_analysis.get('missing_sections', []))}
 
 **README Preview:**
-{state.get('readme_content', '')[:600]}...
+{readme_preview}...
 
 **Automated Suggestions:**
-{chr(10).join(f"â€¢ {s['suggestion']}" for s in markdown_suggestions[:5])}
+{chr(10).join(f"• {s['suggestion']}" for s in markdown_suggestions[:5])}
 
 **Best Practices Reference:**
 {best_practices_summary}
@@ -122,5 +126,3 @@ Focus on making the documentation clear, complete, and professional."""
 7. **Quick Wins**: 3 easy improvements that would have high impact
 
 Provide specific, actionable recommendations with examples where possible."""
-
-

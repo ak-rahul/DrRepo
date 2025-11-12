@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 from src.tools.rag_retriever import RAGRetriever
 
+
 class FactCheckerAgent(BaseAgent):
     """Agent for fact-checking claims in README against actual content."""
     
@@ -26,7 +27,8 @@ Be precise and provide evidence for your findings."""
         
         try:
             repo_data = state["repo_data"]
-            readme_content = state["readme_content"]
+            # Fixed: Get readme_content from repo_data
+            readme_content = repo_data.get("readme_content", "")
             
             # Extract claims to verify
             claims = self._extract_claims(readme_content, repo_data)
@@ -60,7 +62,7 @@ Be precise and provide evidence for your findings."""
                 content=f"Fact Check Results:\n{fact_check}"
             ))
             
-            self._log_execution("âœ“ Fact checking complete")
+            self._log_execution("✓ Fact checking complete")
             return state
             
         except Exception as e:
@@ -77,7 +79,7 @@ Be precise and provide evidence for your findings."""
             claims.append("stated features exist")
         
         # Check for technology claims
-        if repo_data["language"]:
+        if repo_data.get("language"):
             claims.append(f"{repo_data['language']} implementation")
         
         # Check for performance claims
@@ -98,17 +100,21 @@ Be precise and provide evidence for your findings."""
         self,
         repo_data: Dict,
         claims: List[str],
-        verification_results: Dict
+        verification_results: List[Dict]  # Fixed: Changed from Dict to List[Dict]
     ) -> str:
         """Create fact-checking prompt."""
+        # Fixed: Handle list of verification results
         verification_summary = "\n".join([
-            f"- {claim}: {'âœ“ Verified' if result['found'] else 'âœ— Not found'}"
-            for claim, result in verification_results.items()
+            f"- {result.get('claim', 'Unknown')}: {'✓ Verified' if result.get('verified', False) else '✗ Not verified'}"
+            for result in verification_results
         ])
+        
+        # Safe access with defaults
+        file_structure = repo_data.get('file_structure', {})
         
         return f"""Fact-check this repository's claims:
 
-**Repository:** {repo_data['name']}
+**Repository:** {repo_data.get('name', 'Unknown')}
 
 **Claims to Verify:**
 {chr(10).join(f'{i+1}. {claim}' for i, claim in enumerate(claims))}
@@ -117,11 +123,11 @@ Be precise and provide evidence for your findings."""
 {verification_summary}
 
 **Repository Facts:**
-- Language: {repo_data['language']}
-- Has tests: {repo_data['file_structure']['has_tests']}
-- Has CI/CD: {repo_data['file_structure']['has_ci']}
+- Language: {repo_data.get('language', 'Unknown')}
+- Has tests: {file_structure.get('has_tests', False)}
+- Has CI/CD: {file_structure.get('has_ci', False)}
 - License: {repo_data.get('license', 'None')}
-- Last updated: {repo_data['updated_at']}
+- Last updated: {repo_data.get('updated_at', 'Unknown')}
 
 **Fact-Check Analysis Required:**
 
@@ -146,4 +152,3 @@ Be precise and provide evidence for your findings."""
    - Missing documentation for existing features
 
 Provide a clear, honest fact-check report."""
-
