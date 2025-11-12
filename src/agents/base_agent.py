@@ -1,10 +1,12 @@
 """Base class for all agents."""
 from abc import ABC, abstractmethod
 from typing import Dict
+import os
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from src.utils.config import config
 from src.utils.logger import logger
+
 
 class BaseAgent(ABC):
     """Abstract base class for agents."""
@@ -14,13 +16,24 @@ class BaseAgent(ABC):
         self.system_prompt = system_prompt
         self.logger = logger
         
-        # Initialize LLM
-        self.llm = ChatOpenAI(
-            model=config.model_name,
-            temperature=temperature,
-            max_tokens=config.max_tokens,
-            api_key=config.openai_api_key
-        )
+        # Check which provider to use
+        model_provider = os.getenv('MODEL_PROVIDER', 'openai')
+        
+        if model_provider == 'groq':
+            from langchain_groq import ChatGroq
+            self.llm = ChatGroq(
+                model=os.getenv('MODEL_NAME', 'llama-3.1-70b-versatile'),
+                temperature=temperature,
+                api_key=os.getenv('GROQ_API_KEY')
+            )
+        else:
+            # Default to OpenAI
+            self.llm = ChatOpenAI(
+                model=config.model_name,
+                temperature=temperature,
+                max_tokens=config.max_tokens,
+                api_key=config.openai_api_key
+            )
     
     @abstractmethod
     def execute(self, state: Dict) -> Dict:
