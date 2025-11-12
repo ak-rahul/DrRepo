@@ -1,0 +1,22 @@
+# Core dependencies
+langgraph==0.2.28
+langchain==0.3.0
+langchain-openai==0.2.1
+langchain-community==0.3.0
+
+# GitHub Integration
+PyGithub==2.1.1
+
+# Web Search
+tavily-python==0.5.0
+
+# Vector Store
+faiss-cpu==1.7.4
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
+tiktoken==0.7.0
+
+# Optional
+pydantic==2.8.2
