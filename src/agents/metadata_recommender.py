@@ -1,49 +1,60 @@
-﻿"""Metadata Recommender Agent - Suggests metadata improvements."""
+﻿"""Metadata Recommender Agent - Suggests improvements for repository metadata."""
 from typing import Dict, List
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 from src.tools.web_search_tool import WebSearchTool
 
+
 class MetadataRecommenderAgent(BaseAgent):
-    """Agent for recommending metadata and discoverability improvements."""
+    """Agent for recommending metadata improvements."""
     
     def __init__(self):
-        system_prompt = """You are a GitHub metadata optimization expert. Your role is to:
-1. Suggest improved project titles and descriptions
-2. Recommend relevant topics and tags for discoverability
-3. Propose keywords for search optimization
-4. Compare with successful similar projects
-5. Advise on categorization and positioning
+        system_prompt = """You are a GitHub repository metadata optimization expert. Your role is to:
+1. Suggest better repository names and descriptions
+2. Recommend relevant topics and tags
+3. Improve repository discoverability
+4. Optimize for GitHub search and SEO
+5. Compare with successful similar repositories
 
-Focus on making the project more discoverable and appealing to the target audience."""
+Focus on actionable recommendations that increase visibility."""
         
         super().__init__("MetadataRecommender", system_prompt, temperature=0.4)
         self.web_search = WebSearchTool()
     
     def execute(self, state: Dict) -> Dict:
-        """Execute metadata recommendation."""
+        """Execute metadata recommendation analysis.
+        
+        Args:
+            state: Workflow state with repo_data
+        
+        Returns:
+            Updated state with metadata recommendations
+        """
         self._log_execution("Analyzing metadata and discoverability...")
         
         try:
             repo_data = state["repo_data"]
             
-            # Search for similar successful projects
-            similar_repos = self.web_search.find_similar_repositories(
-                repo_data["language"],
-                repo_data["topics"]
+            # Search for similar successful repositories
+            similar_repos = self.web_search.search_similar_repositories(
+                repo_data.get("language", ""),
+                repo_data.get("description", "")
             )
             
-            # Create prompt
-            user_prompt = self._create_recommendation_prompt(repo_data, similar_repos)
+            # Create recommendation prompt
+            user_prompt = self._create_recommendation_prompt(
+                repo_data,
+                similar_repos
+            )
             
             # Get recommendations
             recommendations = self._call_llm(user_prompt)
             
             # Update state
-            state["metadata_suggestions"].append({
+            state["metadata_recommendations"].append({
                 "agent": "MetadataRecommender",
                 "recommendations": recommendations,
-                "similar_repos": similar_repos
+                "similar_repos": similar_repos[:3]
             })
             
             state["current_agent"] = "MetadataRecommender"
@@ -51,7 +62,7 @@ Focus on making the project more discoverable and appealing to the target audien
                 content=f"Metadata Recommendations:\n{recommendations}"
             ))
             
-            self._log_execution("âœ“ Metadata recommendations generated")
+            self._log_execution("✓ Metadata recommendations generated")
             return state
             
         except Exception as e:
@@ -64,44 +75,48 @@ Focus on making the project more discoverable and appealing to the target audien
         repo_data: Dict,
         similar_repos: List[Dict]
     ) -> str:
-        """Create metadata recommendation prompt."""
-        similar_info = "\n".join([
-            f"- {repo.get('title', 'N/A')}: {repo.get('content', '')[:150]}..."
+        """Create metadata recommendation prompt.
+        
+        Args:
+            repo_data: Repository metadata
+            similar_repos: List of similar successful repositories
+        
+        Returns:
+            Formatted prompt string
+        """
+        similar_summary = "\n".join([
+            f"- {repo.get('title', 'N/A')} (Topics: {', '.join(repo.get('topics', [])[:3])})"
             for repo in similar_repos[:3]
         ])
         
-        return f"""Provide metadata optimization recommendations for this repository:
+        return f"""Suggest metadata improvements for this repository:
 
 **Current Metadata:**
-- Name: {repo_data['name']}
-- Description: {repo_data['description']}
-- Topics: {', '.join(repo_data['topics']) if repo_data['topics'] else 'None'}
-- Language: {repo_data['language']}
-- Stars: {repo_data['stars']}
+- Name: {repo_data.get('name', 'Unknown')}
+- Description: {repo_data.get('description', 'None')}
+- Topics: {', '.join(repo_data.get('topics', [])) or 'None'}
+- Language: {repo_data.get('language', 'Unknown')}
+- Stars: {repo_data.get('stars', 0):,}
 
-**Similar Successful Projects:**
-{similar_info}
+**Similar Successful Repositories:**
+{similar_summary}
 
-**Recommendations Needed:**
+**Improvement Recommendations Needed:**
 
-1. **Project Title**: Suggest a better name if current one is unclear
-   - Keep it short, descriptive, and memorable
-   - Include key technology/purpose if relevant
+1. **Repository Name**: Is it clear and descriptive? Suggest alternatives if needed.
 
-2. **Description**: Write an improved one-line description (max 150 chars)
-   - Clear value proposition
-   - Include target audience
-   - Mention key features/benefits
+2. **Description**: Write a compelling 1-2 sentence description that:
+   - Clearly states what the project does
+   - Highlights key benefits
+   - Uses relevant keywords
 
-3. **Topics/Tags**: Recommend 5-10 relevant topics
-   - Technology stack
-   - Use cases
-   - Target audience
-   - Problem domain
+3. **Topics/Tags**: Suggest 5-8 relevant topics to improve discoverability:
+   - Primary technology/language tags
+   - Use-case tags
+   - Trending relevant tags
 
-4. **Keywords**: Suggest 8-12 SEO-friendly keywords for discoverability
+4. **SEO Keywords**: List 5 keywords to optimize for GitHub search
 
-5. **Positioning**: How should this project be positioned in the ecosystem?
+5. **Tagline**: Create a memorable tagline (max 10 words)
 
-Format as clear, actionable recommendations with examples."""
-
+Provide specific, actionable recommendations."""

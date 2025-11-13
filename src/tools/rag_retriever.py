@@ -1,30 +1,36 @@
-﻿"""RAG-based retriever for fact checking."""
+﻿"""RAG-based retriever for fact checking using FAISS."""
 from typing import List, Dict
-import os
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from src.utils.config import config
+from langchain_text_splitters import RecursiveCharacterTextSplitter  # ✅ CHANGED THIS LINE
 from src.utils.logger import logger
 
 
 class RAGRetriever:
-    """RAG retriever for document-based fact checking."""
+    """RAG retriever for document-based fact checking using FAISS."""
     
     def __init__(self):
+        """Initialize RAG retriever with HuggingFace embeddings."""
         self.logger = logger
-        # Use free HuggingFace embeddings instead of OpenAI
+        
+        # Use free HuggingFace embeddings (no API key needed)
         self.embeddings = HuggingFaceEmbeddings(
             model_name='sentence-transformers/all-MiniLM-L6-v2'
         )
+        
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200
         )
+        
         self.vector_store = None
     
     def index_documents(self, documents: List[str]) -> None:
-        """Index documents for retrieval."""
+        """Index documents for retrieval using FAISS.
+        
+        Args:
+            documents: List of document strings to index
+        """
         try:
             splits = self.text_splitter.create_documents(documents)
             self.vector_store = FAISS.from_documents(splits, self.embeddings)
@@ -34,7 +40,15 @@ class RAGRetriever:
             raise
     
     def search(self, query: str, k: int = 3) -> List[Dict]:
-        """Search for relevant documents."""
+        """Search for relevant documents using FAISS similarity search.
+        
+        Args:
+            query: Search query string
+            k: Number of results to return
+        
+        Returns:
+            List of relevant document dictionaries
+        """
         if not self.vector_store:
             self.logger.warning("No documents indexed")
             return []
@@ -54,7 +68,15 @@ class RAGRetriever:
         readme_content: str,
         claims: List[str]
     ) -> List[Dict]:
-        """Search for evidence supporting or refuting claims."""
+        """Search for evidence supporting or refuting claims.
+        
+        Args:
+            readme_content: README content to search
+            claims: List of claims to verify
+        
+        Returns:
+            List of verification results
+        """
         # Index the README
         self.index_documents([readme_content])
         

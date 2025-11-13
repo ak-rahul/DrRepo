@@ -1,65 +1,49 @@
-"""Advanced usage examples for Publication Assistant."""
-import json
-from src.main import PublicationAssistant
+"""Advanced usage example showing custom workflow."""
+from src.graph.workflow import PublicationAssistantWorkflow
+from src.utils.logger import logger
 
-def analyze_multiple_repos():
-    """Analyze multiple repositories and compare results."""
-    assistant = PublicationAssistant()
+def main():
+    """Run advanced analysis with custom handling."""
+    # Initialize workflow directly
+    workflow = PublicationAssistantWorkflow()
     
-    repos = [
-        "https://github.com/langchain-ai/langgraph",
-        "https://github.com/openai/openai-python",
-        "https://github.com/tiangolo/fastapi"
+    # Multiple repositories to analyze
+    repositories = [
+        "https://github.com/psf/requests",
+        "https://github.com/django/django",
+        "https://github.com/fastapi/fastapi"
     ]
     
     results = []
     
-    for repo_url in repos:
-        print(f"\nAnalyzing: {repo_url}")
-        recommendations = assistant.analyze(repo_url)
-        results.append({
-            "url": repo_url,
-            "score": recommendations["repository"]["current_score"],
-            "suggestions": len(recommendations["summary"]["total_suggestions"])
-        })
+    for repo_url in repositories:
+        try:
+            logger.info(f"Analyzing {repo_url}...")
+            
+            # Execute workflow
+            result = workflow.execute(repo_url, "")
+            
+            # Extract key metrics
+            summary = result.get("final_summary", {})
+            results.append({
+                "repo": repo_url,
+                "score": summary.get("repository", {}).get("current_score", 0),
+                "status": summary.get("summary", {}).get("status", "Unknown")
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze {repo_url}: {str(e)}")
+            results.append({
+                "repo": repo_url,
+                "score": 0,
+                "status": "Error"
+            })
     
-    # Compare results
-    print("\n" + "="*60)
-    print("COMPARISON RESULTS")
-    print("="*60)
-    
-    for result in sorted(results, key=lambda x: x["score"], reverse=True):
-        print(f"\n{result['url']}")
-        print(f"  Score: {result['score']:.1f}/100")
-        print(f"  Suggestions: {result['suggestions']}")
+    # Print comparison
+    print("\n=== Repository Comparison ===")
+    for r in sorted(results, key=lambda x: x['score'], reverse=True):
+        print(f"{r['repo']}: {r['score']:.1f}/100 ({r['status']})")
 
-def batch_analysis_with_filtering():
-    """Analyze repos and filter by quality score."""
-    assistant = PublicationAssistant()
-    
-    repos = [
-        "https://github.com/user1/repo1",
-        "https://github.com/user2/repo2",
-        "https://github.com/user3/repo3"
-    ]
-    
-    threshold = 70.0
-    high_quality_repos = []
-    
-    for repo_url in repos:
-        recommendations = assistant.analyze(repo_url)
-        score = recommendations["repository"]["current_score"]
-        
-        if score >= threshold:
-            high_quality_repos.append(repo_url)
-            print(f"✓ {repo_url} - Score: {score:.1f}")
-        else:
-            print(f"✗ {repo_url} - Score: {score:.1f} (needs improvement)")
-    
-    print(f"\nHigh quality repos ({len(high_quality_repos)}/{len(repos)}):")
-    for repo in high_quality_repos:
-        print(f"  - {repo}")
 
 if __name__ == "__main__":
-    print("Running advanced examples...\n")
-    analyze_multiple_repos()
+    main()

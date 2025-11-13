@@ -1,52 +1,66 @@
-"""Web search tool using Tavily API."""
+"""Web Search Tool using Tavily API."""
 from typing import List, Dict
 from tavily import TavilyClient
-from src.tools.base_tool import BaseTool
 from src.utils.config import config
+from src.utils.logger import logger
 
-class WebSearchTool(BaseTool):
-    """Tool for web search functionality."""
+
+class WebSearchTool:
+    """Tool for web search using Tavily API."""
     
     def __init__(self):
-        super().__init__("WebSearchTool")
+        """Initialize Tavily client."""
+        self.logger = logger
         self.client = TavilyClient(api_key=config.tavily_api_key)
     
-    def execute(self, query: str, max_results: int = 5) -> List[Dict]:
-        """
-        Execute web search.
+    def search_similar_repositories(
+        self,
+        language: str,
+        description: str
+    ) -> List[Dict]:
+        """Search for similar successful repositories.
         
         Args:
-            query: Search query
-            max_results: Maximum number of results
-            
+            language: Programming language
+            description: Repository description
+        
         Returns:
-            List of search results
+            List of similar repository results
         """
         try:
+            query = f"top GitHub {language} repositories {description[:50]} stars trending"
+            
             response = self.client.search(
                 query=query,
-                max_results=max_results,
-                search_depth="advanced",
-                include_answer=True
+                max_results=5,
+                search_depth="basic"
             )
             
             self.logger.info(f"Search completed for: {query}")
-            return response.get('results', [])
+            return response.get("results", [])
             
         except Exception as e:
-            return [self._handle_error(e)]
-    
-    def find_similar_repositories(self, language: str, topics: List[str]) -> List[Dict]:
-        """Find similar successful repositories."""
-        query = f"top GitHub {language} repositories {' '.join(topics[:3])} stars trending"
-        return self.execute(query, max_results=3)
+            self.logger.error(f"Search error: {str(e)}")
+            return []
     
     def get_readme_best_practices(self) -> List[Dict]:
-        """Get best practices for README files."""
-        query = "GitHub README best practices professional structure 2025"
-        return self.execute(query, max_results=3)
-    
-    def search_documentation_standards(self, language: str) -> List[Dict]:
-        """Search for documentation standards for specific language."""
-        query = f"{language} documentation standards best practices 2025"
-        return self.execute(query, max_results=3)
+        """Get README best practices from web search.
+        
+        Returns:
+            List of best practice results
+        """
+        try:
+            query = "GitHub README best practices professional structure 2025"
+            
+            response = self.client.search(
+                query=query,
+                max_results=3,
+                search_depth="basic"
+            )
+            
+            self.logger.info(f"Search completed for: {query}")
+            return response.get("results", [])
+            
+        except Exception as e:
+            self.logger.error(f"Search error: {str(e)}")
+            return []

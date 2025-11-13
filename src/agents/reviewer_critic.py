@@ -1,48 +1,56 @@
-﻿"""Reviewer/Critic Agent - Quality checks and validation."""
-from typing import Dict, List
+﻿"""Reviewer Critic Agent - Performs quality review and provides constructive criticism."""
+from typing import Dict
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 
+
 class ReviewerCriticAgent(BaseAgent):
-    """Agent for reviewing and critiquing repository quality."""
+    """Agent for comprehensive quality review and critique."""
     
     def __init__(self):
-        system_prompt = """You are a strict code review and documentation quality expert. Your role is to:
-1. Identify gaps in documentation and completeness
-2. Check for consistency and accuracy
-3. Validate structure against best practices
-4. Flag missing critical sections
-5. Assess professional presentation standards
-6. Provide constructive criticism
+        system_prompt = """You are a senior code reviewer and documentation specialist. Your role is to:
+1. Perform comprehensive quality assessment
+2. Identify gaps and inconsistencies
+3. Evaluate against professional standards
+4. Provide constructive criticism
+5. Suggest priority improvements
 
-Be thorough, objective, and focus on actionable improvements. Rate each aspect clearly."""
+Be honest but constructive. Focus on actionable feedback."""
         
-        super().__init__("ReviewerCritic", system_prompt, temperature=0.2)
+        super().__init__("ReviewerCritic", system_prompt, temperature=0.3)
     
     def execute(self, state: Dict) -> Dict:
-        """Execute review and critique."""
+        """Execute quality review.
+        
+        Args:
+            state: Workflow state with all previous analyses
+        
+        Returns:
+            Updated state with quality review
+        """
         self._log_execution("Performing quality review...")
         
         try:
             repo_data = state["repo_data"]
             readme_analysis = state["code_structure"]
-            file_structure = repo_data["file_structure"]
             
-            # Create comprehensive review prompt
+            # Create review prompt
             user_prompt = self._create_review_prompt(
                 repo_data,
                 readme_analysis,
-                file_structure
+                state.get("analysis", []),
+                state.get("metadata_recommendations", []),
+                state.get("content_improvements", [])
             )
             
             # Get review
             review = self._call_llm(user_prompt)
             
             # Update state
-            state["review_feedback"].append({
+            state["quality_review"].append({
                 "agent": "ReviewerCritic",
                 "review": review,
-                "checklist": self._generate_checklist(readme_analysis, file_structure)
+                "overall_score": readme_analysis.get("quality_score", 0)
             })
             
             state["current_agent"] = "ReviewerCritic"
@@ -50,7 +58,7 @@ Be thorough, objective, and focus on actionable improvements. Rate each aspect c
                 content=f"Quality Review:\n{review}"
             ))
             
-            self._log_execution("âœ“ Review complete")
+            self._log_execution("✓ Review complete")
             return state
             
         except Exception as e:
@@ -62,115 +70,71 @@ Be thorough, objective, and focus on actionable improvements. Rate each aspect c
         self,
         repo_data: Dict,
         readme_analysis: Dict,
-        file_structure: Dict
+        analyses: list,
+        metadata_recs: list,
+        content_improvements: list
     ) -> str:
-        """Create review prompt."""
-        return f"""Perform a comprehensive quality review of this repository:
+        """Create quality review prompt.
+        
+        Args:
+            repo_data: Repository metadata
+            readme_analysis: README analysis results
+            analyses: Previous agent analyses
+            metadata_recs: Metadata recommendations
+            content_improvements: Content improvement suggestions
+        
+        Returns:
+            Formatted prompt string
+        """
+        file_structure = repo_data.get('file_structure', {})
+        
+        return f"""Perform comprehensive quality review of this repository:
 
 **Repository Overview:**
-- Name: {repo_data['name']}
-- Description: {repo_data['description']}
-- Language: {repo_data['language']}
-- Stars: {repo_data['stars']} | Forks: {repo_data['forks']}
+- Name: {repo_data.get('name', 'Unknown')}
+- Quality Score: {readme_analysis.get('quality_score', 0):.1f}/100
+- Stars: {repo_data.get('stars', 0):,}
+- Language: {repo_data.get('language', 'Unknown')}
 
-**README Quality Score:** {readme_analysis.get('quality_score', 0):.1f}/100
+**Documentation Status:**
+- README Word Count: {readme_analysis.get('word_count', 0)}
+- Sections: {readme_analysis.get('section_count', 0)}
+- Code Examples: {readme_analysis.get('code_block_count', 0)}
+- Missing Sections: {', '.join(readme_analysis.get('missing_sections', []))}
 
-**Completeness Checklist:**
-- âœ“/âœ— README Present: {'âœ“' if readme_analysis['word_count'] > 0 else 'âœ—'}
-- âœ“/âœ— Installation Guide: {'âœ“' if readme_analysis['has_installation'] else 'âœ—'}
-- âœ“/âœ— Usage Instructions: {'âœ“' if readme_analysis['has_usage'] else 'âœ—'}
-- âœ“/âœ— Code Examples: {'âœ“' if readme_analysis.get('has_code_blocks') else 'âœ—'}
-- âœ“/âœ— Tests: {'âœ“' if file_structure['has_tests'] else 'âœ—'}
-- âœ“/âœ— Contributing Guide: {'âœ“' if readme_analysis['has_contributing'] else 'âœ—'}
-- âœ“/âœ— License: {'âœ“' if file_structure['has_license'] else 'âœ—'}
-- âœ“/âœ— CI/CD: {'âœ“' if file_structure['has_ci'] else 'âœ—'}
+**Project Structure:**
+- Has Tests: {file_structure.get('has_tests', False)}
+- Has CI/CD: {file_structure.get('has_ci', False)}
+- Has Docs: {file_structure.get('has_docs', False)}
+- Has License: {bool(repo_data.get('license'))}
 
-**Repository Structure:**
-- Has tests: {file_structure['has_tests']}
-- Has docs: {file_structure['has_docs']}
-- Has requirements: {file_structure['has_requirements']}
-- Has Docker: {file_structure['has_docker']}
-- Has Makefile: {file_structure['has_makefile']}
+**Review Criteria:**
 
-**Review Requirements:**
+1. **Completeness** (0-25 points):
+   - Essential sections present?
+   - Adequate code examples?
+   - Clear installation/usage instructions?
 
-1. **Documentation Quality** (Rate 1-10):
-   - Clarity and completeness
-   - Professional presentation
-   - Missing critical sections
+2. **Clarity** (0-25 points):
+   - Easy to understand?
+   - Well-organized?
+   - Beginner-friendly?
 
-2. **Repository Structure** (Rate 1-10):
-   - Organization and layout
-   - Missing essential files
-   - Professional standards
+3. **Professionalism** (0-25 points):
+   - Proper formatting?
+   - No typos/errors?
+   - Consistent style?
 
-3. **Discoverability** (Rate 1-10):
-   - README appeal
-   - Metadata quality
-   - First impression
+4. **Discoverability** (0-25 points):
+   - Good description?
+   - Relevant topics?
+   - SEO optimized?
 
-4. **Critical Issues** (List):
-   - Must-fix problems
-   - Blocking issues for professional use
+**Provide:**
+1. Score breakdown by category
+2. Top 3 critical issues
+3. Top 3 quick wins
+4. Overall assessment (Excellent/Good/Needs Improvement/Poor)
+5. Priority recommendations
 
-5. **Recommendations Priority**:
-   - High priority (must have)
-   - Medium priority (should have)
-   - Low priority (nice to have)
-
-6. **Overall Assessment**:
-   - Ready for production? Yes/No
-   - Suitable for professional sharing? Yes/No
-   - Main strengths and weaknesses
-
-Provide honest, constructive criticism with specific examples."""
-    
-    def _generate_checklist(
-        self,
-        readme_analysis: Dict,
-        file_structure: Dict
-    ) -> Dict:
-        """Generate a structured checklist."""
-        return {
-            "documentation": {
-                "readme_present": readme_analysis["word_count"] > 0,
-                "installation_guide": readme_analysis["has_installation"],
-                "usage_instructions": readme_analysis["has_usage"],
-                "examples": readme_analysis.get("has_code_blocks", False),
-                "contributing_guide": readme_analysis["has_contributing"],
-                "license_info": readme_analysis["has_license"],
-            },
-            "repository_structure": {
-                "has_tests": file_structure["has_tests"],
-                "has_docs": file_structure["has_docs"],
-                "has_requirements": file_structure["has_requirements"],
-                "has_ci_cd": file_structure["has_ci"],
-                "has_license_file": file_structure["has_license"],
-            },
-            "quality_score": readme_analysis.get("quality_score", 0),
-            "completeness_percentage": self._calculate_completeness(
-                readme_analysis,
-                file_structure
-            )
-        }
-    
-    def _calculate_completeness(
-        self,
-        readme_analysis: Dict,
-        file_structure: Dict
-    ) -> float:
-        """Calculate overall completeness percentage."""
-        checks = [
-            readme_analysis["word_count"] > 100,
-            readme_analysis["has_installation"],
-            readme_analysis["has_usage"],
-            readme_analysis.get("has_code_blocks", False),
-            readme_analysis["has_contributing"],
-            readme_analysis["has_license"],
-            file_structure["has_tests"],
-            file_structure["has_requirements"],
-            file_structure["has_license"],
-            file_structure["has_ci"],
-        ]
-        return (sum(checks) / len(checks)) * 100
-
+Be specific and actionable."""

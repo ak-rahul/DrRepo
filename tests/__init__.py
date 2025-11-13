@@ -1,1 +1,1 @@
-"""Test suite for Publication Assistant."""
+"""Tests package for DrRepo."""

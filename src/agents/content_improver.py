@@ -24,7 +24,14 @@ Focus on making the documentation clear, complete, and professional."""
         self.markdown_tool = MarkdownTool()
     
     def execute(self, state: Dict) -> Dict:
-        """Execute content improvement analysis."""
+        """Execute content improvement analysis.
+        
+        Args:
+            state: Workflow state with repo_data and code_structure
+        
+        Returns:
+            Updated state with content improvements
+        """
         self._log_execution("Analyzing content and suggesting improvements...")
         
         try:
@@ -78,21 +85,31 @@ Focus on making the documentation clear, complete, and professional."""
         best_practices: List[Dict],
         markdown_suggestions: List[Dict]
     ) -> str:
-        """Create content improvement prompt."""
+        """Create content improvement prompt.
+        
+        Args:
+            repo_data: Repository metadata
+            readme_analysis: README structure analysis
+            best_practices: Best practice guidelines
+            markdown_suggestions: Automated markdown suggestions
+        
+        Returns:
+            Formatted prompt string
+        """
         best_practices_summary = "\n".join([
             f"- {practice.get('title', 'N/A')}"
             for practice in best_practices[:3]
         ])
         
-        # Fixed: Changed state to repo_data
+        # Fixed: Get readme_content from repo_data instead of state
         readme_preview = repo_data.get('readme_content', '')[:600]
         
         return f"""Suggest content improvements for this README:
 
 **Current README State:**
 - Quality Score: {readme_analysis.get('quality_score', 0):.1f}/100
-- Word Count: {readme_analysis['word_count']}
-- Sections: {readme_analysis['section_count']}
+- Word Count: {readme_analysis.get('word_count', 0)}
+- Sections: {readme_analysis.get('section_count', 0)}
 - Code Examples: {readme_analysis.get('code_block_count', 0)}
 - Images: {readme_analysis.get('image_count', 0)}
 - Badges: {readme_analysis.get('badge_count', 0)}
@@ -102,7 +119,7 @@ Focus on making the documentation clear, complete, and professional."""
 {readme_preview}...
 
 **Automated Suggestions:**
-{chr(10).join(f"• {s['suggestion']}" for s in markdown_suggestions[:5])}
+{chr(10).join(f"• {s.get('suggestion', '')}" for s in markdown_suggestions[:5])}
 
 **Best Practices Reference:**
 {best_practices_summary}

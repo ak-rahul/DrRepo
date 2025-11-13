@@ -1,129 +1,126 @@
-﻿"""Repository Analyzer Agent - First agent in the workflow."""
-from typing import Dict, List
+﻿"""Repository Analyzer Agent - Analyzes GitHub repository structure and metadata."""
+from typing import Dict
 from langchain_core.messages import HumanMessage
 from src.agents.base_agent import BaseAgent
 from src.tools.github_tool import GitHubTool
 from src.tools.markdown_tool import MarkdownTool
 
+
 class RepoAnalyzerAgent(BaseAgent):
-    """Agent responsible for analyzing repository structure and content."""
+    """Agent for analyzing repository structure and extracting metadata."""
     
     def __init__(self):
-        system_prompt = """You are a repository analysis expert. Your role is to:
-1. Examine repository structure, files, and organization
-2. Analyze README content and documentation quality
-3. Assess project metadata (description, topics, stars)
-4. Identify the project's purpose and target audience
-5. Provide a comprehensive overview of the repository's current state
+        system_prompt = """You are a GitHub repository analysis expert. Your role is to:
+1. Analyze repository structure and organization
+2. Extract key metadata (stars, forks, language, topics)
+3. Evaluate README quality and completeness
+4. Identify project type and category
+5. Assess overall repository health
 
-Be thorough, objective, and focus on actionable insights."""
+Focus on factual analysis and comprehensive data extraction."""
         
         super().__init__("RepoAnalyzer", system_prompt, temperature=0.2)
         self.github_tool = GitHubTool()
         self.markdown_tool = MarkdownTool()
     
     def execute(self, state: Dict) -> Dict:
-        """
-        Execute repository analysis.
+        """Execute repository analysis.
         
         Args:
-            state: Current workflow state
-            
+            state: Workflow state containing repo_url
+        
         Returns:
-            Updated state with analysis results
+            Updated state with repo_data and code_structure
         """
         self._log_execution("Starting repository analysis...")
         
         try:
-            # Fetch repository data
-            repo_data = self.github_tool.execute(state["repo_url"])
+            repo_url = state["repo_url"]
             
-            if "error" in repo_data:
-                state["errors"].append(f"GitHub fetch error: {repo_data['error']}")
-                state["workflow_status"] = "error"
-                return state
+            # Fetch repository data
+            repo_data = self.github_tool.execute(repo_url)
             
             # Analyze README structure
-            readme_analysis = self.markdown_tool.execute(repo_data["readme_content"])
-            
-            # Prepare LLM analysis prompt
-            user_prompt = self._create_analysis_prompt(
-                repo_data,
-                readme_analysis,
-                state.get("user_description", "")
+            readme_analysis = self.markdown_tool.execute(
+                repo_data.get("readme_content", "")
             )
             
+            # Create analysis prompt
+            user_prompt = self._create_analysis_prompt(repo_data, readme_analysis)
+            
             # Get LLM analysis
-            llm_analysis = self._call_llm(user_prompt)
+            analysis = self._call_llm(user_prompt)
             
             # Update state
             state["repo_data"] = repo_data
-            state["readme_content"] = repo_data["readme_content"]
             state["code_structure"] = readme_analysis
-            state["current_agent"] = "RepoAnalyzer"
+            state["analysis"].append({
+                "agent": "RepoAnalyzer",
+                "analysis": analysis,
+                "metadata": {
+                    "stars": repo_data.get("stars", 0),
+                    "forks": repo_data.get("forks", 0),
+                    "language": repo_data.get("language", "Unknown"),
+                    "quality_score": readme_analysis.get("quality_score", 0)
+                }
+            })
             
-            # Add message
+            state["current_agent"] = "RepoAnalyzer"
             state["messages"].append(HumanMessage(
-                content=f"Repository Analysis Complete:\n{llm_analysis}"
+                content=f"Repository Analysis:\n{analysis}"
             ))
             
-            self._log_execution("âœ“ Analysis complete")
+            self._log_execution("✓ Analysis complete")
             return state
             
         except Exception as e:
             self.logger.error(f"Error in RepoAnalyzer: {str(e)}")
             state["errors"].append(str(e))
-            state["workflow_status"] = "error"
             return state
     
     def _create_analysis_prompt(
         self,
         repo_data: Dict,
-        readme_analysis: Dict,
-        user_description: str
+        readme_analysis: Dict
     ) -> str:
-        """Create comprehensive analysis prompt for LLM."""
-        return f"""Analyze this GitHub repository comprehensively:
+        """Create repository analysis prompt.
+        
+        Args:
+            repo_data: Repository metadata
+            readme_analysis: README structure analysis
+        
+        Returns:
+            Formatted prompt string
+        """
+        return f"""Analyze this GitHub repository:
 
 **Repository Information:**
-- Name: {repo_data['name']}
-- Description: {repo_data['description']}
-- Language: {repo_data['language']}
-- Stars: {repo_data['stars']} | Forks: {repo_data['forks']}
-- Topics: {', '.join(repo_data['topics']) if repo_data['topics'] else 'None'}
+- Name: {repo_data.get('name', 'Unknown')}
+- Description: {repo_data.get('description', 'None')}
+- Language: {repo_data.get('language', 'Unknown')}
+- Stars: {repo_data.get('stars', 0):,}
+- Forks: {repo_data.get('forks', 0):,}
+- Topics: {', '.join(repo_data.get('topics', [])) or 'None'}
 - License: {repo_data.get('license', 'None')}
-
-**File Structure:**
-- Has Tests: {repo_data['file_structure']['has_tests']}
-- Has Docs: {repo_data['file_structure']['has_docs']}
-- Has CI/CD: {repo_data['file_structure']['has_ci']}
-- Has Requirements: {repo_data['file_structure']['has_requirements']}
-- Directories: {', '.join(repo_data['file_structure']['directories'][:10])}
+- Last Updated: {repo_data.get('updated_at', 'Unknown')}
 
 **README Analysis:**
 - Quality Score: {readme_analysis.get('quality_score', 0):.1f}/100
-- Word Count: {readme_analysis['word_count']}
-- Sections: {readme_analysis['section_count']}
-- Has Installation: {readme_analysis['has_installation']}
-- Has Usage: {readme_analysis['has_usage']}
-- Has Examples: {readme_analysis['has_examples']}
-- Code Blocks: {readme_analysis.get('code_block_count', 0)}
+- Word Count: {readme_analysis.get('word_count', 0)}
+- Sections: {readme_analysis.get('section_count', 0)}
+- Code Examples: {readme_analysis.get('code_block_count', 0)}
 - Images: {readme_analysis.get('image_count', 0)}
-- Badges: {readme_analysis.get('badge_count', 0)}
-- Missing Sections: {', '.join(readme_analysis.get('missing_sections', []))}
 
-**User Description:**
-{user_description if user_description else 'Not provided'}
+**File Structure:**
+- Has Tests: {repo_data.get('file_structure', {}).get('has_tests', False)}
+- Has CI/CD: {repo_data.get('file_structure', {}).get('has_ci', False)}
+- Has Documentation: {repo_data.get('file_structure', {}).get('has_docs', False)}
 
-**Analysis Required:**
-1. Project Type & Domain: What category does this project fall into?
-2. Target Audience: Who is this project for?
-3. Technical Stack: Main technologies used
-4. Current State Assessment: Rate overall quality (1-10)
-5. Strengths: What's done well?
-6. Key Issues: What needs improvement?
-7. Discoverability: How easy is it to find and understand this project?
+Provide a comprehensive analysis covering:
+1. **Repository Health**: Overall assessment of repository quality
+2. **Documentation Quality**: README completeness and clarity
+3. **Project Maturity**: Development stage and maintenance status
+4. **Key Strengths**: What this repository does well
+5. **Improvement Areas**: Main areas needing attention
 
-Provide a concise but thorough analysis (200-300 words)."""
-
-
+Keep analysis factual and actionable."""

@@ -1,6 +1,5 @@
 # Python
 __pycache__/
-*/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -23,35 +22,46 @@ wheels/
 
 # Virtual Environment
 venv/
-ENV/
 env/
+ENV/
+.venv
+
+# Environment variables
+.env
+.env.local
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Environment
-.env
-.env.local
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Data
-data/raw/
-data/processed/
-*.db
-*.sqlite
+*~
 
 # Logs
-*.log
 logs/
+*.log
+
+# Reports
+reports/*.json
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

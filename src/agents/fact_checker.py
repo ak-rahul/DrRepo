@@ -22,7 +22,14 @@ Be precise and provide evidence for your findings."""
         self.rag_retriever = RAGRetriever()
     
     def execute(self, state: Dict) -> Dict:
-        """Execute fact checking."""
+        """Execute fact checking.
+        
+        Args:
+            state: Workflow state with repo_data
+        
+        Returns:
+            Updated state with fact check results
+        """
         self._log_execution("Fact-checking README claims...")
         
         try:
@@ -71,7 +78,15 @@ Be precise and provide evidence for your findings."""
             return state
     
     def _extract_claims(self, readme_content: str, repo_data: Dict) -> List[str]:
-        """Extract verifiable claims from README."""
+        """Extract verifiable claims from README.
+        
+        Args:
+            readme_content: README text
+            repo_data: Repository metadata
+        
+        Returns:
+            List of claims to verify
+        """
         claims = []
         
         # Check for feature claims
@@ -102,7 +117,16 @@ Be precise and provide evidence for your findings."""
         claims: List[str],
         verification_results: List[Dict]  # Fixed: Changed from Dict to List[Dict]
     ) -> str:
-        """Create fact-checking prompt."""
+        """Create fact-checking prompt.
+        
+        Args:
+            repo_data: Repository metadata
+            claims: List of claims to verify
+            verification_results: RAG verification results
+        
+        Returns:
+            Formatted prompt string
+        """
         # Fixed: Handle list of verification results
         verification_summary = "\n".join([
             f"- {result.get('claim', 'Unknown')}: {'✓ Verified' if result.get('verified', False) else '✗ Not verified'}"

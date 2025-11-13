@@ -1,4 +1,4 @@
-publication-assistant/
+DrRepo/
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml
@@ -8,6 +8,7 @@ publication-assistant/
 │   │   ├── bug_report.md
 │   │   └── feature_request.md
 │   └── PULL_REQUEST_TEMPLATE.md
+│
 ├── docs/
 │   ├── architecture.md
 │   ├── api_reference.md
@@ -15,35 +16,38 @@ publication-assistant/
 │   ├── configuration.md
 │   └── images/
 │       └── workflow_diagram.png
+│
 ├── src/
-│   ├── __init__.py
-│   ├── agents/
+│   ├── __init__.py                    # Project initialization
+│   ├── main.py                        # Main application entry
+│   │
+│   ├── agents/                        # 5 AI Agents
 │   │   ├── __init__.py
-│   │   ├── base_agent.py
-│   │   ├── repo_analyzer.py
-│   │   ├── metadata_recommender.py
-│   │   ├── content_improver.py
-│   │   ├── reviewer_critic.py
-│   │   └── fact_checker.py
-│   ├── tools/
+│   │   ├── base_agent.py              # Base agent class (Groq/OpenAI support)
+│   │   ├── repo_analyzer.py           # Repository data analyzer
+│   │   ├── metadata_recommender.py    # Metadata optimization
+│   │   ├── content_improver.py        # README enhancement (FIXED)
+│   │   ├── reviewer_critic.py         # Quality assessment
+│   │   └── fact_checker.py            # RAG-based verification (FIXED)
+│   │
+│   ├── tools/                         # Tool integrations
 │   │   ├── __init__.py
-│   │   ├── base_tool.py
-│   │   ├── github_tool.py
-│   │   ├── rag_retriever.py
-│   │   ├── web_search_tool.py
-│   │   └── markdown_tool.py
-│   ├── graph/
+│   │   ├── github_tool.py             # GitHub API integration
+│   │   ├── rag_retriever.py           # FAISS + HuggingFace embeddings
+│   │   ├── web_search_tool.py         # Tavily search
+│   │   └── markdown_tool.py           # README parsing & analysis
+│   │
+│   ├── graph/                         # LangGraph workflow
 │   │   ├── __init__.py
-│   │   ├── state.py
-│   │   ├── workflow.py
-│   │   └── nodes.py
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── logger.py
-│   │   ├── config.py
-│   │   └── validators.py
-│   └── main.py
-├── tests/
+│   │   ├── state.py                   # State management
+│   │   └── workflow.py                # Multi-agent orchestration
+│   │
+│   └── utils/                         # Utilities
+│       ├── __init__.py
+│       ├── config.py                  # Configuration (Groq support)
+│       └── logger.py                  # Logging system
+│
+├── tests/                             # Unit tests
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── test_agents/
@@ -54,28 +58,39 @@ publication-assistant/
 │   │   └── test_web_search_tool.py
 │   └── test_integration/
 │       └── test_workflow.py
-├── examples/
+│
+├── examples/                          # Usage examples
 │   ├── basic_usage.py
 │   ├── advanced_usage.py
 │   └── sample_output.json
-├── data/
-│   ├── prompts/
-│   │   ├── analyzer_prompts.json
-│   │   └── recommender_prompts.json
-│   └── templates/
-│       └── readme_template.md
-├── .env.example
-├── .gitignore
-├── .pre-commit-config.yaml
-├── requirements.txt
-├── requirements-dev.txt
-├── setup.py
-├── pyproject.toml
-├── Dockerfile
-├── docker-compose.yml
-├── Makefile
-├── LICENSE
-├── CONTRIBUTING.md
-├── CHANGELOG.md
-├── CODE_OF_CONDUCT.md
-└── README.md
+│
+├── reports/                           # ✅ Generated analysis outputs
+│   └── requests_report.json
+│
+├── logs/                              # ✅ Application logs
+│   └── app.log
+│
+├── venv/                              # ✅ Virtual environment
+│   └── (Python packages)
+│
+├── app.py                             # ✅ Streamlit frontend (WORKING)
+├── gradio_app.py                      # Optional: Gradio interface
+│
+├── .env                               # ✅ API keys (YOUR CONFIG)
+├── .env.example                       # Example environment file
+├── .gitignore                         # Git ignore rules
+├── requirements.txt                   # ✅ Production dependencies (Groq, Streamlit)
+├── requirements-dev.txt               # ✅ Development dependencies
+├── requirements-minimal.txt           # Minimal dependencies backup
+│
+├── setup.py                           # Package setup
+├── pyproject.toml                     # Modern Python config
+├── Dockerfile                         # Docker containerization
+├── docker-compose.yml                 # Docker compose config
+├── Makefile                           # Build automation
+│
+├── LICENSE                            # Project license
+├── CONTRIBUTING.md                    # Contribution guidelines
+├── CHANGELOG.md                       # Version history
+├── CODE_OF_CONDUCT.md                 # Community guidelines
+└── README.md                          # 🩺 DrRepo Documentation

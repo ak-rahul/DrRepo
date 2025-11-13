@@ -1,46 +1,117 @@
-"""Tests for GitHubTool."""
+"""Tests for GitHub tool."""
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
+from github import GithubException
 from src.tools.github_tool import GitHubTool
 
+
 class TestGitHubTool:
+    """Test cases for GitHub tool."""
     
-    def test_initialization(self, mock_config):
+    def test_initialization(self):
         """Test tool initialization."""
-        with patch('src.tools.github_tool.config', mock_config):
-            tool = GitHubTool()
-            assert tool.name == "GitHubTool"
+        tool = GitHubTool()
+        assert tool.github is not None
     
-    def test_execute_success(self, mock_github_client, sample_repo_data):
+    def test_parse_valid_repo_url(self):
+        """Test parsing valid GitHub URLs."""
+        tool = GitHubTool()
+        
+        # Test various valid formats
+        assert tool._parse_repo_url("https://github.com/user/repo") == "user/repo"
+        assert tool._parse_repo_url("https://github.com/user/repo/") == "user/repo"
+        assert tool._parse_repo_url("https://github.com/user-name/repo-name") == "user-name/repo-name"
+    
+    def test_parse_invalid_repo_url(self):
+        """Test parsing invalid URLs."""
+        tool = GitHubTool()
+        
+        # Invalid domain
+        with pytest.raises(ValueError):
+            tool._parse_repo_url("https://gitlab.com/user/repo")
+        
+        # Missing repo name
+        with pytest.raises(ValueError):
+            tool._parse_repo_url("https://github.com/user")
+        
+        # Completely invalid
+        with pytest.raises(ValueError):
+            tool._parse_repo_url("not-a-url")
+    
+    @patch('src.tools.github_tool.Github')
+    def test_execute_success(self, mock_github):
         """Test successful repository fetch."""
-        # Mock repository object
-        mock_repo = Mock()
-        mock_repo.name = sample_repo_data["name"]
-        mock_repo.full_name = sample_repo_data["full_name"]
-        mock_repo.description = sample_repo_data["description"]
-        mock_repo.html_url = sample_repo_data["url"]
-        mock_repo.stargazers_count = sample_repo_data["stars"]
+        # Setup mock
+        mock_repo = MagicMock()
+        mock_repo.name = "test-repo"
+        mock_repo.full_name = "user/test-repo"
+        mock_repo.description = "Test description"
+        mock_repo.html_url = "https://github.com/user/test-repo"
+        mock_repo.stargazers_count = 100
+        mock_repo.forks_count = 20
+        mock_repo.watchers_count = 50
+        mock_repo.language = "Python"
+        mock_repo.get_topics.return_value = ["python", "test"]
+        mock_repo.license = Mock(name="MIT")
+        mock_repo.size = 1024
+        mock_repo.default_branch = "main"
+        mock_repo.open_issues_count = 5
         
         # Mock README
-        mock_readme = Mock()
-        mock_readme.decoded_content.decode.return_value = sample_repo_data["readme_content"]
+        mock_readme = MagicMock()
+        mock_readme.decoded_content = b"# Test README"
         mock_repo.get_readme.return_value = mock_readme
         
         # Mock contents
         mock_repo.get_contents.return_value = []
         
-        # Setup mock client
-        mock_github_client.return_value.get_repo.return_value = mock_repo
+        mock_github_instance = Mock()
+        mock_github_instance.get_repo.return_value = mock_repo
+        mock_github.return_value = mock_github_instance
         
+        # Execute
         tool = GitHubTool()
-        result = tool.execute("https://github.com/testuser/test-repo")
+        result = tool.execute("https://github.com/user/test-repo")
         
-        assert "name" in result
+        # Assertions
         assert result["name"] == "test-repo"
+        assert result["full_name"] == "user/test-repo"
+        assert result["stars"] == 100
+        assert result["language"] == "Python"
+        assert "readme_content" in result
+        assert "file_structure" in result
     
-    def test_execute_invalid_url(self):
-        """Test execution with invalid URL."""
-        tool = GitHubTool()
-        result = tool.execute("invalid-url")
+    @patch('src.tools.github_tool.Github')
+    def test_execute_handles_api_error(self, mock_github):
+        """Test handling of GitHub API errors."""
+        mock_github_instance = Mock()
+        mock_github_instance.get_repo.side_effect = GithubException(404, "Not Found", {})
+        mock_github.return_value = mock_github_instance
         
-        assert "error" in result
+        tool = GitHubTool()
+        
+        with pytest.raises(GithubException):
+            tool.execute("https://github.com/user/nonexistent")
+    
+    def test_analyze_file_structure(self):
+        """Test file structure analysis."""
+        tool = GitHubTool()
+        
+        # Mock repository contents
+        mock_repo = MagicMock()
+        mock_contents = [
+            Mock(name="tests"),
+            Mock(name=".github"),
+            Mock(name="docs"),
+            Mock(name="LICENSE"),
+            Mock(name="CONTRIBUTING.md")
+        ]
+        mock_repo.get_contents.return_value = mock_contents
+        
+        structure = tool._analyze_file_structure(mock_repo)
+        
+        assert structure["has_tests"] == True
+        assert structure["has_ci"] == True
+        assert structure["has_docs"] == True
+        assert structure["has_license"] == True
+        assert structure["has_contributing"] == True

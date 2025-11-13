@@ -1,10 +1,6 @@
-"""LangGraph workflow components."""
+"""Graph package for LangGraph workflow."""
 
-from src.graph.state import PublicationState, create_initial_state
+from src.graph.state import State
 from src.graph.workflow import PublicationAssistantWorkflow
 
-__all__ = [
-    "PublicationState",
-    "create_initial_state",
-    "PublicationAssistantWorkflow",
-]
+__all__ = ["State", "PublicationAssistantWorkflow"]
