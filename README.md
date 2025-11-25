@@ -201,7 +201,6 @@ python -m src.main https://github.com/django/django "Python web framework"
 ### Project Structure
 - Test presence
 - CI/CD configuration
-- Documentation files
 - Contributing guidelines
 
 ### Content Quality
@@ -277,8 +276,6 @@ Run integration tests
 ```
 pytest tests/ -v -m integration
 ```
-
-
 
 ---
 
