@@ -168,7 +168,7 @@ python -m src.main https://github.com/django/django "Python web framework"
 
 ## 🏗️ Architecture
 
-<img src="images/workflow_diagram.jpg" alt="DrRepo Architecture Workflow" style="max-width: 100%; border: 1px solid #ccc;" />
+<img src="images/workflow_diagram.png" alt="DrRepo Architecture Workflow" style="max-width: 100%; border: 1px solid #ccc;" />
 
 
 ### Key Components
