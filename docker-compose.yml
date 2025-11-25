@@ -3,6 +3,7 @@ version: '3.8'
 services:
   drrepo:
     build: .
+    image: drrepo:latest
     container_name: drrepo
     ports:
       - "8501:8501"
@@ -25,7 +26,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - drrepo-network
 
-volumes:
-  logs:
-  reports:
+networks:
+  drrepo-network:
+    driver: bridge

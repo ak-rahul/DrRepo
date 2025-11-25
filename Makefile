@@ -1,55 +1,90 @@
-.PHONY: help install install-dev test lint format clean run docker-build docker-run
+.PHONY: help install install-dev test lint format clean run cli docker-build docker-run
+
+# Detect OS
+ifeq ($(OS),Windows_NT)
+    PYTHON := python
+    RM := del /Q
+    RMDIR := rmdir /S /Q
+else
+    PYTHON := python3
+    RM := rm -f
+    RMDIR := rm -rf
+endif
 
 help:
-	@echo "DrRepo - Makefile Commands"
-	@echo "=========================="
-	@echo "install        - Install production dependencies"
-	@echo "install-dev    - Install development dependencies"
-	@echo "test           - Run tests"
-	@echo "lint           - Run linters"
-	@echo "format         - Format code"
-	@echo "clean          - Clean generated files"
-	@echo "run            - Run Streamlit app"
-	@echo "cli            - Run CLI version"
-	@echo "docker-build   - Build Docker image"
-	@echo "docker-run     - Run with Docker Compose"
+	@echo DrRepo - Makefile Commands
+	@echo ==========================
+	@echo install        - Install production dependencies
+	@echo install-dev    - Install development dependencies
+	@echo test           - Run tests
+	@echo test-unit      - Run unit tests only
+	@echo test-integration - Run integration tests
+	@echo lint           - Run linters
+	@echo format         - Format code
+	@echo clean          - Clean generated files
+	@echo run            - Run Streamlit app
+	@echo cli            - Run CLI version
+	@echo docker-build   - Build Docker image
+	@echo docker-run     - Run with Docker Compose
 
 install:
-	pip install -r requirements.txt
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r requirements.txt
 
 install-dev:
-	pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt
 	pre-commit install
 
 test:
-	pytest tests/ -v --cov=src --cov-report=html
+	$(PYTHON) -m pytest tests/ -v --cov=src --cov-report=html --cov-report=term
+
+test-unit:
+	$(PYTHON) -m pytest tests/ -v -m "not integration"
+
+test-integration:
+	$(PYTHON) -m pytest tests/ -v -m integration
 
 lint:
-	flake8 src/ tests/
-	mypy src/
-	black --check src/ tests/
+	$(PYTHON) -m flake8 src/ tests/ --max-line-length=100
+	$(PYTHON) -m pylint src/
+	$(PYTHON) -m mypy src/ --ignore-missing-imports
 
 format:
-	black src/ tests/
-	isort src/ tests/
+	$(PYTHON) -m black src/ tests/ app.py
+	$(PYTHON) -m isort src/ tests/ app.py
+
+format-check:
+	$(PYTHON) -m black --check src/ tests/ app.py
+	$(PYTHON) -m isort --check-only src/ tests/ app.py
 
 clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	rm -rf .pytest_cache
-	rm -rf .mypy_cache
-	rm -rf htmlcov
-	rm -rf dist
-	rm -rf build
-	rm -rf *.egg-info
+	$(PYTHON) -m pip install --upgrade pip
+ifeq ($(OS),Windows_NT)
+	-@for /r %%i in (__pycache__) do @if exist "%%i" rmdir /s /q "%%i"
+	-@del /s /q *.pyc 2>nul
+	-@del /s /q *.pyo 2>nul
+	-@if exist .pytest_cache rmdir /s /q .pytest_cache
+	-@if exist .mypy_cache rmdir /s /q .mypy_cache
+	-@if exist htmlcov rmdir /s /q htmlcov
+	-@if exist dist rmdir /s /q dist
+	-@if exist build rmdir /s /q build
+	-@if exist *.egg-info rmdir /s /q *.egg-info
+else
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+	rm -rf .pytest_cache .mypy_cache htmlcov dist build *.egg-info
+endif
+	@echo Clean complete!
 
 run:
-	streamlit run app.py
+	$(PYTHON) -m streamlit run app.py
 
 cli:
-	@read -p "Enter GitHub URL: " url; \
-	python -m src.main $$url
+	@echo Enter GitHub repository URL:
+	@$(PYTHON) -m src.main
 
 docker-build:
 	docker build -t drrepo:latest .
@@ -62,3 +97,11 @@ docker-stop:
 
 docker-logs:
 	docker-compose logs -f
+
+check: format-check lint test
+	@echo All checks passed!
+
+dev-setup: install-dev
+	@echo Development environment ready!
+
+.DEFAULT_GOAL := help
