@@ -75,6 +75,5 @@ setup(
     project_urls={
         "Bug Reports": "https://github.com/ak-rahul/DrRepo/issues",
         "Source": "https://github.com/ak-rahul/DrRepo",
-        "Documentation": "https://github.com/ak-rahul/DrRepo/blob/main/docs",
     },
 )

@@ -64,7 +64,6 @@ gradio = [
 
 [project.urls]
 Homepage = "https://github.com/ak-rahul/DrRepo"
-Documentation = "https://github.com/ak-rahul/DrRepo/blob/main/docs"
 Repository = "https://github.com/ak-rahul/DrRepo"
 Issues = "https://github.com/ak-rahul/DrRepo/issues"
 

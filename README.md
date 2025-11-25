@@ -48,27 +48,38 @@ DrRepo uses **5 specialized AI agents** powered by LangGraph to comprehensively 
 ### Installation
 
 Clone repository
+```
 git clone https://github.com/yourusername/DrRepo.git
 cd DrRep
+```
 
 Create virtual environment
+```
 python -m venv venv
+```
 
 Activate virtual environment
 Windows:
+```
 venv\Scripts\activate
+```
 
 Linux/Mac:
+```
 source venv/bin/activate
+```
 
 Install dependencies
+```
 pip install -r requirements.txt
+```
 
 
 ### Configuration
 
 Create a `.env` file in the project root:
 
+```
 Groq API (Free - get from https://console.groq.com)
 GROQ_API_KEY=your_groq_api_key_here
 
@@ -77,20 +88,21 @@ GITHUB_TOKEN=your_github_token_here
 
 Tavily Search API (get from https://app.tavily.com)
 TAVILY_API_KEY=your_tavily_api_key_here
-
+```
 
 ### Run Web Interface
-
+```
 streamlit run app.py
+```
 
 
 Open your browser at `http://localhost:8501`
 
 ### Run CLI
 
+```
 python -m src.main https://github.com/psf/requests "Python HTTP library"
-
-
+```
 
 ---
 
@@ -105,60 +117,58 @@ python -m src.main https://github.com/psf/requests "Python HTTP library"
 5. View comprehensive results and download JSON report
 
 ### Python API
-
+```
 from src.main import PublicationAssistant
+```
 
 Initialize
+```
 assistant = PublicationAssistant()
+```
 
 Analyze repository
+```
 result = assistant.analyze(
-repo_url="https://github.com/fastapi/fastapi",
-description="Modern Python web framew
+    repo_url="https://github.com/fastapi/fastapi",
+    description="Modern Python web framework"
+)    
+```
+
 Access results
+```
 print(f"Quality Score: {result['repository']['current_score']:.1f}/100")
-print(f"Status: {resu
+print(f"Status: {result}")
+```
 
 Print top recommendations
+```
 for item in result['action_items'][:3]:
-print(item)
+    print(item)
+```
 
 
 ### Command Line
 
 Basic usage
+```
 python -m src.main <repo_url>
+```
 
 With description
+```
 python -m src.main <repo_url> "<description>"
+```
 
 Example
+```
 python -m src.main https://github.com/django/django "Python web framework"
-
+```
 
 ---
 
 ## 🏗️ Architecture
 
-┌─────────────────────────────────────────────────────────────┐
-│ DrRepo System │
-├─────────────────────────────────────────────────────────────┤
-│ │
-│ User Input → GitHub Fetch → RepoAnalyzer Agent │
-│ ↓ │
-│ MetadataRecommender Agent │
-│ ↓ │
-│ ContentImprover Agent │
-│ ↓ │
-│ ReviewerCritic Agent │
-│ ↓ │
-│ FactChecker Agent (RAG) │
-│ ↓ │
-│ Result Synthesis │
-│ ↓ │
-│ Final Report (JSON + UI) │
-│ │
-└─────────────────────────────────────────────────────────────┘
+<img src="images/workflow_diagram.jpg" alt="DrRepo Architecture Workflow" style="max-width: 100%; border: 1px solid #ccc;" />
 
 
 ### Key Components
@@ -249,16 +259,24 @@ python -m src.main https://github.com/django/django "Python web framework"
 ## 🧪 Testing
 
 Run all tests
+```
 pytest tests/ -v
+```
 
 Run with coverage
+```
 pytest tests/ -v --cov=src --cov-report=html
+```
 
 Run specific test file
+```
 pytest tests/test_agents/test_repo_analyzer.py -v
+```
 
 Run integration tests
+```
 pytest tests/ -v -m integration
+```
 
 
 
@@ -267,14 +285,19 @@ pytest tests/ -v -m integration
 ## 🐳 Docker
 
 Build image
+```
 docker build -t drrepo:latest .
+```
 
 Run container
+```
 docker run -p 8501:8501 --env-file .env drrepo:latest
+```
 
 Or use docker-compose
+```
 docker-compose up
-
+```
 
 ---
 
@@ -312,13 +335,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) f
 - **Issues**: [GitHub Issues](https://github.com/ak-rahul/DrRepo/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ak-rahul/DrRepo/discussions)
 
----
-
-## 🌟 Star History
-
-If you find DrRepo useful, please consider giving it a star! ⭐
-
-[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/DrRepo&type=Date)](https://star-history.com/#yourusername/DrRepo&Date)
 
 ---
 
@@ -337,7 +353,7 @@ If you find DrRepo useful, please consider giving it a star! ⭐
 
 <div align="center">
 
-**Made with ❤️ by [Your Name](https://github.com/yourusername)**
+**Made with ❤️ by [AK Rahul](https://github.com/ak-rahul)**
 
 **DrRepo** | Your Repository's Health Specialist 🩺
 
