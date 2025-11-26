@@ -244,14 +244,6 @@ python -m src.main https://github.com/django/django "Python web framework"
 | **Testing** | pytest, pytest-cov |
 | **CI/CD** | GitHub Actions |
 
----
-
-## 📚 Documentation
-
-- [Architecture Guide](docs/architecture.md) - System design and components
-- [API Reference](docs/api_reference.md) - Complete API documentation
-- [User Guide](docs/user_guide.md) - Comprehensive usage instructions
-- [Configuration](docs/configuration.md) - Environment setup and customization
 
 ---
 
