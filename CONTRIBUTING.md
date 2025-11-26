@@ -410,8 +410,6 @@ Look for issues labeled:
 - **Pull Requests**: Code contributions
 
 ### Getting Help
-
-- Read the [documentation](docs/)
 - Check [existing issues](https://github.com/ak-rahul/DrRepo/issues)
 - Ask in [Discussions](https://github.com/ak-rahul/DrRepo/discussions)
 
@@ -420,7 +418,6 @@ Look for issues labeled:
 ## 🏆 Recognition
 
 Contributors will be:
-- Listed in [CHANGELOG.md](CHANGELOG.md)
 - Mentioned in release notes
 - Added to README acknowledgments
 
