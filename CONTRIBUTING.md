@@ -35,13 +35,15 @@ This project adheres to the [Code of Conduct](CODE_OF_CONDUCT.md). By participat
    - Click "Fork" on the GitHub repository page
 
 2. **Clone your fork**
-git clone https://github.com/YOUR_USERNAME/DrRepo.git
+```
+git clone https://github.com/ak-rahul/DrRepo.git
 cd DrRepo
-
+```
 
 3. **Add upstream remote**
-git remote add upstream https://github.com/original/DrRepo.git
-
+```
+git remote add upstream https://github.com/ak-rahul/DrRepo.git
+```
 
 ---
 
@@ -49,27 +51,39 @@ git remote add upstream https://github.com/original/DrRepo.git
 
 ### 1. Create Virtual Environment
 
+```
 python -m venv venv
+```
 
 Activate (Windows)
+```
 venv\Scripts\activate
+```
 
 Activate (Linux/Mac)
+```
 source venv/bin/activate
+```
 
 
 ### 2. Install Dependencies
 
 Install production dependencies
+```
 pip install -r requirements.txt
+```
 
 Install development dependencies
+```
 pip install -r requirements-dev.txt
+```
 
 
 ### 3. Install Pre-commit Hooks
 
+```
 pre-commit install
+```
 
 
 ### 4. Set Up Environment Variables
@@ -81,15 +95,17 @@ Create `.env` file:
 
 Create `.env` file:
 
+```
 GROQ_API_KEY=your_test_key
 GITHUB_TOKEN=your_test_token
 TAVILY_API_KEY=your_test_key
-
+```
 
 ### 5. Run Tests
 
+```
 pytest tests/ -v
-
+```
 
 ---
 
@@ -97,24 +113,26 @@ pytest tests/ -v
 
 ### Reporting Bugs
 
-1. Check [existing issues](https://github.com/yourusername/DrRepo/issues) first
-2. Use the [bug report template](.github/ISSUE_TEMPLATE/bug_report.md)
-3. Include:
-   - Clear description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Environment details
-   - Logs/screenshots
+1. Check [existing issues](https://github.com/ak-rahul/DrRepo/issues) to avoid duplicates.
+2. Open a new GitHub issue using the "New Issue" button.
+3. Please include the following in your issue:
+   - A clear description of the bug
+   - Steps to reproduce the problem
+   - What you expected to happen and what actually happened
+   - Details about your environment (OS, Python version, etc.)
+   - Any relevant logs or screenshots
+
 
 ### Suggesting Features
 
-1. Check [existing issues](https://github.com/yourusername/DrRepo/issues)
-2. Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md)
-3. Describe:
-   - The problem/use case
-   - Proposed solution
-   - Alternatives considered
-   - Benefits
+1. Check [existing issues](https://github.com/ak-rahul/DrRepo/issues) to see if your idea is already being discussed.
+2. Open a new GitHub issue and select "New Issue."
+3. In your feature request, please include:
+   - The problem or use case you’d like to solve
+   - Your proposed solution or suggestion
+   - Any alternatives you’ve considered
+   - The potential benefits for users or the project
+
 
 ### Improving Documentation
 
@@ -145,17 +163,24 @@ pytest tests/ -v
 ### Code Formatting
 
 Format code
+```
 black src/ tests/
+```
 
 Sort imports
+```
 isort src/ tests/
+```
 
 Lint code
+```
 flake8 src/ tests/
+```
 
 Type check
+```
 mypy src/
-
+```
 
 
 ### Naming Conventions
@@ -169,6 +194,7 @@ mypy src/
 
 Use Google-style docstrings:
 
+```
 def analyze_repository(repo_url: str, description: str = "") -> dict:
 """Analyze a GitHub repository.
 
@@ -184,7 +210,7 @@ Raises:
     GithubException: If API call fails
 """
 pass
-
+```
 
 ---
 
@@ -201,31 +227,47 @@ pass
 def test_feature_name():
 """Test description."""
 # Arrange
+```
 input_data = "test"
+```
 
 # Act
+```
 result = function_to_test(input_data)
+```
 
 # Assert
+```
 assert result == expected_output
+```
 
 
 ### Running Tests
 
 All tests
+```
 pytest tests/ -v
+```
 
 Specific file
+```
 pytest tests/test_agents/test_repo_analyzer.py -v
+```
 
 With coverage
+```
 pytest tests/ --cov=src --cov-report=html
+```
 
 Integration tests only
+```
 pytest tests/ -m integration
+```
 
 Skip integration tests
+```
 pytest tests/ -m "not integration"
+```
 
 
 ### Test Requirements
@@ -242,12 +284,15 @@ pytest tests/ -m "not integration"
 ### 1. Create a Branch
 
 Update main branch
+```
 git checkout main
 git pull upstream main
+```
 
 Create feature branch
+```
 git checkout -b feature/your-feature-name
-
+```
 
 Branch naming:
 - `feature/` - New features
@@ -266,19 +311,23 @@ Branch naming:
 ### 3. Commit Changes
 
 Stage changes
+```
 git add .
+```
 
 Commit with descriptive message
+```
 git commit -m "feat: add repository caching feature"
-
+```
 
 Commit message format:
+```
 <type>: <description>
 
 [optional body]
 
 [optional footer]
-
+```
 
 
 Types:
@@ -291,9 +340,9 @@ Types:
 - `chore`: Maintenance
 
 ### 4. Push to Your Fork
-
+```
 git push origin feature/your-feature-name
-
+```
 
 ### 5. Create Pull Request
 
@@ -313,13 +362,16 @@ git push origin feature/your-feature-name
 ### 7. After Merge
 
 Update main branch
+```
 git checkout main
 git pull upstream main
+```
 
 Delete feature branch
+```
 git branch -d feature/your-feature-name
 git push origin --delete feature/your-feature-name
-
+```
 
 ---
 
@@ -360,8 +412,8 @@ Look for issues labeled:
 ### Getting Help
 
 - Read the [documentation](docs/)
-- Check [existing issues](https://github.com/yourusername/DrRepo/issues)
-- Ask in [Discussions](https://github.com/yourusername/DrRepo/discussions)
+- Check [existing issues](https://github.com/ak-rahul/DrRepo/issues)
+- Ask in [Discussions](https://github.com/ak-rahul/DrRepo/discussions)
 
 ---
 
