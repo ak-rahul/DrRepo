@@ -95,16 +95,16 @@ class TestGitHubTool:
     
     @patch('src.tools.github_tool.Github')
     def test_analyze_file_structure(self, mock_github):
-        """Test file structure analysis with correct keys."""
-        # Setup mock repo with contents that match EXPECTED keys
+        """Test file structure analysis with method-exact logic."""
+        # Mock repo with contents matching your method's detection
         mock_repo = MagicMock()
         mock_contents = [
-            Mock(name="tests", type="dir"),           # has_tests
-            Mock(name=".github/workflows/ci.yml", type="file"),  # has_ci
-            Mock(name="docs", type="dir"),            # has_docs  
-            Mock(name="LICENSE", type="file"),        # has_license
-            Mock(name="CONTRIBUTING.md", type="file"), # has_contributing
-            Mock(name="CHANGELOG.md", type="file")    # has_changelog
+            Mock(name="tests", type="dir"),                    # → has_tests=True
+            Mock(name=".github", type="dir"),                  # → has_ci=True  
+            Mock(name="docs", type="dir"),                     # → has_docs=True
+            Mock(name="LICENSE", type="file"),                 # → has_license=True
+            Mock(name="CONTRIBUTING.md", type="file"),         # → has_contributing=True
+            Mock(name="CHANGELOG.md", type="file")             # → has_changelog=True
         ]
         mock_repo.get_contents.return_value = mock_contents
         
@@ -113,15 +113,15 @@ class TestGitHubTool:
         mock_github_instance.get_repo.return_value = mock_repo
         mock_github.return_value = mock_github_instance
         
-        # Create tool & test
+        # Test
         tool = GitHubTool()
         structure = tool._analyze_file_structure(mock_repo)
         
-        # Match YOUR method's ACTUAL keys
-        assert isinstance(structure, dict)
-        assert structure.get("has_tests") is True
-        assert structure.get("has_ci") is True
-        assert structure.get("has_docs") is True
-        assert structure.get("has_license") is True  # or "has_license_file"
-        assert structure.get("has_contributing") is True
-        assert structure.get("has_changelog") is True
+        # Test ALL keys your method returns
+        assert structure["has_tests"] is True
+        assert structure["has_ci"] is True
+        assert structure["has_docs"] is True
+        assert structure["has_license"] is True  # or whatever your method uses
+        assert structure["has_contributing"] is True
+        assert structure["has_changelog"] is True
+
