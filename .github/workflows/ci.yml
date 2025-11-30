@@ -7,7 +7,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
-      with: { python-version: '3.11' }
+      with: 
+        python-version: '3.11'
     - run: pip install -r requirements.txt pytest pytest-cov
     - env:
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -19,28 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Maximize disk space
-      uses: sarisia/actions-wait-for-disk-space@v1
-      with:
-        disk-space-gb: 10
-        disk-path: /
-        wait-for-disk: false
-    
-    - name: Cleanup runner
-      run: |
-        docker system prune -af
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/local/lib/python3.11/site-packages/nvidia
-        df -h  # Verify 12GB+ free
-    
     - uses: docker/setup-buildx-action@v3
-    - name: Install Docker Compose
-      run: |
-        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-    
-    - name: Build optimized Docker
-      run: docker-compose build --no-cache
+    - name: Build Docker
+      run: docker build -t drrepo:test .
