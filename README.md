@@ -84,7 +84,7 @@ Groq API (Free - get from https://console.groq.com)
 GROQ_API_KEY=your_groq_api_key_here
 
 GitHub Token (get from https://github.com/settings/tokens)
-GITHUB_TOKEN=your_github_token_here
+GH_TOKEN=your_github_token_here
 
 Tavily Search API (get from https://app.tavily.com)
 TAVILY_API_KEY=your_tavily_api_key_here

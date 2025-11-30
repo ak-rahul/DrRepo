@@ -15,7 +15,7 @@ class Config:
     # API Keys
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
-    github_token: str = os.getenv("GITHUB_TOKEN", "")
+    github_token: str = os.getenv("GH_TOKEN", "")
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
     
     # Model Configuration
@@ -44,13 +44,13 @@ class Config:
         if self.model_provider == 'groq':
             required = [
                 ('GROQ_API_KEY', self.groq_api_key),
-                ('GITHUB_TOKEN', self.github_token),
+                ('GH_TOKEN', self.github_token),
                 ('TAVILY_API_KEY', self.tavily_api_key)
             ]
         else:
             required = [
                 ('OPENAI_API_KEY', self.openai_api_key),
-                ('GITHUB_TOKEN', self.github_token),
+                ('GH_TOKEN', self.github_token),
                 ('TAVILY_API_KEY', self.tavily_api_key)
             ]
         

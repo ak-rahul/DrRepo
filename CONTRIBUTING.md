@@ -97,7 +97,7 @@ Create `.env` file:
 
 ```
 GROQ_API_KEY=your_test_key
-GITHUB_TOKEN=your_test_token
+GH_TOKEN=your_test_token
 TAVILY_API_KEY=your_test_key
 ```
 
