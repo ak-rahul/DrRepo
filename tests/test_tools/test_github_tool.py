@@ -93,25 +93,33 @@ class TestGitHubTool:
         with pytest.raises(GithubException):
             tool.execute("https://github.com/user/nonexistent")
     
-    def test_analyze_file_structure(self):
-        """Test file structure analysis."""
-        tool = GitHubTool()
-        
-        # Mock repository contents
+    @patch('src.tools.github_tool.Github')
+    def test_analyze_file_structure(self, mock_github):
+        """Test file structure analysis with mocked GitHub data."""
+        # Setup mock repo
         mock_repo = MagicMock()
         mock_contents = [
-            Mock(name="tests"),
-            Mock(name=".github"),
-            Mock(name="docs"),
-            Mock(name="LICENSE"),
-            Mock(name="CONTRIBUTING.md")
+            Mock(name="tests", type="dir"),
+            Mock(name=".github", type="dir"),
+            Mock(name="docs", type="dir"),
+            Mock(name="LICENSE", type="file"),
+            Mock(name="CONTRIBUTING.md", type="file")
         ]
         mock_repo.get_contents.return_value = mock_contents
         
+        # Mock GitHub instance
+        mock_github_instance = Mock()
+        mock_github_instance.get_repo.return_value = mock_repo
+        mock_github.return_value = mock_github_instance
+        
+        # Create tool and test
+        tool = GitHubTool()
         structure = tool._analyze_file_structure(mock_repo)
         
+        # Assertions
         assert structure["has_tests"] == True
         assert structure["has_ci"] == True
         assert structure["has_docs"] == True
         assert structure["has_license"] == True
         assert structure["has_contributing"] == True
+
