@@ -95,33 +95,33 @@ class TestGitHubTool:
     
     @patch('src.tools.github_tool.Github')
     def test_analyze_file_structure(self, mock_github):
-        """Test file structure analysis logic directly."""
-        # Setup mock repo with contents
+        """Test file structure analysis with correct keys."""
+        # Setup mock repo with contents that match EXPECTED keys
         mock_repo = MagicMock()
         mock_contents = [
-            Mock(name="tests", type="dir"),
-            Mock(name=".github", type="dir"),
-            Mock(name="docs", type="dir"),
-            Mock(name="LICENSE", type="file"),
-            Mock(name="CONTRIBUTING.md", type="file")
+            Mock(name="tests", type="dir"),           # has_tests
+            Mock(name=".github/workflows/ci.yml", type="file"),  # has_ci
+            Mock(name="docs", type="dir"),            # has_docs  
+            Mock(name="LICENSE", type="file"),        # has_license
+            Mock(name="CONTRIBUTING.md", type="file"), # has_contributing
+            Mock(name="CHANGELOG.md", type="file")    # has_changelog
         ]
         mock_repo.get_contents.return_value = mock_contents
         
-        # Mock GitHub instance (for tool init)
+        # Mock GitHub instance
         mock_github_instance = Mock()
         mock_github_instance.get_repo.return_value = mock_repo
         mock_github.return_value = mock_github_instance
         
-        # Create tool
+        # Create tool & test
         tool = GitHubTool()
-        
-        # Test PRIVATE method
         structure = tool._analyze_file_structure(mock_repo)
         
-        # CORRECTED ASSERTIONS - Match your ACTUAL method output
+        # Match YOUR method's ACTUAL keys
         assert isinstance(structure, dict)
         assert structure.get("has_tests") is True
         assert structure.get("has_ci") is True
         assert structure.get("has_docs") is True
-        assert structure.get("has_license") is True
+        assert structure.get("has_license") is True  # or "has_license_file"
         assert structure.get("has_contributing") is True
+        assert structure.get("has_changelog") is True
