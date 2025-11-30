@@ -95,8 +95,8 @@ class TestGitHubTool:
     
     @patch('src.tools.github_tool.Github')
     def test_analyze_file_structure(self, mock_github):
-        """Test file structure analysis with mocked GitHub data."""
-        # Setup mock repo
+        """Test file structure analysis logic directly."""
+        # Setup mock repo with contents
         mock_repo = MagicMock()
         mock_contents = [
             Mock(name="tests", type="dir"),
@@ -107,19 +107,21 @@ class TestGitHubTool:
         ]
         mock_repo.get_contents.return_value = mock_contents
         
-        # Mock GitHub instance
+        # Mock GitHub instance (for tool init)
         mock_github_instance = Mock()
         mock_github_instance.get_repo.return_value = mock_repo
         mock_github.return_value = mock_github_instance
         
-        # Create tool and test
+        # Create tool
         tool = GitHubTool()
+        
+        # Test PRIVATE method
         structure = tool._analyze_file_structure(mock_repo)
         
-        # Assertions
-        assert structure["has_tests"] == True
-        assert structure["has_ci"] == True
-        assert structure["has_docs"] == True
-        assert structure["has_license"] == True
-        assert structure["has_contributing"] == True
-
+        # CORRECTED ASSERTIONS - Match your ACTUAL method output
+        assert isinstance(structure, dict)
+        assert structure.get("has_tests") is True
+        assert structure.get("has_ci") is True
+        assert structure.get("has_docs") is True
+        assert structure.get("has_license") is True
+        assert structure.get("has_contributing") is True
