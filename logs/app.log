@@ -1,173 +1,89 @@
-2025-11-30 14:04:53 - drrepo - INFO - Starting workflow for: https://github.com/psf/requests
-2025-11-30 14:04:53 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
-2025-11-30 14:05:08 - drrepo - INFO - Successfully fetched data for psf/requests
-2025-11-30 14:05:10 - drrepo - INFO - [RepoAnalyzer] ✓ Analysis complete
-2025-11-30 14:05:10 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
-2025-11-30 14:05:13 - drrepo - INFO - Search completed for: top GitHub Python repositories A simple, yet elegant, HTTP library. stars trending
-2025-11-30 14:05:15 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
-2025-11-30 14:05:15 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
-2025-11-30 14:05:17 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
-2025-11-30 14:05:19 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
-2025-11-30 14:05:19 - drrepo - INFO - [ReviewerCritic] Performing quality review...
-2025-11-30 14:05:22 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
-2025-11-30 14:05:22 - drrepo - INFO - [FactChecker] Fact-checking README claims...
-2025-11-30 14:05:22 - drrepo - INFO - Indexed 4 document chunks
-2025-11-30 14:05:24 - drrepo - INFO - [FactChecker] ✓ Fact checking complete
-2025-11-30 14:05:24 - drrepo - INFO - Synthesizing final recommendations...
-2025-11-30 14:05:24 - drrepo - INFO - ✓ Synthesized 4 action items
-2025-11-30 14:05:24 - drrepo - WARNING - final_summary not properly set by synthesizer
-2025-11-30 14:05:24 - drrepo - INFO - ✓ Workflow completed successfully
-2025-12-19 13:29:35 - drrepo - WARNING - test_func attempt 1/4 failed: First failure. Retrying in 0.1s...
-2025-12-19 13:29:35 - drrepo - WARNING - test_func attempt 2/4 failed: Second failure. Retrying in 0.2s...
-2025-12-19 13:29:35 - drrepo - INFO - test_func succeeded on attempt 3/4
-2025-12-19 13:29:35 - drrepo - WARNING - test_func attempt 1/3 failed: Always fails. Retrying in 0.1s...
-2025-12-19 13:29:35 - drrepo - WARNING - test_func attempt 2/3 failed: Always fails. Retrying in 0.2s...
-2025-12-19 13:29:36 - drrepo - ERROR - test_func failed after 3 attempts: Always fails
-2025-12-19 13:29:36 - drrepo - WARNING - test_func attempt 1/4 failed: Retry. Retrying in 0.1s...
-2025-12-19 13:29:36 - drrepo - WARNING - test_func attempt 2/4 failed: Retry. Retrying in 0.2s...
-2025-12-19 13:29:36 - drrepo - INFO - test_func succeeded on attempt 3/4
-2025-12-19 13:29:36 - drrepo - WARNING - test_func attempt 1/3 failed: Retry. Retrying in 0.1s...
-2025-12-19 13:29:36 - drrepo - WARNING - test_func attempt 2/3 failed: Retry. Retrying in 0.2s...
-2025-12-19 13:29:36 - drrepo - INFO - test_func succeeded on attempt 3/3
-2025-12-19 13:29:36 - drrepo - WARNING - test_func attempt 1/3 failed: Rate limit. Retrying in 0.1s...
-2025-12-19 13:29:36 - drrepo - INFO - Rate limit hit. Waiting 0.1s before retry 1
-2025-12-19 13:29:36 - drrepo - INFO - test_func succeeded on attempt 2/3
-2025-12-19 13:30:01 - drrepo - INFO - Analyzing repository: https://github.com/invalid/repo
-2025-12-19 13:30:01 - drrepo - INFO - Starting workflow for: https://github.com/invalid/repo
-2025-12-19 13:30:01 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
-2025-12-19 13:30:02 - drrepo - ERROR - Repository not found: https://github.com/invalid/repo
-2025-12-19 13:30:02 - drrepo - ERROR - Error in RepoAnalyzer: Repository not found: https://github.com/invalid/repo
-2025-12-19 13:30:02 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
-2025-12-19 13:30:05 - drrepo - INFO - Search completed for: top GitHub  repositories  stars trending
-2025-12-19 13:30:07 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
-2025-12-19 13:30:07 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
-2025-12-19 13:30:09 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
-2025-12-19 13:30:11 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
-2025-12-19 13:30:11 - drrepo - INFO - [ReviewerCritic] Performing quality review...
-2025-12-19 13:30:13 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
-2025-12-19 13:30:13 - drrepo - INFO - [FactChecker] Fact-checking README claims...
-2025-12-19 13:30:14 - drrepo - ERROR - Error indexing documents: list index out of range
-2025-12-19 13:30:14 - drrepo - ERROR - Error in FactChecker: list index out of range
-2025-12-19 13:30:14 - drrepo - INFO - Synthesizing final recommendations...
-2025-12-19 13:30:14 - drrepo - INFO - ✓ Synthesized 4 action items
-2025-12-19 13:30:14 - drrepo - WARNING - final_summary not properly set by synthesizer
-2025-12-19 13:30:14 - drrepo - WARNING - Workflow completed with errors: 68 error(s)
-2025-12-19 13:30:14 - drrepo - INFO - Analysis complete
-2025-12-19 13:30:14 - drrepo - INFO - Starting workflow for: https://github.com/invalid/repo
-2025-12-19 13:30:14 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
-2025-12-19 13:30:14 - drrepo - ERROR - Repository not found: https://github.com/invalid/repo
-2025-12-19 13:30:14 - drrepo - ERROR - Error in RepoAnalyzer: Repository not found: https://github.com/invalid/repo
-2025-12-19 13:30:14 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
-2025-12-19 13:30:16 - drrepo - INFO - Search completed for: top GitHub  repositories  stars trending
-2025-12-19 13:30:17 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
-2025-12-19 13:30:17 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
-2025-12-19 13:30:18 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
-2025-12-19 13:30:21 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
-2025-12-19 13:30:21 - drrepo - INFO - [ReviewerCritic] Performing quality review...
-2025-12-19 13:30:23 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
-2025-12-19 13:30:23 - drrepo - INFO - [FactChecker] Fact-checking README claims...
-2025-12-19 13:30:23 - drrepo - ERROR - Error indexing documents: list index out of range
-2025-12-19 13:30:23 - drrepo - ERROR - Error in FactChecker: list index out of range
-2025-12-19 13:30:23 - drrepo - INFO - Synthesizing final recommendations...
-2025-12-19 13:30:23 - drrepo - INFO - ✓ Synthesized 4 action items
-2025-12-19 13:30:23 - drrepo - WARNING - final_summary not properly set by synthesizer
-2025-12-19 13:30:23 - drrepo - WARNING - Workflow completed with errors: 68 error(s)
-2025-12-19 13:30:23 - drrepo - INFO - Report exported to: reports\Unknown_20251219_133023_report.json
-2025-12-19 13:45:47 - drrepo - INFO - Groq API health check: OK
-2025-12-19 13:45:48 - drrepo - ERROR - GitHub API health check failed: 'RateLimitOverview' object has no attribute 'core'
-2025-12-19 13:45:49 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 13:45:54 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 13:45:54 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 13:46:22 - drrepo - INFO - Groq API health check: OK
-2025-12-19 13:46:23 - drrepo - ERROR - GitHub API health check failed: 'RateLimitOverview' object has no attribute 'core'
-2025-12-19 13:46:25 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 13:46:30 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 13:46:30 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 13:48:04 - drrepo - INFO - Groq API health check: OK
-2025-12-19 13:48:05 - drrepo - INFO - GitHub API health check: OK (remaining: 4991)
-2025-12-19 13:48:06 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 13:48:10 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 13:48:10 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 13:57:25 - drrepo - INFO - Groq API health check: OK
-2025-12-19 13:57:26 - drrepo - INFO - GitHub API health check: OK (remaining: 4991)
-2025-12-19 13:57:27 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 13:57:35 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 13:57:35 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 13:58:27 - drrepo - INFO - Groq API health check: OK
-2025-12-19 13:58:28 - drrepo - INFO - GitHub API health check: OK (remaining: 4991)
-2025-12-19 13:58:30 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 13:58:34 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 13:58:34 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:24:27 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:24:28 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:24:30 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:24:40 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:24:40 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:30:20 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:30:22 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:30:23 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:30:29 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:30:29 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:33:33 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:33:34 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:33:35 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:33:40 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:33:40 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:35:10 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:35:11 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:35:13 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:35:18 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:35:18 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:36:25 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:36:26 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:36:27 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:36:32 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:36:32 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:37:33 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:37:34 - drrepo - INFO - GitHub API health check: OK (remaining: 4999)
-2025-12-19 14:37:35 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:37:40 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:37:40 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:37:47 - drrepo - INFO - Starting workflow for: https://github.com/ak-rahul/QuickForms
-2025-12-19 14:37:47 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
-2025-12-19 14:37:48 - drrepo - ERROR - Repository not found: https://github.com/ak-rahul/QuickForms
-2025-12-19 14:37:48 - drrepo - ERROR - Error in RepoAnalyzer: Repository not found: https://github.com/ak-rahul/QuickForms. Please check the URL and ensure the repository exists.
-2025-12-19 14:37:48 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
-2025-12-19 14:37:51 - drrepo - INFO - Search completed for: top GitHub  repositories  stars trending
-2025-12-19 14:37:52 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
-2025-12-19 14:37:52 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
-2025-12-19 14:37:54 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
-2025-12-19 14:37:57 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
-2025-12-19 14:37:57 - drrepo - INFO - [ReviewerCritic] Performing quality review...
-2025-12-19 14:37:59 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
-2025-12-19 14:37:59 - drrepo - INFO - [FactChecker] Fact-checking README claims...
-2025-12-19 14:37:59 - drrepo - ERROR - Error indexing documents: list index out of range
-2025-12-19 14:37:59 - drrepo - ERROR - Error in FactChecker: list index out of range
-2025-12-19 14:37:59 - drrepo - INFO - Synthesizing final recommendations...
-2025-12-19 14:37:59 - drrepo - INFO - ✓ Synthesized 4 action items
-2025-12-19 14:37:59 - drrepo - WARNING - final_summary not properly set by synthesizer
-2025-12-19 14:37:59 - drrepo - WARNING - Workflow completed with errors: 68 error(s)
-2025-12-19 14:39:03 - drrepo - INFO - Groq API health check: OK
-2025-12-19 14:39:04 - drrepo - INFO - GitHub API health check: OK (remaining: 4998)
-2025-12-19 14:39:05 - drrepo - INFO - Tavily API health check: OK
-2025-12-19 14:39:11 - drrepo - INFO - Indexed 1 document chunks
-2025-12-19 14:39:11 - drrepo - INFO - RAG retriever health check: OK
-2025-12-19 14:39:19 - drrepo - INFO - Starting workflow for: https://github.com/ak-rahul/DrRepo
-2025-12-19 14:39:19 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
-2025-12-19 14:39:22 - drrepo - INFO - Successfully fetched data for ak-rahul/DrRepo
-2025-12-19 14:39:24 - drrepo - INFO - [RepoAnalyzer] ✓ Analysis complete
-2025-12-19 14:39:24 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
-2025-12-19 14:39:26 - drrepo - INFO - Search completed for: top GitHub Python repositories Multi-agent AI platform for analyzing GitHub repos stars trending
-2025-12-19 14:39:28 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
-2025-12-19 14:39:28 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
-2025-12-19 14:39:29 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
-2025-12-19 14:39:33 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
-2025-12-19 14:39:33 - drrepo - INFO - [ReviewerCritic] Performing quality review...
-2025-12-19 14:39:35 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
-2025-12-19 14:39:35 - drrepo - INFO - [FactChecker] Fact-checking README claims...
-2025-12-19 14:39:36 - drrepo - INFO - Indexed 10 document chunks
-2025-12-19 14:39:38 - drrepo - INFO - [FactChecker] ✓ Fact checking complete
-2025-12-19 14:39:38 - drrepo - INFO - Synthesizing final recommendations...
-2025-12-19 14:39:38 - drrepo - INFO - ✓ Synthesized 2 action items
-2025-12-19 14:39:38 - drrepo - WARNING - final_summary not properly set by synthesizer
-2025-12-19 14:39:38 - drrepo - INFO - ✓ Workflow completed successfully
+2025-12-19 14:50:18 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
+2025-12-19 14:50:18 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
+2025-12-19 14:50:19 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
+2025-12-19 14:50:19 - drrepo - ERROR - Error in MetadataRecommender: Search Error
+2025-12-19 14:50:22 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
+2025-12-19 14:50:22 - drrepo - INFO - [RepoAnalyzer] ✓ Analysis complete
+2025-12-19 14:50:23 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
+2025-12-19 14:50:23 - drrepo - ERROR - Error in RepoAnalyzer: API Error
+2025-12-19 14:50:32 - drrepo - INFO - Starting workflow for: https://github.com/user/test-repo
+2025-12-19 14:50:32 - drrepo - INFO - [RepoAnalyzer] Starting repository analysis...
+2025-12-19 14:50:32 - drrepo - INFO - Successfully fetched data for user/test-repo
+2025-12-19 14:50:32 - drrepo - INFO - [RepoAnalyzer] ✓ Analysis complete
+2025-12-19 14:50:32 - drrepo - INFO - [MetadataRecommender] Analyzing metadata and discoverability...
+2025-12-19 14:50:32 - drrepo - INFO - Search completed for: top GitHub Python repositories Test stars trending
+2025-12-19 14:50:32 - drrepo - INFO - [MetadataRecommender] ✓ Metadata recommendations generated
+2025-12-19 14:50:32 - drrepo - INFO - [ContentImprover] Analyzing content and suggesting improvements...
+2025-12-19 14:50:32 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
+2025-12-19 14:50:32 - drrepo - INFO - [ContentImprover] ✓ Content improvements generated
+2025-12-19 14:50:32 - drrepo - INFO - [ReviewerCritic] Performing quality review...
+2025-12-19 14:50:32 - drrepo - INFO - [ReviewerCritic] ✓ Review complete
+2025-12-19 14:50:32 - drrepo - INFO - [FactChecker] Fact-checking README claims...
+2025-12-19 14:50:32 - drrepo - INFO - Indexed 1 document chunks
+2025-12-19 14:50:32 - drrepo - INFO - [FactChecker] ✓ Fact checking complete
+2025-12-19 14:50:32 - drrepo - INFO - Synthesizing final recommendations...
+2025-12-19 14:50:32 - drrepo - INFO - ✓ Synthesized 5 action items
+2025-12-19 14:50:32 - drrepo - WARNING - final_summary not properly set by synthesizer
+2025-12-19 14:50:32 - drrepo - INFO - ✓ Workflow completed successfully
+2025-12-19 14:50:49 - drrepo - INFO - Synthesizing final recommendations...
+2025-12-19 14:50:49 - drrepo - INFO - ✓ Synthesized 4 action items
+2025-12-19 14:50:57 - drrepo - INFO - Successfully fetched data for user/test-repo
+2025-12-19 14:50:57 - drrepo - ERROR - Repository not found: https://github.com/user/nonexistent
+2025-12-19 14:50:57 - drrepo - WARNING - Rate limit hit while analyzing file structure
+2025-12-19 14:50:57 - drrepo - INFO - Search completed for: top GitHub Python repositories testing framework stars trending
+2025-12-19 14:50:57 - drrepo - ERROR - Tavily search error: API Error
+2025-12-19 14:50:57 - drrepo - INFO - Search completed for: GitHub README best practices professional structure 2025
+2025-12-19 14:50:57 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=3, timeout=1s
+2025-12-19 14:50:57 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=3, timeout=1s
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/3
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/3
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 3/3
+2025-12-19 14:50:57 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2025-12-19 14:50:57 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=10s
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2025-12-19 14:50:57 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Circuit is OPEN. Retry in 10s
+2025-12-19 14:50:57 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=1s
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2025-12-19 14:50:57 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2025-12-19 14:50:57 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Attempting recovery (HALF_OPEN)
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Recovery successful, closing circuit
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=10s
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2025-12-19 14:50:58 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Manual reset
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'TestBreaker' initialized: threshold=5, timeout=60s
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'test_circuit_breaker.test_func' initialized: threshold=2, timeout=1s
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Failure 1/2
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Failure 2/2
+2025-12-19 14:50:58 - drrepo - ERROR - CircuitBreaker 'test_circuit_breaker.test_func': Threshold reached, opening circuit
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Circuit is OPEN. Retry in 1s
+2025-12-19 14:50:58 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=1s
+2025-12-19 14:50:58 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2025-12-19 14:50:58 - drrepo - INFO - Groq API health check: OK
+2025-12-19 14:50:58 - drrepo - ERROR - Groq API health check failed: API connection failed
+2025-12-19 14:50:58 - drrepo - INFO - GitHub API health check: OK (remaining: 5000)
+2025-12-19 14:50:58 - drrepo - ERROR - GitHub API health check failed: Authentication failed
+2025-12-19 14:51:00 - drrepo - INFO - Groq API health check: OK
+2025-12-19 14:51:00 - drrepo - INFO - GitHub API health check: OK (remaining: 4994)
+2025-12-19 14:51:02 - drrepo - INFO - Tavily API health check: OK
+2025-12-19 14:51:06 - drrepo - INFO - Indexed 1 document chunks
+2025-12-19 14:51:06 - drrepo - INFO - RAG retriever health check: OK
+2025-12-19 14:51:06 - drrepo - WARNING - test_func attempt 1/4 failed: First failure. Retrying in 0.1s...
+2025-12-19 14:51:06 - drrepo - WARNING - test_func attempt 2/4 failed: Second failure. Retrying in 0.2s...
+2025-12-19 14:51:06 - drrepo - INFO - test_func succeeded on attempt 3/4
+2025-12-19 14:51:06 - drrepo - WARNING - test_func attempt 1/3 failed: Always fails. Retrying in 0.1s...
+2025-12-19 14:51:06 - drrepo - WARNING - test_func attempt 2/3 failed: Always fails. Retrying in 0.2s...
+2025-12-19 14:51:06 - drrepo - ERROR - test_func failed after 3 attempts: Always fails
+2025-12-19 14:51:06 - drrepo - WARNING - test_func attempt 1/4 failed: Retry. Retrying in 0.1s...
+2025-12-19 14:51:07 - drrepo - WARNING - test_func attempt 2/4 failed: Retry. Retrying in 0.2s...
+2025-12-19 14:51:07 - drrepo - INFO - test_func succeeded on attempt 3/4
+2025-12-19 14:51:07 - drrepo - WARNING - test_func attempt 1/3 failed: Retry. Retrying in 0.1s...
+2025-12-19 14:51:07 - drrepo - WARNING - test_func attempt 2/3 failed: Retry. Retrying in 0.2s...
+2025-12-19 14:51:07 - drrepo - INFO - test_func succeeded on attempt 3/3
+2025-12-19 14:51:07 - drrepo - WARNING - test_func attempt 1/3 failed: Rate limit. Retrying in 0.1s...
+2025-12-19 14:51:07 - drrepo - INFO - Rate limit hit. Waiting 0.1s before retry 1
+2025-12-19 14:51:07 - drrepo - INFO - test_func succeeded on attempt 2/3

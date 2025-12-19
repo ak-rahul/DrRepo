@@ -38,8 +38,8 @@ ENV/
 *~
 
 # Logs
-#logs/
-#*.log
+logs/
+*.log
 
 # Reports
 reports/*.json
@@ -65,10 +65,6 @@ coverage.xml
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# Logs
-logs/
-*.log
 
 # Diagnostic outputs
 profile.stats

@@ -2,7 +2,7 @@
 
 import time
 from typing import Dict, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.utils.config import config
 from src.utils.logger import logger
@@ -101,28 +101,18 @@ class HealthChecker:
         try:
             start_time = time.time()
             
-            from github import Github
-            github = Github(config.github_token, timeout=5)
+            from github import Github, Auth
             
-            # FIXED: Get rate limit with correct attribute access
+            # Use new Auth.Token() method instead of deprecated login_or_token
+            auth = Auth.Token(config.github_token)
+            github = Github(auth=auth, timeout=5)
+            
+            # Get rate limit
             rate_limit = github.get_rate_limit()
             
-            # Access core rate limit correctly
-            # PyGithub returns different structures depending on version
-            try:
-                # Try newer PyGithub version (>= 2.0)
-                core_remaining = rate_limit.core.remaining
-                core_limit = rate_limit.core.limit
-            except AttributeError:
-                # Fallback for older PyGithub versions
-                try:
-                    core_remaining = rate_limit.rate.remaining
-                    core_limit = rate_limit.rate.limit
-                except AttributeError:
-                    # If both fail, try alternative method
-                    rate_info = github.rate_limiting
-                    core_remaining = rate_info[0]
-                    core_limit = rate_info[1]
+            # Access core rate limit
+            core_remaining = rate_limit.core.remaining
+            core_limit = rate_limit.core.limit
             
             latency_ms = int((time.time() - start_time) * 1000)
             
@@ -250,7 +240,7 @@ class HealthChecker:
         
         return {
             "status": "healthy" if all_healthy else "degraded",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "version": "1.0.0",
             "provider": config.model_provider,
             "components": components

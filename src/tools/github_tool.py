@@ -1,12 +1,12 @@
-"""GitHub API Tool for fetching repository data."""
+"""GitHub Tool for fetching repository data."""
 
-from typing import Dict, Optional
-
-from github import Github, GithubException
+import logging
+from typing import Dict
+from github import Github, GithubException, Auth  # ADD Auth import
 
 from src.utils.config import config
 from src.utils.logger import logger
-from src.utils.retry import retry_with_backoff, retry_on_rate_limit
+from src.utils.retry import retry_with_backoff
 from src.utils.exceptions import (
     RepositoryNotFoundError,
     RateLimitError,
@@ -17,16 +17,14 @@ from src.utils.exceptions import (
 
 
 class GitHubTool:
-    """Tool for interacting with GitHub API with automatic retry on failures."""
+    """Tool for interacting with GitHub API."""
 
     def __init__(self):
-        """Initialize GitHub API client."""
-        self.logger = logger
+        """Initialize GitHub tool with authentication."""
+        self.logger = logging.getLogger(__name__)
         
-        if not config.github_token:
-            raise ValidationError("GitHub token not configured. Set GH_TOKEN in .env")
-        
-        self.github = Github(config.github_token)
+        auth = Auth.Token(config.github_token)
+        self.github = Github(auth=auth)
 
     @retry_with_backoff(
         max_retries=3,
