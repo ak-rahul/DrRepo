@@ -50,7 +50,7 @@ DrRepo uses **5 specialized AI agents** powered by LangGraph to comprehensively 
 Clone repository
 ```
 git clone https://github.com/ak-rahul/DrRepo.git
-cd DrRep
+cd DrRepo
 ```
 
 Create virtual environment
