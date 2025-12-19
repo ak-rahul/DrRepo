@@ -30,4 +30,8 @@ pydantic>=2.8.2
 # Frontend
 streamlit>=1.31.0
 
+# NEW: FastAPI for health check API
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
 

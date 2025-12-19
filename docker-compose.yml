@@ -3,16 +3,15 @@ version: '3.8'
 services:
   drrepo:
     build: .
-    image: drrepo:latest
     container_name: drrepo
     ports:
-      - "8501:8501"
+      - "8501:8501"  # Streamlit UI
+      - "8000:8000"  # Health API (optional)
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GH_TOKEN=${GH_TOKEN}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - MODEL_PROVIDER=groq
-      - MODEL_NAME=llama-3.3-70b-versatile
       - LOG_LEVEL=INFO
     volumes:
       - ./logs:/app/logs
@@ -21,11 +20,11 @@ services:
       - .env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 15s
     networks:
       - drrepo-network
 

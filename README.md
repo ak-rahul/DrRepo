@@ -163,6 +163,76 @@ Example
 ```
 python -m src.main https://github.com/django/django "Python web framework"
 ```
+---
+
+## 🏥 Health Monitoring
+
+DrRepo includes built-in health monitoring for production deployments.
+
+### Streamlit UI Health Check
+
+The Streamlit interface includes a **System Health** panel in the sidebar that shows:
+- ✅ LLM API status (Groq/OpenAI)
+- ✅ GitHub API status with rate limit info
+- ✅ Tavily Search API status
+- ✅ RAG retriever (FAISS) status
+- ✅ Response latency for each component
+
+Click the **🔄 Refresh Health Status** button to update.
+
+### Production Health Check API
+
+For production monitoring, DrRepo provides a FastAPI health check endpoint:
+
+**Start the health API server:**
+```
+python scripts/run_health_api.py
+```
+
+**Health Check Endpoints:**
+
+| Endpoint | Purpose | Response Time |
+|----------|---------|---------------|
+| `GET /health` | Comprehensive health check with all component details | ~2-5s |
+| `GET /health/simple` | Quick health status (no component checks) | <100ms |
+| `GET /health/components` | Individual component status only | ~2-5s |
+| `GET /health/ready` | Kubernetes readiness probe | <100ms |
+| `GET /health/live` | Kubernetes liveness probe | <50ms |
+
+**Example Response (`/health`):**
+```
+{
+"status": "healthy",
+"timestamp": "2025-12-19T08:00:00Z",
+"version": "1.0.0",
+"provider": "groq",
+"components": {
+"llm_groq": {
+"status": "up",
+"latency_ms": 120,
+"model": "llama-3.3-70b-versatile"
+},
+"github_api": {
+"status": "up",
+"latency_ms": 85,
+"rate_limit_remaining": 4500,
+"rate_limit_total": 5000
+},
+"tavily_api": {
+"status": "up",
+"latency_ms": 200
+},
+"rag_retriever": {
+"status": "up",
+"latency_ms": 45,
+"embeddings_model": "sentence-transformers/all-MiniLM-L6-v2"
+}
+}
+}
+```
+**HTTP Status Codes:**
+- `200 OK`: All systems healthy
+- `503 Service Unavailable`: One or more components degraded/down
 
 ---
 
@@ -180,6 +250,22 @@ python -m src.main https://github.com/django/django "Python web framework"
 - **PyGithub**: GitHub API integration
 - **Tavily**: Web search for best practices
 - **Streamlit**: Web interface
+
+---
+
+## 🤖 Agent Specializations
+
+Each of the 5 AI agents has a **distinct, non-overlapping role**:
+
+| Agent | Unique Responsibility | What Sets It Apart |
+|-------|----------------------|-------------------|
+| **🔍 RepoAnalyzer** | Extract repository facts & metadata | Only agent with direct GitHub API access; provides data foundation for all others |
+| **🏷️ MetadataRecommender** | Optimize discoverability & SEO | Only agent that researches competitor repositories for benchmarking |
+| **✍️ ContentImprover** | Enhance README structure & content | Only agent that retrieves external best practices documentation |
+| **✅ ReviewerCritic** | Audit quality with structured scoring | Only agent that provides 4-dimension scoring (Completeness, Clarity, Professionalism, Discoverability) |
+| **🔎 FactChecker** | Verify claims with evidence | Only agent using RAG/FAISS vector search to validate README statements |
+
+**Key Distinction:** Each agent uses different **tools** and **temperature settings** optimized for its specific task, ensuring specialized expertise rather than redundant analysis.
 
 ---
 
