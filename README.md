@@ -4,10 +4,8 @@
 
 Multi-agent AI platform that analyzes GitHub repositories and provides actionable recommendations to improve documentation quality, metadata, and discoverability.
 
-[![GitHub release](https://img.shields.io/github/v/release/ak-rahul/DrRepo)](https://github.com/ak-rahul/DrRepo/releases)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-57%2F57%20passing-brightgreen)](https://github.com/ak-rahul/DrRepo)
-[![Coverage](https://img.shields.io/badge/coverage-74%25-yellowgreen)](https://github.com/ak-rahul/DrRepo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.31+-FF4B4B.svg)](https://streamlit.io)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
