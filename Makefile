@@ -47,8 +47,8 @@ test-integration:
 	$(PYTHON) -m pytest tests/ -v -m integration
 
 lint:
-	$(PYTHON) -m flake8 src/ tests/ --max-line-length=100
-	$(PYTHON) -m pylint src/
+	$(PYTHON) -m ruff check src/ tests/ app.py
+	$(PYTHON) -m flake8 src/ tests/
 	$(PYTHON) -m mypy src/ --ignore-missing-imports
 
 format:
@@ -83,7 +83,7 @@ run:
 	$(PYTHON) -m streamlit run app.py
 
 cli:
-	@echo Enter GitHub repository URL:
+	@echo Usage: python -m src.main ^<repo_url^> ["description"]
 	@$(PYTHON) -m src.main
 
 docker-build:

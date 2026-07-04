@@ -1,31 +1,35 @@
-"""Basic usage example for DrRepo."""
-from src.main import PublicationAssistant
+"""Basic usage example for DrRepo v2."""
+
+from src.config import Config
+from src.graph.workflow import Workflow
+from src.main import save_report
+
 
 def main():
-    """Run basic analysis example."""
-    # Initialize assistant
-    assistant = PublicationAssistant()
-    
-    # Analyze a repository
+    """Run a basic analysis example."""
+    config = Config.from_env()
+    missing = config.validate_for_llm()
+    if missing:
+        raise SystemExit(f"Missing required configuration: {missing}. See .env.example.")
+
+    workflow = Workflow(config)
+
     repo_url = "https://github.com/psf/requests"
-    description = "Popular Python HTTP library"
-    
     print(f"Analyzing {repo_url}...")
-    
-    # Run analysis
-    results = assistant.analyze(repo_url, description)
-    
-    # Print summary
+
+    result = workflow.execute(repo_url, description="Popular Python HTTP library")
+
     print("\n=== Analysis Results ===")
-    print(f"Repository: {results['repository']['name']}")
-    print(f"Quality Score: {results['repository']['current_score']:.1f}/100")
-    print(f"Status: {results['summary']['status']}")
-    print(f"\nTop Priority Actions:")
-    for i, item in enumerate(results['action_items'][:3], 1):
-        print(f"{i}. [{item['priority']}] {item['action']}")
-    
-    # Save report
-    report_path = assistant.analyze_and_save(repo_url, description)
+    print(f"Repository: {result['repository']['name']}")
+    print(f"Overall Score: {result['overall_score']:.1f}/100")
+    for name, cs in result["category_scores"].items():
+        print(f"  {name}: {cs['score']:.1f}/100")
+
+    print("\nTop Issues:")
+    for issue in result["issues"][:5]:
+        print(f"  [{issue['severity'].upper()}] {issue['title']}")
+
+    report_path = save_report(result)
     print(f"\nFull report saved to: {report_path}")
 
 

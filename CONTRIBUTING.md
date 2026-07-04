@@ -25,8 +25,8 @@ This project adheres to the [Code of Conduct](CODE_OF_CONDUCT.md). By participat
 
 ### Prerequisites
 
-- Python 3.9 or higher
-- Git
+- Python 3.11 or higher
+- Git (also required at runtime -- collectors shell out to it to clone repositories)
 - GitHub account
 
 ### Development Environment
@@ -90,16 +90,13 @@ pre-commit install
 
 Create `.env` file:
 
-
-### 4. Set Up Environment Variables
-
-Create `.env` file:
-
 ```
 GROQ_API_KEY=your_test_key
 GH_TOKEN=your_test_token
-TAVILY_API_KEY=your_test_key
 ```
+
+Note: the unit test suite never needs real keys -- it's hermetic. These are only needed to
+actually run an analysis (CLI/Streamlit/integration tests).
 
 ### 5. Run Tests
 

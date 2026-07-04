@@ -172,3 +172,97 @@
 2025-12-19 14:56:34 - drrepo - WARNING - test_func attempt 1/3 failed: Rate limit. Retrying in 0.1s...
 2025-12-19 14:56:34 - drrepo - INFO - Rate limit hit. Waiting 0.1s before retry 1
 2025-12-19 14:56:34 - drrepo - INFO - test_func succeeded on attempt 2/3
+2026-07-04 11:10:19 - drrepo - ERROR - Readiness check failed: missing ['GROQ_API_KEY']
+2026-07-04 11:10:19 - drrepo - INFO - Health check requested
+2026-07-04 11:10:19 - drrepo - INFO - Health check completed: healthy
+2026-07-04 11:10:19 - drrepo - INFO - Health check requested
+2026-07-04 11:10:19 - drrepo - INFO - Health check completed: degraded
+2026-07-04 11:10:19 - drrepo - INFO - Health check requested
+2026-07-04 11:10:19 - drrepo - ERROR - Health check failed: boom
+Traceback (most recent call last):
+  File "D:\DrRepo\src\api\health.py", line 50, in health_check
+    health_status = HealthChecker.check_all(_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\unittest\mock.py", line 1137, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\unittest\mock.py", line 1141, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\unittest\mock.py", line 1196, in _execute_mock_call
+    raise effect
+Exception: boom
+2026-07-04 11:10:19 - drrepo - INFO - Fetched GitHub metadata for user/test-repo
+2026-07-04 11:10:19 - drrepo - INFO - Fetched GitHub metadata for user/test-repo
+2026-07-04 11:10:19 - drrepo - WARNING - Clone of https://github.com/user/nonexistent failed: fatal: repository not found
+2026-07-04 11:10:19 - drrepo - WARNING - Clone of https://github.com/user/repo timed out after 60s
+2026-07-04 11:10:19 - drrepo - WARNING - Clone of https://github.com/user/repo exceeded size cap: 9999MB
+2026-07-04 11:10:19 - drrepo - INFO - bandit skipped: bandit not installed
+2026-07-04 11:10:19 - drrepo - INFO - ruff skipped: ruff not installed
+2026-07-04 11:10:19 - drrepo - INFO - semgrep skipped: semgrep not installed
+2026-07-04 11:10:19 - drrepo - INFO - semgrep skipped: semgrep not installed
+2026-07-04 11:10:19 - drrepo - INFO - ruff skipped: ruff timed out
+2026-07-04 11:10:19 - drrepo - INFO - semgrep skipped: semgrep timed out
+2026-07-04 11:10:19 - drrepo - INFO - Starting analysis for https://github.com/user/test-repo
+2026-07-04 11:10:19 - drrepo - INFO - Analysis complete
+2026-07-04 11:10:19 - drrepo - INFO - Starting analysis for https://github.com/user/test-repo
+2026-07-04 11:10:19 - drrepo - INFO - Analysis complete
+2026-07-04 11:10:19 - drrepo - INFO - Reports saved to reports\test-repo_20260704_111019_report.json and reports\test-repo_20260704_111019_report.md
+2026-07-04 11:10:19 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=3, timeout=1s
+2026-07-04 11:10:19 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=3, timeout=1s
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/3
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/3
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 3/3
+2026-07-04 11:10:19 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2026-07-04 11:10:19 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=10s
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2026-07-04 11:10:19 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Circuit is OPEN. Retry in 10s
+2026-07-04 11:10:19 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=1s
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2026-07-04 11:10:19 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2026-07-04 11:10:19 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Attempting recovery (HALF_OPEN)
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Recovery successful, closing circuit
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=10s
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 2/2
+2026-07-04 11:10:20 - drrepo - ERROR - CircuitBreaker 'CircuitBreaker': Threshold reached, opening circuit
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'CircuitBreaker': Manual reset
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'TestBreaker' initialized: threshold=5, timeout=60s
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'test_circuit_breaker.test_func' initialized: threshold=2, timeout=1s
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Failure 1/2
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Failure 2/2
+2026-07-04 11:10:20 - drrepo - ERROR - CircuitBreaker 'test_circuit_breaker.test_func': Threshold reached, opening circuit
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'test_circuit_breaker.test_func': Circuit is OPEN. Retry in 1s
+2026-07-04 11:10:20 - drrepo - INFO - CircuitBreaker 'CircuitBreaker' initialized: threshold=2, timeout=1s
+2026-07-04 11:10:20 - drrepo - WARNING - CircuitBreaker 'CircuitBreaker': Failure 1/2
+2026-07-04 11:10:21 - drrepo - INFO - Groq API health check: OK
+2026-07-04 11:10:21 - drrepo - ERROR - Groq API health check failed: API connection failed
+2026-07-04 11:10:21 - drrepo - INFO - GitHub API health check: OK (remaining: 5000)
+2026-07-04 11:10:21 - drrepo - ERROR - GitHub API health check failed: Mock object has no attribute 'resources'
+2026-07-04 11:10:21 - drrepo - ERROR - GitHub API health check failed: Authentication failed
+2026-07-04 11:10:21 - drrepo - INFO - OSV.dev connectivity check: OK
+2026-07-04 11:10:21 - drrepo - ERROR - OSV.dev connectivity check failed: no network
+2026-07-04 11:10:21 - drrepo - INFO - Groq API health check: OK
+2026-07-04 11:10:21 - drrepo - INFO - GitHub API health check: OK (remaining: 5000)
+2026-07-04 11:10:21 - drrepo - INFO - OSV.dev connectivity check: OK
+2026-07-04 11:10:21 - drrepo - ERROR - Groq API health check failed: down
+2026-07-04 11:10:21 - drrepo - INFO - GitHub API health check: OK (remaining: 5000)
+2026-07-04 11:10:21 - drrepo - INFO - OSV.dev connectivity check: OK
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 1/4 failed: First failure. Retrying in 0.1s...
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 2/4 failed: Second failure. Retrying in 0.2s...
+2026-07-04 11:10:21 - drrepo - INFO - test_func succeeded on attempt 3/4
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 1/3 failed: Always fails. Retrying in 0.1s...
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 2/3 failed: Always fails. Retrying in 0.2s...
+2026-07-04 11:10:21 - drrepo - ERROR - test_func failed after 3 attempts: Always fails
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 1/4 failed: Retry. Retrying in 0.1s...
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 2/4 failed: Retry. Retrying in 0.2s...
+2026-07-04 11:10:21 - drrepo - INFO - test_func succeeded on attempt 3/4
+2026-07-04 11:10:21 - drrepo - WARNING - test_func attempt 1/3 failed: Retry. Retrying in 0.1s...
+2026-07-04 11:10:22 - drrepo - WARNING - test_func attempt 2/3 failed: Retry. Retrying in 0.2s...
+2026-07-04 11:10:22 - drrepo - INFO - test_func succeeded on attempt 3/3
+2026-07-04 11:10:22 - drrepo - WARNING - test_func attempt 1/3 failed: Rate limit. Retrying in 0.1s...
+2026-07-04 11:10:22 - drrepo - INFO - Rate limit hit. Waiting 0.1s before retry 1
+2026-07-04 11:10:22 - drrepo - INFO - test_func succeeded on attempt 2/3

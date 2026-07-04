@@ -49,8 +49,8 @@ gh auth status
 
 Using Python
 ```
-python -c "from github import Github; from src.utils.config import config; 
-print(Github(config.github_token).get_user().login)"
+python -c "from github import Github; from src.config import Config;
+c = Config.from_env(); print(Github(c.github_token).get_user().login)"
 ```
 
 **B. Verify `.env` Configuration**
@@ -62,29 +62,27 @@ ls -la .env
 
 Verify required keys are set
 ```
-cat .env | grep -E "GROQ_API_KEY|GH_TOKEN|TAVILY_API_KEY"
+cat .env | grep -E "GROQ_API_KEY|GH_TOKEN"
 ```
 
 
 **C. Test API Connectivity**
 Test GitHub API
 ```
-python -c "from src.tools.github_tool import GitHubTool; 
-print(GitHubTool().execute('https://github.com/python/cpython'))"
+python -c "from src.collectors.github_metadata import collect_github_metadata; \
+from src.config import Config; \
+print(collect_github_metadata('https://github.com/python/cpython', Config.from_env()))"
 ```
 
 Test Groq API
 ```
-python -c "from langchain_groq import ChatGroq; f
-rom src.utils.config import config; 
-ChatGroq(api_key=config.groq_api_key).invoke('test')"
+python -c "from langchain_groq import ChatGroq; from src.config import Config; \
+c = Config.from_env(); ChatGroq(api_key=c.groq_api_key, model=c.model_name).invoke('test')"
 ```
 
-Test Tavily API
+Test OSV.dev connectivity (used by the dependency audit collector)
 ```
-python -c "from tavily import TavilyClient; 
-from src.utils.config import config; 
-TavilyClient(config.tavily_api_key).search('test', max_results=1)"
+python -c "import httpx; print(httpx.get('https://api.osv.dev/v1/query', timeout=5).status_code)"
 ```
 
 **D. Check Rate Limits**
@@ -161,61 +159,45 @@ tail -f logs/app.log | grep "latency"
 
 ---
 
-### 3. FAISS/RAG Issues
+### 3. Static Analysis Tool Issues (ruff / semgrep / bandit)
 
 #### Symptom
 ```
-ModuleNotFoundError: No module named 'faiss'
-ImportError: DLL load failed while importing _swigfaiss
+collector_status.static_analysis.tool_status.semgrep == "skipped: semgrep not installed"
+FileNotFoundError: [Errno 2] No such file or directory: 'git'
 ```
 
 #### Root Causes
-- FAISS not installed
-- Wrong FAISS version (CPU vs GPU)
-- Missing system dependencies
+- `ruff`/`semgrep`/`bandit` not installed (they ship as regular `requirements.txt` entries, so
+  this usually means a stale/incomplete `pip install`)
+- `git` not on PATH (required at runtime -- the clone collector shells out to it)
 
 #### Solutions
 
-**A. Install FAISS CPU Version (Recommended)**
+**A. Verify the tools are installed and on PATH**
 ```
-pip uninstall faiss-gpu faiss-cpu # Remove existing
-pip install faiss-cpu
-```
-
-
-**B. Install FAISS GPU Version (If CUDA Available)**
-Check CUDA availability
-```
-python -c "import torch; print(torch.cuda.is_available())"
+pip install -r requirements.txt
+python -c "import shutil; print([shutil.which(t) for t in ('git', 'ruff', 'semgrep', 'bandit')])"
 ```
 
-Install GPU version
-```
-pip install faiss-gpu
-```
+**B. Disable a collector instead of failing the whole analysis**
 
-**C. Test FAISS Installation**
-
+Each collector degrades gracefully already, but you can turn one off explicitly in `.env`:
 ```
-python -c "import faiss; print(f'FAISS version: {faiss.version}')"
+ENABLE_SEMGREP=false
+ENABLE_BANDIT=false
 ```
 
+**C. Check `collector_status` in the report**
 
-**D. Alternative: Use ChromaDB**
-
-If FAISS continues to cause issues, switch to ChromaDB:
-
-```
-pip install chromadb
-```
-
-Update rag_retriever.py to use ChromaDB instead
-
+Every report includes a `collector_status` field showing exactly which collectors ran, were
+skipped, or errored, and why -- check that first before assuming a tool is broken.
 
 #### Prevention
-- Always use `faiss-cpu` unless you have GPU
-- Pin FAISS version in requirements.txt
-- Test after installation
+- Run `python scripts/check_components.py` after any environment change; it reports which
+  external tools are found on PATH.
+- Pin tool versions in `requirements.txt` (already done) so a `pip install` upgrade can't
+  silently change behavior.
 
 ---
 
@@ -228,22 +210,19 @@ Killed (process terminated by OS)
 ```
 
 #### Root Causes
-- Large repository analysis
-- High RAG chunk size
+- Very large repository clone
 - Insufficient system RAM
 - Memory leaks
 
 #### Solutions
 
-**A. Reduce RAG Chunk Size**
+**A. Lower the Clone Size Limit**
 
-Edit `src/tools/rag_retriever.py`:
+Edit `.env`:
 ```
-self.text_splitter = RecursiveCharacterTextSplitter(
-chunk_size=500, # Reduced from 1000
-chunk_overlap=100 # Reduced from 200
-)
+CLONE_MAX_SIZE_MB=150   # Reduced from the default 300
 ```
+Repositories over this size are skipped (not crashed on) -- see `collector_status.repo_clone`.
 
 **B. Analyze Smaller Repositories**
 Start with small repos
@@ -462,8 +441,9 @@ python scripts/health_check.py
 
 Quick validation
 ```
-python -c "from src.utils.config import config; 
-print('✓ Valid' if config.validate() else '✗ Invalid')"
+python -c "from src.config import Config; \
+c = Config.from_env(); missing = c.validate_for_llm(); \
+print('Valid' if not missing else f'Missing: {missing}')"
 ```
 
 Check individual components
@@ -475,21 +455,20 @@ python scripts/check_components.py
 
 GitHub
 ```
-python -c "from src.tools.github_tool import GitHubTool; 
-GitHubTool().execute('https://github.com/python/cpython')['name']"
+python -c "from src.collectors.github_metadata import collect_github_metadata; \
+from src.config import Config; \
+print(collect_github_metadata('https://github.com/python/cpython', Config.from_env()).data.get('name'))"
 ```
 
 Groq
 ```
-python -c "from langchain_groq import ChatGroq; 
-from src.utils.config import config; 
-ChatGroq(api_key=config.groq_api_key, model='llama-3.3-70b-versatile').invoke('ping')"
+python -c "from langchain_groq import ChatGroq; from src.config import Config; \
+c = Config.from_env(); ChatGroq(api_key=c.groq_api_key, model=c.model_name).invoke('ping')"
 ```
 
-Tavily
+OSV.dev (used by the dependency audit collector)
 ```
-python -c "from src.tools.web_search_tool import WebSearchTool; 
-len(WebSearchTool().search_generic('test', max_results=1))"
+python -c "import httpx; print(httpx.get('https://api.osv.dev/v1/query', timeout=5).status_code)"
 ```
 
 ### Dependency Check
@@ -665,15 +644,17 @@ A: `git pull origin main && pip install -r requirements.txt --upgrade`
 A: Yes, keys are stored in `.env` (not committed to git). Never share your `.env` file.
 
 **Q: Can I analyze private repositories?**
-A: Yes, ensure your GitHub token has `repo` scope for private repo access.
+A: Not currently -- v2 only supports public repositories (the clone collector rejects anything
+other than a plain `https://github.com/<owner>/<repo>` URL, and never embeds credentials in the
+clone URL). This is a deliberate scope boundary, not a bug.
 
 **Q: How much does it cost to run?**
-A: Groq is free (with limits), GitHub token is free, Tavily has free tier. Costs vary with usage.
+A: Groq is free (with limits), a GitHub token is free, and OSV.dev's API is free and
+unauthenticated. Costs vary only with Groq usage if you exceed the free tier.
 
 ---
 
-**Last Updated**: December 19, 2025  
-**DrRepo Version**: 1.0.0
+**DrRepo Version**: 2.0.0
 
 For more help, visit: https://github.com/ak-rahul/DrRepo
 

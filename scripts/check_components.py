@@ -1,105 +1,70 @@
-"""Check individual DrRepo components."""
+"""Check individual DrRepo v2 components: collectors, tools, and the workflow graph."""
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-def check_tools():
-    """Check if all tools are working."""
-    print("🔧 Checking Tools...")
-    
-    # GitHub Tool
-    try:
-        from src.tools.github_tool import GitHubTool
-        tool = GitHubTool()
-        print("✅ GitHubTool initialized")
-    except Exception as e:
-        print(f"❌ GitHubTool: {str(e)}")
-    
-    # Web Search Tool
-    try:
-        from src.tools.web_search_tool import WebSearchTool
-        tool = WebSearchTool()
-        print("✅ WebSearchTool initialized")
-    except Exception as e:
-        print(f"❌ WebSearchTool: {str(e)}")
-    
-    # RAG Retriever
-    try:
-        from src.tools.rag_retriever import RAGRetriever
-        tool = RAGRetriever()
-        print("✅ RAGRetriever initialized")
-    except Exception as e:
-        print(f"❌ RAGRetriever: {str(e)}")
-    
-    # Markdown Tool
-    try:
-        from src.tools.markdown_tool import MarkdownTool
-        tool = MarkdownTool()
-        print("✅ MarkdownTool initialized")
-    except Exception as e:
-        print(f"❌ MarkdownTool: {str(e)}")
+from src.config import Config  # noqa: E402
 
 
-def check_agents():
-    """Check if all agents are working."""
-    print("\n🤖 Checking Agents...")
-    
-    agents = [
-        'RepoAnalyzerAgent',
-        'MetadataRecommenderAgent',
-        'ContentImproverAgent',
-        'ReviewerCriticAgent',
-        'FactCheckerAgent'
-    ]
-    
-    for agent_name in agents:
+def check_external_tools():
+    """Check whether the CLI tools collectors depend on are on PATH."""
+    import shutil
+
+    print("Checking external tools...")
+    for tool in ("git", "ruff", "semgrep", "bandit"):
+        path = shutil.which(tool)
+        print(f"{'OK  ' if path else 'MISS'} {tool}: {path or 'not found on PATH'}")
+
+
+def check_collectors():
+    """Check that collector modules import and their pure functions run."""
+    print("\nChecking Collectors...")
+
+    try:
+        from src.collectors.readme import analyze_readme
+
+        result = analyze_readme("# Test\n\nSome content")
+        print(f"OK   readme collector (quality_score={result.data['quality_score']})")
+    except Exception as e:
+        print(f"FAIL readme collector: {e}")
+
+    for name, module, func in [
+        ("github_metadata", "src.collectors.github_metadata", "collect_github_metadata"),
+        ("static_analysis", "src.collectors.static_analysis", "collect_static_analysis"),
+        ("security", "src.collectors.security", "collect_security"),
+        ("dependency_audit", "src.collectors.dependency_audit", "collect_dependency_audit"),
+        ("repo_clone", "src.collectors.repo_clone", "clone_repo"),
+    ]:
         try:
-            if agent_name == 'RepoAnalyzerAgent':
-                from src.agents.repo_analyzer import RepoAnalyzerAgent
-                agent = RepoAnalyzerAgent()
-            elif agent_name == 'MetadataRecommenderAgent':
-                from src.agents.metadata_recommender import MetadataRecommenderAgent
-                agent = MetadataRecommenderAgent()
-            elif agent_name == 'ContentImproverAgent':
-                from src.agents.content_improver import ContentImproverAgent
-                agent = ContentImproverAgent()
-            elif agent_name == 'ReviewerCriticAgent':
-                from src.agents.reviewer_critic import ReviewerCriticAgent
-                agent = ReviewerCriticAgent()
-            elif agent_name == 'FactCheckerAgent':
-                from src.agents.fact_checker import FactCheckerAgent
-                agent = FactCheckerAgent()
-            
-            print(f"✅ {agent_name} initialized")
+            exec(f"from {module} import {func}")
+            print(f"OK   {name} imports")
         except Exception as e:
-            print(f"❌ {agent_name}: {str(e)}")
+            print(f"FAIL {name}: {e}")
 
 
-def check_workflow():
-    """Check if workflow can be initialized."""
-    print("\n🔄 Checking Workflow...")
-    
+def check_workflow(config: Config):
+    """Check that the LangGraph workflow compiles."""
+    print("\nChecking Workflow...")
     try:
-        from src.main import PublicationAssistant
-        assistant = PublicationAssistant()
-        print("✅ PublicationAssistant initialized")
-        print("✅ Workflow graph compiled")
+        from src.graph.workflow import Workflow
+
+        workflow = Workflow(config)
+        print("OK   Workflow graph compiled")
     except Exception as e:
-        print(f"❌ Workflow: {str(e)}")
+        print(f"FAIL Workflow: {e}")
 
 
 def main():
-    """Run all component checks."""
-    print("🔍 DrRepo Component Checker\n")
-    
-    check_tools()
-    check_agents()
-    check_workflow()
-    
-    print("\n✅ Component check complete!")
+    print("DrRepo v2 Component Checker\n")
+
+    config = Config.from_env()
+    check_external_tools()
+    check_collectors()
+    check_workflow(config)
+
+    print("\nComponent check complete!")
 
 
 if __name__ == "__main__":

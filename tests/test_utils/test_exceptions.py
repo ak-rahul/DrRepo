@@ -1,17 +1,15 @@
 """Tests for custom exceptions."""
 
-import pytest
-
 from src.utils.exceptions import (
-    DrRepoException,
+    AgentExecutionError,
+    AnalysisError,
     APIConnectionError,
     ConfigurationError,
-    RepositoryNotFoundError,
+    DrRepoException,
     RateLimitError,
-    AnalysisError,
-    ValidationError,
+    RepositoryNotFoundError,
     ToolExecutionError,
-    AgentExecutionError
+    ValidationError,
 )
 
 
@@ -60,7 +58,7 @@ class TestCustomExceptions:
         """Test ToolExecutionError."""
         original = ValueError("Original error")
         exc = ToolExecutionError("GitHubTool", "Execution failed", original)
-        
+
         assert isinstance(exc, DrRepoException)
         assert exc.tool_name == "GitHubTool"
         assert exc.original_error == original
@@ -70,7 +68,7 @@ class TestCustomExceptions:
         """Test AgentExecutionError."""
         original = RuntimeError("Agent crashed")
         exc = AgentExecutionError("RepoAnalyzer", "Analysis failed", original)
-        
+
         assert isinstance(exc, DrRepoException)
         assert exc.agent_name == "RepoAnalyzer"
         assert exc.original_error == original
@@ -86,9 +84,9 @@ class TestCustomExceptions:
             AnalysisError("test"),
             ValidationError("test"),
             ToolExecutionError("tool", "test"),
-            AgentExecutionError("agent", "test")
+            AgentExecutionError("agent", "test"),
         ]
-        
+
         for exc in exceptions:
             assert isinstance(exc, DrRepoException)
             assert isinstance(exc, Exception)

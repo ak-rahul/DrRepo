@@ -1,48 +1,40 @@
-"""Advanced usage example showing custom workflow."""
-from src.graph.workflow import PublicationAssistantWorkflow
+"""Advanced usage: analyzing and comparing multiple repositories."""
+
+from src.config import Config
+from src.graph.workflow import Workflow
 from src.utils.logger import logger
 
+
 def main():
-    """Run advanced analysis with custom handling."""
-    # Initialize workflow directly
-    workflow = PublicationAssistantWorkflow()
-    
-    # Multiple repositories to analyze
+    """Analyze several repositories and print a comparison."""
+    config = Config.from_env()
+    workflow = Workflow(config)
+
     repositories = [
         "https://github.com/psf/requests",
-        "https://github.com/django/django",
-        "https://github.com/fastapi/fastapi"
+        "https://github.com/pallets/flask",
+        "https://github.com/tiangolo/fastapi",
     ]
-    
+
     results = []
-    
     for repo_url in repositories:
         try:
             logger.info(f"Analyzing {repo_url}...")
-            
-            # Execute workflow
-            result = workflow.execute(repo_url, "")
-            
-            # Extract key metrics
-            summary = result.get("final_summary", {})
-            results.append({
-                "repo": repo_url,
-                "score": summary.get("repository", {}).get("current_score", 0),
-                "status": summary.get("summary", {}).get("status", "Unknown")
-            })
-            
+            result = workflow.execute(repo_url)
+            results.append(
+                {
+                    "repo": repo_url,
+                    "score": result["overall_score"],
+                    "issues": len(result["issues"]),
+                }
+            )
         except Exception as e:
-            logger.error(f"Failed to analyze {repo_url}: {str(e)}")
-            results.append({
-                "repo": repo_url,
-                "score": 0,
-                "status": "Error"
-            })
-    
-    # Print comparison
+            logger.error(f"Failed to analyze {repo_url}: {e}")
+            results.append({"repo": repo_url, "score": 0, "issues": None})
+
     print("\n=== Repository Comparison ===")
-    for r in sorted(results, key=lambda x: x['score'], reverse=True):
-        print(f"{r['repo']}: {r['score']:.1f}/100 ({r['status']})")
+    for r in sorted(results, key=lambda x: x["score"], reverse=True):
+        print(f"{r['repo']}: {r['score']:.1f}/100 ({r['issues']} issues found)")
 
 
 if __name__ == "__main__":

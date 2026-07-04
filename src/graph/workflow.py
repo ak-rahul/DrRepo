@@ -1,325 +1,217 @@
-﻿"""LangGraph workflow for DrRepo multi-agent system."""
-from typing import Dict
-from langgraph.graph import StateGraph, END
+"""DrRepo v2 workflow: parallel collectors -> parallel analyst agents -> synthesizer.
+
+Cloning happens outside the graph (in `Workflow.execute`) so cleanup is
+guaranteed via try/finally regardless of what happens inside the graph.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional, cast
+
+from langgraph.graph import END, START, StateGraph
+
+from src.agents.base import build_llm_client
+from src.agents.code_quality_analyst import CodeQualityAnalyst
+from src.agents.dependency_analyst import DependencyAnalyst
+from src.agents.docs_analyst import DocsAnalyst
+from src.agents.maintainability_analyst import MaintainabilityAnalyst
+from src.agents.security_analyst import SecurityAnalyst
+from src.collectors.dependency_audit import collect_dependency_audit
+from src.collectors.github_metadata import collect_github_metadata
+from src.collectors.readme import analyze_readme
+from src.collectors.repo_clone import clone_repo
+from src.collectors.security import collect_security
+from src.collectors.static_analysis import collect_static_analysis
+from src.config import Config
 from src.graph.state import State
-from src.agents.repo_analyzer import RepoAnalyzerAgent
-from src.agents.metadata_recommender import MetadataRecommenderAgent
-from src.agents.content_improver import ContentImproverAgent
-from src.agents.reviewer_critic import ReviewerCriticAgent
-from src.agents.fact_checker import FactCheckerAgent
+from src.models import Category, CollectorResult
+from src.report.synthesizer import synthesize_report
 from src.utils.logger import logger
 
 
-class PublicationAssistantWorkflow:
-    """LangGraph workflow orchestrating all agents."""
-    
-    def __init__(self):
-        """Initialize workflow with all agents."""
-        self.logger = logger
-        
-        # Initialize agents
-        self.repo_analyzer = RepoAnalyzerAgent()
-        self.metadata_recommender = MetadataRecommenderAgent()
-        self.content_improver = ContentImproverAgent()
-        self.reviewer_critic = ReviewerCriticAgent()
-        self.fact_checker = FactCheckerAgent()
-        
-        # Build workflow graph
+def _collector_status_summary(collector_results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        name: {"status": result.get("status"), "detail": result.get("detail")}
+        for name, result in collector_results.items()
+    }
+
+
+class Workflow:
+    """Orchestrates a full repository analysis run."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        llm_client = build_llm_client(config)
+
+        self.docs_analyst = DocsAnalyst(llm_client)
+        self.code_quality_analyst = CodeQualityAnalyst(llm_client)
+        self.security_analyst = SecurityAnalyst(llm_client)
+        self.dependency_analyst = DependencyAnalyst(llm_client)
+        self.maintainability_analyst = MaintainabilityAnalyst(llm_client)
+
         self.graph = self._build_graph()
-    
-    def _build_graph(self) -> StateGraph:
-        """Build LangGraph workflow.
-        
-        Returns:
-            Compiled StateGraph
-        """
-        # Create graph
-        workflow = StateGraph(State)
-        
-        # Add nodes (agents)
-        workflow.add_node("analyze_repo", self.repo_analyzer.execute)
-        workflow.add_node("recommend_metadata", self.metadata_recommender.execute)
-        workflow.add_node("improve_content", self.content_improver.execute)
-        workflow.add_node("review_quality", self.reviewer_critic.execute)
-        workflow.add_node("check_facts", self.fact_checker.execute)
-        workflow.add_node("synthesize", self._synthesize_results)
-        
-        # Define workflow edges (sequential execution)
-        workflow.set_entry_point("analyze_repo")
-        workflow.add_edge("analyze_repo", "recommend_metadata")
-        workflow.add_edge("recommend_metadata", "improve_content")
-        workflow.add_edge("improve_content", "review_quality")
-        workflow.add_edge("review_quality", "check_facts")
-        workflow.add_edge("check_facts", "synthesize")
-        workflow.add_edge("synthesize", END)
-        
-        # Compile
-        return workflow.compile()
-    
-    def execute(self, repo_url: str, description: str = "") -> Dict:
-        """Execute workflow for a repository.
-        
-        Args:
-            repo_url: GitHub repository URL
-            description: Optional repository description
-        
-        Returns:
-            Final state with all results
-        """
-        self.logger.info(f"Starting workflow for: {repo_url}")
-        
-        # Initialize state
-        initial_state = {
+
+    # ---- collector nodes -------------------------------------------------
+
+    def _github_metadata_node(self, state: State) -> Dict[str, Any]:
+        result = collect_github_metadata(state["repo_url"], self.config)
+        return {"collector_results": {"github_metadata": _as_dict(result)}}
+
+    def _readme_node(self, state: State) -> Dict[str, Any]:
+        github_data = state["collector_results"].get("github_metadata", {}).get("data", {})
+        result = analyze_readme(github_data.get("readme_content", ""))
+        return {"collector_results": {"readme": _as_dict(result)}}
+
+    def _static_analysis_node(self, state: State) -> Dict[str, Any]:
+        clone_path = state.get("clone_path")
+        if not clone_path:
+            return {
+                "collector_results": {
+                    "static_analysis": {"status": "skipped", "detail": "no clone"}
+                }
+            }
+        result = collect_static_analysis(clone_path, self.config)
+        return {"collector_results": {"static_analysis": _as_dict(result)}}
+
+    def _security_node(self, state: State) -> Dict[str, Any]:
+        clone_path = state.get("clone_path")
+        if not clone_path:
+            return {"collector_results": {"security": {"status": "skipped", "detail": "no clone"}}}
+        result = collect_security(clone_path, self.config)
+        return {"collector_results": {"security": _as_dict(result)}}
+
+    def _dependency_audit_node(self, state: State) -> Dict[str, Any]:
+        clone_path = state.get("clone_path")
+        if not clone_path:
+            return {
+                "collector_results": {
+                    "dependency_audit": {"status": "skipped", "detail": "no clone"}
+                }
+            }
+        result = collect_dependency_audit(clone_path, self.config)
+        return {"collector_results": {"dependency_audit": _as_dict(result)}}
+
+    # ---- analyst nodes -----------------------------------------------------
+
+    def _collector_data(self, state: State) -> Dict[str, Any]:
+        """Unwrap collector_results (status+data) into plain {name: data} for analysts."""
+        return {name: r.get("data", {}) for name, r in state["collector_results"].items()}
+
+    def _docs_analyst_node(self, state: State) -> Dict[str, Any]:
+        findings = self.docs_analyst.analyze(self._collector_data(state))
+        return {"category_findings": {Category.DOCUMENTATION.value: findings}}
+
+    def _code_quality_analyst_node(self, state: State) -> Dict[str, Any]:
+        findings = self.code_quality_analyst.analyze(self._collector_data(state))
+        return {"category_findings": {Category.CODE_QUALITY.value: findings}}
+
+    def _security_analyst_node(self, state: State) -> Dict[str, Any]:
+        findings = self.security_analyst.analyze(self._collector_data(state))
+        return {"category_findings": {Category.SECURITY.value: findings}}
+
+    def _dependency_analyst_node(self, state: State) -> Dict[str, Any]:
+        findings = self.dependency_analyst.analyze(self._collector_data(state))
+        return {"category_findings": {Category.DEPENDENCIES.value: findings}}
+
+    def _maintainability_analyst_node(self, state: State) -> Dict[str, Any]:
+        findings = self.maintainability_analyst.analyze(self._collector_data(state))
+        return {"category_findings": {Category.MAINTAINABILITY.value: findings}}
+
+    # ---- synthesizer -------------------------------------------------------
+
+    def _synthesizer_node(self, state: State) -> Dict[str, Any]:
+        github_data = state["collector_results"].get("github_metadata", {}).get("data", {})
+        repository = {
+            "name": github_data.get("name", "Unknown"),
+            "url": github_data.get("url", state["repo_url"]),
+            "language": github_data.get("language", "Unknown"),
+            "stars": github_data.get("stars", 0),
+            "forks": github_data.get("forks", 0),
+        }
+        report = synthesize_report(
+            repository=repository,
+            category_findings=state["category_findings"],
+            collector_status=_collector_status_summary(state["collector_results"]),
+        )
+        return {"report": report.to_dict()}
+
+    # ---- graph assembly -----------------------------------------------------
+
+    def _build_graph(self) -> Any:
+        graph = StateGraph(State)
+
+        graph.add_node("github_metadata", self._github_metadata_node)
+        graph.add_node("readme", self._readme_node)
+        graph.add_node("static_analysis", self._static_analysis_node)
+        graph.add_node("security", self._security_node)
+        graph.add_node("dependency_audit", self._dependency_audit_node)
+
+        graph.add_node("docs_analyst", self._docs_analyst_node)
+        graph.add_node("code_quality_analyst", self._code_quality_analyst_node)
+        graph.add_node("security_analyst", self._security_analyst_node)
+        graph.add_node("dependency_analyst", self._dependency_analyst_node)
+        graph.add_node("maintainability_analyst", self._maintainability_analyst_node)
+
+        graph.add_node("synthesizer", self._synthesizer_node)
+
+        # Parallel collector fan-out from START.
+        graph.add_edge(START, "github_metadata")
+        graph.add_edge(START, "static_analysis")
+        graph.add_edge(START, "security")
+        graph.add_edge(START, "dependency_audit")
+        # readme depends on github_metadata's fetched content.
+        graph.add_edge("github_metadata", "readme")
+
+        # Fan-in: every analyst waits for all collectors to complete.
+        collector_nodes = ["readme", "static_analysis", "security", "dependency_audit"]
+        analyst_nodes = [
+            "docs_analyst",
+            "code_quality_analyst",
+            "security_analyst",
+            "dependency_analyst",
+            "maintainability_analyst",
+        ]
+        for collector_node in collector_nodes:
+            for analyst_node in analyst_nodes:
+                graph.add_edge(collector_node, analyst_node)
+
+        for analyst_node in analyst_nodes:
+            graph.add_edge(analyst_node, "synthesizer")
+
+        graph.add_edge("synthesizer", END)
+
+        return graph.compile()
+
+    # ---- public entrypoint --------------------------------------------------
+
+    def execute(self, repo_url: str, description: str = "") -> Dict[str, Any]:
+        """Run a full analysis of `repo_url` and return the final report dict."""
+        logger.info(f"Starting analysis for {repo_url}")
+
+        cloned, clone_result = clone_repo(repo_url, self.config)
+        clone_path: Optional[str] = str(cloned.path) if cloned else None
+
+        initial_state: State = {
             "repo_url": repo_url,
             "description": description,
-            "repo_data": {},
-            "code_structure": {},
-            "analysis": [],
-            "metadata_recommendations": [],
-            "content_improvements": [],
-            "quality_review": [],
-            "fact_check_results": [],
-            "messages": [],
-            "current_agent": "",
+            "clone_path": clone_path,
+            "collector_results": {"repo_clone": _as_dict(clone_result)},
+            "category_findings": {},
+            "report": {},
             "errors": [],
-            "final_summary": {}  # Initialize this explicitly
         }
-        
+
         try:
-            # Execute workflow
+            # `self.graph` is typed `Any` (LangGraph's compiled graph type is
+            # not easily expressible here), so cast the one value we actually
+            # return rather than let `Any` leak through this method's signature.
             final_state = self.graph.invoke(initial_state)
-            
-            # Ensure final_summary exists
-            if not final_state.get("final_summary") or not final_state["final_summary"].get("repository"):
-                self.logger.warning("final_summary not properly set by synthesizer")
-                final_state = self._ensure_final_summary(final_state)
-            
-            if final_state.get("errors"):
-                self.logger.warning(f"Workflow completed with errors: {len(final_state['errors'])} error(s)")
-            else:
-                self.logger.info("✓ Workflow completed successfully")
-            
-            return final_state
-            
-        except Exception as e:
-            self.logger.error(f"Workflow failed: {str(e)}")
-            raise
-    
-    def _synthesize_results(self, state: Dict) -> Dict:
-        """Synthesize all agent results into final recommendations.
-        
-        Args:
-            state: Current workflow state
-        
-        Returns:
-            Updated state with synthesized results
-        """
-        self.logger.info("Synthesizing final recommendations...")
-        
-        try:
-            repo_data = state.get("repo_data", {})
-            code_structure = state.get("code_structure", {})
-            quality_score = code_structure.get("quality_score", 0)
-            
-            # Determine status
-            if quality_score >= 80:
-                status = "Excellent"
-            elif quality_score >= 60:
-                status = "Good"
-            elif quality_score >= 40:
-                status = "Needs Improvement"
-            else:
-                status = "Poor"
-            
-            # Count critical issues
-            missing_sections = code_structure.get("missing_sections", [])
-            critical_issues = len([s for s in missing_sections if s.lower() in 
-                                  ['installation', 'usage', 'license']])
-            
-            # Extract action items from all agents
-            action_items = self._extract_action_items(state)
-            
-            # Build final summary
-            state["final_summary"] = {
-                "repository": {
-                    "name": repo_data.get("name", "Unknown"),
-                    "url": repo_data.get("url", ""),
-                    "current_score": quality_score,
-                    "language": repo_data.get("language", "Unknown"),
-                    "stars": repo_data.get("stars", 0),
-                    "forks": repo_data.get("forks", 0)
-                },
-                "summary": {
-                    "status": status,
-                    "total_suggestions": len(action_items),
-                    "critical_issues": critical_issues,
-                    "quality_score": quality_score
-                },
-                "action_items": action_items,
-                "metadata": self._summarize_metadata(state),
-                "content": self._summarize_content(state),
-                "quality_review": self._summarize_quality(state),
-                "fact_check": self._summarize_factcheck(state)
-            }
-            
-            self.logger.info(f"✓ Synthesized {len(action_items)} action items")
-            return state
-            
-        except Exception as e:
-            self.logger.error(f"Error in synthesizer: {str(e)}")
-            state["errors"].append(str(e))
-            # Return minimal structure even on error
-            state["final_summary"] = {
-                "repository": {"name": "Unknown", "url": "", "current_score": 0},
-                "summary": {"status": "Error", "total_suggestions": 0, "critical_issues": 0},
-                "action_items": []
-            }
-            return state
-    
-    def _ensure_final_summary(self, state: Dict) -> Dict:
-        """Ensure final_summary exists with fallback logic.
-        
-        Args:
-            state: Workflow state
-        
-        Returns:
-            State with guaranteed final_summary
-        """
-        repo_data = state.get("repo_data", {})
-        code_structure = state.get("code_structure", {})
-        quality_score = code_structure.get("quality_score", 0)
-        
-        if quality_score >= 80:
-            status = "Excellent"
-        elif quality_score >= 60:
-            status = "Good"
-        elif quality_score >= 40:
-            status = "Needs Improvement"
-        else:
-            status = "Poor"
-        
-        action_items = self._extract_action_items(state)
-        missing_sections = code_structure.get("missing_sections", [])
-        critical_issues = len([s for s in missing_sections if s.lower() in ['installation', 'usage', 'license']])
-        
-        state["final_summary"] = {
-            "repository": {
-                "name": repo_data.get("name", "Unknown"),
-                "url": repo_data.get("url", ""),
-                "current_score": quality_score,
-                "language": repo_data.get("language", "Unknown"),
-                "stars": repo_data.get("stars", 0)
-            },
-            "summary": {
-                "status": status,
-                "total_suggestions": len(action_items),
-                "critical_issues": critical_issues
-            },
-            "action_items": action_items
-        }
-        
-        return state
-    
-    def _extract_action_items(self, state: Dict) -> list:
-        """Extract priority action items from all analyses.
-        
-        Args:
-            state: Workflow state
-        
-        Returns:
-            List of action items with priority
-        """
-        action_items = []
-        code_structure = state.get("code_structure", {})
-        missing_sections = code_structure.get("missing_sections", [])
-        
-        # High priority: Missing critical sections
-        for section in ['Installation', 'Usage', 'License']:
-            if section in missing_sections:
-                action_items.append({
-                    "priority": "High",
-                    "category": "Documentation",
-                    "action": f"Add {section} section to README",
-                    "impact": "Critical for usability"
-                })
-        
-        # High priority: Code examples
-        if code_structure.get("code_block_count", 0) == 0:
-            action_items.append({
-                "priority": "High",
-                "category": "Documentation",
-                "action": "Add code examples demonstrating usage",
-                "impact": "Essential for understanding"
-            })
-        
-        # Medium priority: Low word count
-        if code_structure.get("word_count", 0) < 300:
-            action_items.append({
-                "priority": "Medium",
-                "category": "Content",
-                "action": "Expand README with more details",
-                "impact": "Improves clarity and completeness"
-            })
-        
-        # Medium priority: Images
-        if code_structure.get("image_count", 0) == 0:
-            action_items.append({
-                "priority": "Medium",
-                "category": "Visual",
-                "action": "Add screenshots or diagrams",
-                "impact": "Enhances visual appeal"
-            })
-        
-        # Low priority: Badges
-        if code_structure.get("badge_count", 0) == 0:
-            action_items.append({
-                "priority": "Low",
-                "category": "Marketing",
-                "action": "Add badges (build status, version, etc.)",
-                "impact": "Improves professional appearance"
-            })
-        
-        return action_items[:10]  # Top 10 priority items
-    
-    def _summarize_metadata(self, state: Dict) -> Dict:
-        """Summarize metadata recommendations."""
-        recs = state.get("metadata_recommendations", [])
-        return {
-            "suggestions": [r.get("recommendations", "") for r in recs if isinstance(r, dict)],
-            "similar_repos": recs[0].get("similar_repos", []) if recs and isinstance(recs[0], dict) else []
-        }
-    
-    def _summarize_content(self, state: Dict) -> Dict:
-        """Summarize content improvements."""
-        improvements = state.get("content_improvements", [])
-        code_structure = state.get("code_structure", {})
-        
-        return {
-            "missing_sections": code_structure.get("missing_sections", []),
-            "improvements": [i.get("improvements", "") for i in improvements if isinstance(i, dict)],
-            "quality_score": code_structure.get("quality_score", 0)
-        }
-    
-    def _summarize_quality(self, state: Dict) -> Dict:
-        """Summarize quality review."""
-        reviews = state.get("quality_review", [])
-        file_structure = state.get("repo_data", {}).get("file_structure", {})
-        
-        return {
-            "checklist": {
-                "has_readme": bool(state.get("repo_data", {}).get("readme_content")),
-                "has_tests": file_structure.get("has_tests", False),
-                "has_ci": file_structure.get("has_ci", False),
-                "has_license": file_structure.get("has_license", False),
-                "has_contributing": file_structure.get("has_contributing", False)
-            },
-            "feedback": [r.get("review", "") for r in reviews if isinstance(r, dict)]
-        }
-    
-    def _summarize_factcheck(self, state: Dict) -> Dict:
-        """Summarize fact check results."""
-        fact_checks = state.get("fact_check_results", [])
-        return {
-            "verified": sum(fc.get("claims_verified", 0) for fc in fact_checks if isinstance(fc, dict)),
-            "results": [fc.get("fact_check", "") for fc in fact_checks if isinstance(fc, dict)]
-        }
+            logger.info("Analysis complete")
+            return cast(Dict[str, Any], final_state["report"])
+        finally:
+            if cloned:
+                cloned.cleanup()
+
+
+def _as_dict(result: CollectorResult) -> Dict[str, Any]:
+    return {"status": result.status.value, "data": result.data, "detail": result.detail}

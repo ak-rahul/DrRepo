@@ -1,60 +1,40 @@
-"""Utilities for DrRepo."""
+"""Utilities for DrRepo. Deliberately lightweight - no eager heavy imports."""
 
-from src.utils.config import config, Config
-from src.utils.logger import logger, setup_logger
-from src.utils.retry import (
-    retry_with_backoff,
-    retry_on_rate_limit,
-    retry_on_network_error
-)
-from src.utils.health_check import HealthChecker
+from src.utils.circuit_breaker import CircuitBreaker, CircuitState, circuit_breaker
 from src.utils.exceptions import (
-    DrRepoException,
+    AgentExecutionError,
+    AnalysisError,
     APIConnectionError,
     ConfigurationError,
-    RepositoryNotFoundError,
+    DrRepoException,
     RateLimitError,
-    AnalysisError,
-    ValidationError,
+    RepositoryNotFoundError,
     ToolExecutionError,
-    AgentExecutionError
+    ValidationError,
 )
-from src.utils.circuit_breaker import (
-    CircuitBreaker,
-    CircuitState,
-    circuit_breaker
-)
+from src.utils.logger import logger, setup_logger
+from src.utils.retry import retry_on_network_error, retry_on_rate_limit, retry_with_backoff
 
 __all__ = [
-    # Config
-    'config',
-    'Config',
-    
     # Logging
-    'logger',
-    'setup_logger',
-    
+    "logger",
+    "setup_logger",
     # Retry
-    'retry_with_backoff',
-    'retry_on_rate_limit',
-    'retry_on_network_error',
-    
-    # Health Check
-    'HealthChecker',
-    
+    "retry_with_backoff",
+    "retry_on_rate_limit",
+    "retry_on_network_error",
     # Exceptions
-    'DrRepoException',
-    'APIConnectionError',
-    'ConfigurationError',
-    'RepositoryNotFoundError',
-    'RateLimitError',
-    'AnalysisError',
-    'ValidationError',
-    'ToolExecutionError',
-    'AgentExecutionError',
-    
+    "DrRepoException",
+    "APIConnectionError",
+    "ConfigurationError",
+    "RepositoryNotFoundError",
+    "RateLimitError",
+    "AnalysisError",
+    "ValidationError",
+    "ToolExecutionError",
+    "AgentExecutionError",
     # Circuit Breaker
-    'CircuitBreaker',
-    'CircuitState',
-    'circuit_breaker',
+    "CircuitBreaker",
+    "CircuitState",
+    "circuit_breaker",
 ]

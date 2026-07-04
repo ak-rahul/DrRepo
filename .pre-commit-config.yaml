@@ -25,9 +25,16 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
+  # Fast Python linter (also used at runtime by the static_analysis collector)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff
+        args: [--fix]
+
   # Python code formatting
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: "26.5.1"
     hooks:
       - id: black
         language_version: python3.11
@@ -35,34 +42,31 @@ repos:
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: v5.11.3
     hooks:
       - id: isort
         args: ["--profile", "black", "--line-length", "100"]
 
-  # Linting
+  # Linting (settings in .flake8 -- the single source of truth also used by
+  # `make lint` and CI, so all three can never drift apart again)
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+    rev: "7.3.0"
     hooks:
       - id: flake8
-        args: ['--max-line-length=100', '--ignore=E203,W503,E501']
         additional_dependencies:
           - flake8-docstrings
           - flake8-bugbear
 
   # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --no-strict-optional]
-        additional_dependencies:
-          - types-requests
-          - types-PyYAML
 
   # Security checks
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
+    rev: "1.9.4"
     hooks:
       - id: bandit
         args: ["-c", "pyproject.toml"]

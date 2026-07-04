@@ -1,10 +1,17 @@
-"""Health check utilities for monitoring system components."""
+"""Health check utilities for monitoring system components.
+
+All checks take an explicit `Config` argument (dependency injection) instead
+of importing a global singleton, so they're trivially testable with a fake
+config and never touch real environment variables in tests.
+"""
 
 import time
-from typing import Dict, Tuple
 from datetime import datetime, timezone
+from typing import Dict, Tuple
 
-from src.utils.config import config
+import httpx
+
+from src.config import Config
 from src.utils.logger import logger
 
 
@@ -12,236 +19,176 @@ class HealthChecker:
     """Centralized health checking for all system components."""
 
     @staticmethod
-    def check_groq() -> Tuple[bool, Dict]:
+    def check_groq(config: Config) -> Tuple[bool, Dict]:
         """Check Groq API health.
-        
+
         Returns:
             Tuple of (is_healthy: bool, details: dict)
         """
-        if config.model_provider != 'groq':
+        if config.model_provider != "groq":
             return True, {"status": "not_used", "message": "Using different provider"}
-        
+
         try:
             start_time = time.time()
-            
+
             from langchain_groq import ChatGroq
+            from pydantic import SecretStr
+
             llm = ChatGroq(
-                model=config.model_name,
-                api_key=config.groq_api_key,
-                timeout=5
+                model=config.model_name, api_key=SecretStr(config.groq_api_key), timeout=5
             )
-            
-            # Quick ping test
             llm.invoke("ping")
-            
+
             latency_ms = int((time.time() - start_time) * 1000)
-            
+
             logger.info("Groq API health check: OK")
-            return True, {
-                "status": "up",
-                "latency_ms": latency_ms,
-                "model": config.model_name
-            }
-            
+            return True, {"status": "up", "latency_ms": latency_ms, "model": config.model_name}
+
         except Exception as e:
             logger.error(f"Groq API health check failed: {str(e)}")
             return False, {
                 "status": "down",
-                "error": str(e)[:100],  # Truncate long errors
-                "error_type": type(e).__name__
+                "error": str(e)[:100],
+                "error_type": type(e).__name__,
             }
 
     @staticmethod
-    def check_openai() -> Tuple[bool, Dict]:
+    def check_openai(config: Config) -> Tuple[bool, Dict]:
         """Check OpenAI API health.
-        
+
         Returns:
             Tuple of (is_healthy: bool, details: dict)
         """
-        if config.model_provider != 'openai':
+        if config.model_provider != "openai":
             return True, {"status": "not_used", "message": "Using different provider"}
-        
+
         try:
             start_time = time.time()
-            
+
             from langchain_openai import ChatOpenAI
+            from pydantic import SecretStr
+
             llm = ChatOpenAI(
-                model=config.model_name,
-                api_key=config.openai_api_key,
-                timeout=5
+                model=config.model_name, api_key=SecretStr(config.openai_api_key), timeout=5
             )
-            
-            # Quick ping test
             llm.invoke("ping")
-            
+
             latency_ms = int((time.time() - start_time) * 1000)
-            
+
             logger.info("OpenAI API health check: OK")
-            return True, {
-                "status": "up",
-                "latency_ms": latency_ms,
-                "model": config.model_name
-            }
-            
+            return True, {"status": "up", "latency_ms": latency_ms, "model": config.model_name}
+
         except Exception as e:
             logger.error(f"OpenAI API health check failed: {str(e)}")
             return False, {
                 "status": "down",
                 "error": str(e)[:100],
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
             }
 
     @staticmethod
-    def check_github() -> Tuple[bool, Dict]:
+    def check_github(config: Config) -> Tuple[bool, Dict]:
         """Check GitHub API health.
-        
+
         Returns:
             Tuple of (is_healthy: bool, details: dict)
         """
         try:
             start_time = time.time()
-            
-            from github import Github, Auth
-            
-            # Use new Auth.Token() method instead of deprecated login_or_token
+
+            from github import Auth, Github
+
             auth = Auth.Token(config.github_token)
             github = Github(auth=auth, timeout=5)
-            
-            # Get rate limit
+
             rate_limit = github.get_rate_limit()
-            
-            # Access core rate limit
-            core_remaining = rate_limit.core.remaining
-            core_limit = rate_limit.core.limit
-            
+
+            # PyGithub >=2.4 removed the `.core` shortcut from RateLimitOverview;
+            # the equivalent is `.resources.core` (or the `.rate` alias).
+            core = rate_limit.resources.core
+            core_remaining = core.remaining
+            core_limit = core.limit
+
             latency_ms = int((time.time() - start_time) * 1000)
-            
-            # Warn if rate limit is low
+
             is_healthy = core_remaining > 10
-            
+
             logger.info(f"GitHub API health check: OK (remaining: {core_remaining})")
             return is_healthy, {
                 "status": "up" if is_healthy else "degraded",
                 "latency_ms": latency_ms,
                 "rate_limit_remaining": core_remaining,
                 "rate_limit_total": core_limit,
-                "warning": "Low rate limit" if core_remaining < 100 else None
+                "warning": "Low rate limit" if core_remaining < 100 else None,
             }
-            
+
         except Exception as e:
             logger.error(f"GitHub API health check failed: {str(e)}")
             return False, {
                 "status": "down",
                 "error": str(e)[:100],
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
             }
 
     @staticmethod
-    def check_tavily() -> Tuple[bool, Dict]:
-        """Check Tavily API health.
-        
+    def check_osv_connectivity(config: Config) -> Tuple[bool, Dict]:
+        """Check network connectivity used by dependency-audit collectors (OSV.dev).
+
+        v2 no longer depends on Tavily; this checks that outbound HTTPS calls
+        (the same path OSV lookups use) succeed.
+
         Returns:
             Tuple of (is_healthy: bool, details: dict)
         """
         try:
             start_time = time.time()
-            
-            from tavily import TavilyClient
-            client = TavilyClient(api_key=config.tavily_api_key)
-            
-            # Quick search test
-            client.search(query="test", max_results=1, search_depth="basic")
-            
+
+            resp = httpx.get("https://api.osv.dev/v1/query", timeout=5)
+            # Any HTTP response (even 4xx for a malformed GET) proves connectivity.
             latency_ms = int((time.time() - start_time) * 1000)
-            
-            logger.info("Tavily API health check: OK")
-            return True, {
-                "status": "up",
-                "latency_ms": latency_ms
-            }
-            
+            _ = resp.status_code
+
+            logger.info("OSV.dev connectivity check: OK")
+            return True, {"status": "up", "latency_ms": latency_ms}
+
         except Exception as e:
-            logger.error(f"Tavily API health check failed: {str(e)}")
+            logger.error(f"OSV.dev connectivity check failed: {str(e)}")
             return False, {
                 "status": "down",
                 "error": str(e)[:100],
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
             }
 
     @staticmethod
-    def check_rag() -> Tuple[bool, Dict]:
-        """Check RAG retriever (FAISS + HuggingFace) health.
-        
-        Returns:
-            Tuple of (is_healthy: bool, details: dict)
-        """
-        try:
-            start_time = time.time()
-            
-            from src.tools.rag_retriever import RAGRetriever
-            retriever = RAGRetriever()
-            
-            # Quick test: index and search
-            test_docs = ["This is a test document for health checking."]
-            retriever.index_documents(test_docs)
-            results = retriever.search("test", k=1)
-            
-            latency_ms = int((time.time() - start_time) * 1000)
-            
-            logger.info("RAG retriever health check: OK")
-            return True, {
-                "status": "up",
-                "latency_ms": latency_ms,
-                "embeddings_model": "sentence-transformers/all-MiniLM-L6-v2"
-            }
-            
-        except Exception as e:
-            logger.error(f"RAG retriever health check failed: {str(e)}")
-            return False, {
-                "status": "down",
-                "error": str(e)[:100],
-                "error_type": type(e).__name__
-            }
-
-    @staticmethod
-    def check_all() -> Dict:
+    def check_all(config: Config) -> Dict:
         """Run all health checks and return comprehensive status.
-        
+
         Returns:
             Dictionary with overall status and individual component details
         """
         components = {}
         all_healthy = True
-        
-        # Check LLM provider (Groq or OpenAI)
-        if config.model_provider == 'groq':
-            is_healthy, details = HealthChecker.check_groq()
+
+        if config.model_provider == "groq":
+            is_healthy, details = HealthChecker.check_groq(config)
             components["llm_groq"] = details
-            all_healthy = all_healthy and is_healthy
         else:
-            is_healthy, details = HealthChecker.check_openai()
+            is_healthy, details = HealthChecker.check_openai(config)
             components["llm_openai"] = details
-            all_healthy = all_healthy and is_healthy
-        
-        # Check GitHub API
-        is_healthy, details = HealthChecker.check_github()
+        all_healthy = all_healthy and is_healthy
+
+        is_healthy, details = HealthChecker.check_github(config)
         components["github_api"] = details
         all_healthy = all_healthy and is_healthy
-        
-        # Check Tavily API
-        is_healthy, details = HealthChecker.check_tavily()
-        components["tavily_api"] = details
+
+        is_healthy, details = HealthChecker.check_osv_connectivity(config)
+        components["osv_connectivity"] = details
         all_healthy = all_healthy and is_healthy
-        
-        # Check RAG retriever
-        is_healthy, details = HealthChecker.check_rag()
-        components["rag_retriever"] = details
-        all_healthy = all_healthy and is_healthy
-        
+
         return {
             "status": "healthy" if all_healthy else "degraded",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "1.0.0",
+            "version": "2.0.0",
             "provider": config.model_provider,
-            "components": components
+            "components": components,
         }

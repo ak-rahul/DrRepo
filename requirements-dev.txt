@@ -1,24 +1,19 @@
-﻿# Testing
-pytest>=8.3.2
-pytest-cov>=5.0.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.12.0
-pytest-timeout>=2.2.0  # Add this for testing retry timing
+# Testing
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-asyncio==1.4.0
+pytest-mock==3.15.1
+pytest-timeout==2.4.0
 
 # Code Quality
-black>=24.8.0
-flake8>=7.1.0
-isort>=5.13.2
-mypy>=1.11.1
-pylint>=3.0.0
+black==26.5.1
+flake8==7.3.0
+isort==8.0.1
+mypy==2.1.0
+
+# Dependency auditing (developer-run; the app's own dependency_audit collector
+# talks to OSV.dev directly and does not shell out to this tool)
+pip-audit==2.10.1
 
 # Pre-commit
-pre-commit>=3.8.0
-
-# Documentation
-mkdocs>=1.5.0
-mkdocs-material>=9.5.0
-
-# Development utilities
-ipython>=8.20.0
-jupyter>=1.0.0
+pre-commit==4.6.0
