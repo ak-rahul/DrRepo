@@ -85,11 +85,11 @@ with st.sidebar:
     with st.spinner("Checking..."):
         health_status = _cached_health()
 
-    (
+    if health_status["status"] == "healthy":
         st.success("✅ All Systems OK")
-        if health_status["status"] == "healthy"
-        else st.warning("⚠️ Degraded")
-    )
+    else:
+        st.warning("⚠️ Degraded")
+
     for name, details in health_status.get("components", {}).items():
         icon = "✅" if details.get("status") in ("up", "not_used") else "❌"
         st.text(f"{icon} {name}: {details.get('status')}")
