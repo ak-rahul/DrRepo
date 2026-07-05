@@ -115,7 +115,9 @@ with st.form("analysis_form"):
 def _run_analysis_in_background(repo_url: str, description: str):
     """Runs on a background thread; writes progress/result into session_state."""
     try:
-        st.session_state["analysis_status"] = "Cloning and analyzing... this can take 1-3 minutes"
+        st.session_state["analysis_status_text"] = (
+            "Cloning and analyzing... this can take 1-3 minutes"
+        )
         workflow = Workflow(config)
         result = workflow.execute(repo_url, description)
         st.session_state["analysis_result"] = result

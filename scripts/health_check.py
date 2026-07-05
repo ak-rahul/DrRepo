@@ -25,13 +25,17 @@ def main():
 
     for name, details in health_status.get("components", {}).items():
         status = details.get("status", "unknown")
-        icon = "OK  " if status in ("up", "not_used") else "WARN" if status == "degraded" else "FAIL"
+        icon = (
+            "OK  " if status in ("up", "not_used") else "WARN" if status == "degraded" else "FAIL"
+        )
 
         print(f"{icon} {name}: {status.upper()}")
         if "latency_ms" in details:
             print(f"     Latency: {details['latency_ms']}ms")
         if "rate_limit_remaining" in details:
-            print(f"     Rate Limit: {details['rate_limit_remaining']}/{details.get('rate_limit_total', '?')}")
+            print(
+                f"     Rate Limit: {details['rate_limit_remaining']}/{details.get('rate_limit_total', '?')}"
+            )
         if details.get("error"):
             print(f"     Error: {details['error']}")
         print()

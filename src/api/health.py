@@ -144,4 +144,4 @@ async def liveness_check():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("src.api.health:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("src.api.health:app", host="0.0.0.0", port=8000, log_level="info")
