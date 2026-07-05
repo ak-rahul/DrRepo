@@ -12,6 +12,8 @@ from __future__ import annotations
 from operator import add
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
+from src.models import InvestigationPlan
+
 
 def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
     """Shallow-merge reducer for concurrent partial state updates."""
@@ -41,6 +43,12 @@ class State(TypedDict):
     # e.g. "github_metadata", "readme", "static_analysis", "security",
     # "dependency_audit"). Value shape: CollectorResult-as-dict.
     collector_results: Annotated[Dict[str, Any], merge_dicts]
+
+    # Populated by the planner node once, after all collectors finish. Each
+    # category node reads this to decide shallow vs. deep. No reducer needed
+    # -- only the planner node ever writes it, before the parallel category
+    # nodes that read it run.
+    investigation_plan: InvestigationPlan
 
     # Populated by parallel analyst agent nodes, one key per Category value.
     # Value shape: {"summary": str, "score": float, "issues": [Issue-as-dict]}

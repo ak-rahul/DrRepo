@@ -16,8 +16,9 @@ auditing, README quality, and maintainability signals — not just a README lint
 ## What is DrRepo?
 
 Give DrRepo a GitHub URL. It clones the repository into a temporary, size- and time-limited
-sandbox and runs **five parallel collectors** and **five LLM analyst agents** over it, then
-synthesizes everything into one scored report:
+sandbox, runs **five parallel recon collectors** over it, then a **Lead Investigator agent**
+decides, per repository, which of the five categories deserve a deep, tool-calling investigation
+versus a quick pass — and synthesizes everything into one scored report:
 
 - 🔍 **Code Quality** — [ruff](https://astral.sh/ruff) + [semgrep](https://semgrep.dev) static analysis
 - 🔒 **Security** — [bandit](https://bandit.readthedocs.io) + secret/credential scanning
@@ -26,25 +27,62 @@ synthesizes everything into one scored report:
 - 🏗️ **Maintainability** — tests/CI/license presence, activity recency
 
 **Safety invariant:** the cloned repository's code is never executed, installed, or built.
-Every collector only *parses* source and manifest files — no `pip install`, `npm install`, or
-build scripts are ever run. This is what makes it safe to point at arbitrary public repositories.
+Every collector and every investigator tool only *reads* or *parses* source and manifest files —
+no `pip install`, `npm install`, or build scripts are ever run, and nothing is ever written back
+to the analyzed repository. This is what makes it safe to point at arbitrary public repositories,
+even with an LLM choosing which files to look at.
+
+---
+
+## Genuinely agentic, not just LLM-narrated
+
+Most "AI code review" tools hand an LLM a fixed bundle of facts and ask it to write a summary.
+DrRepo's deep path is different: the LLM decides what to look at.
+
+- **Lead Investigator** (`src/agents/planner.py`) looks at the recon summary and picks, per
+  category, `shallow` or `deep` — with a one-sentence rationale. A repo with a clean dependency
+  scan and messy code gets code-quality investigated deeply and dependencies waved through;
+  a different repo gets the opposite treatment. This decision is made fresh per run, not hardcoded.
+- **Investigator agents** (`src/agents/investigator.py`) get a bounded tool-calling loop —
+  `read_file`, `search_code`, `run_scanner_on_path`, `query_osv`, `get_file_git_history` — and
+  decide for themselves which tool to call, with what arguments, and when they have enough
+  evidence to stop. This is a real think-act-observe loop, not a fixed sequence of calls.
+- **Every deep category ships its own trace.** The report's `investigation_trace` records the
+  actual tool calls and observations an investigator made, so a "How It Investigated This"
+  panel in the Streamlit UI (and a matching section in the CLI output) lets you audit *why* it
+  reached a verdict, not just read the verdict.
+- Set `ENABLE_DEEP_INVESTIGATION=false` to force every category through the fast, deterministic
+  shallow path instead — useful as a cost control or a way to reproduce fully deterministic
+  output.
 
 ---
 
 ## Architecture
 
 ```
-                    ┌─ github_metadata ─┬─ readme
-       clone repo ──┼─ static_analysis ─┤
-    (outside graph) ├─ security ────────┼─→ [5 parallel analyst agents] ─→ synthesizer ─→ Report
-                     └─ dependency_audit┘
+[5 parallel recon collectors] ──▶ Lead Investigator (plans depth per category)
+                                          │
+                    for each category ───┼───
+                    │                          │
+              depth = shallow             depth = deep
+              (one LLM call over          (bounded tool-calling loop:
+               recon data)                 read_file / search_code /
+                                            run_scanner_on_path /
+                                            get_file_git_history / query_osv,
+                                            until it decides it has enough)
+                    │                          │
+                    └────────────┬─────────────┘
+                                 ▼
+                            synthesizer ──▶ Report
 ```
 
 Collectors are deterministic, non-LLM functions — they never do their own text parsing beyond
 what's necessary to normalize tool output, so their behavior is fully unit-testable without
-mocking an LLM. Analyst agents consume collector output and produce a narrative + prioritized
-issues per category; a synthesizer merges the five categories into one weighted overall score.
-See [CLAUDE.md](CLAUDE.md) for the full module-by-module breakdown.
+mocking an LLM. The shallow path consumes collector output and produces a narrative + prioritized
+issues per category, same as before; the deep path additionally lets an investigator agent pull
+its own evidence via tools before answering. A synthesizer merges all five categories into one
+weighted overall score, carrying each category's `investigation_depth` and `investigation_trace`
+along with it. See [CLAUDE.md](CLAUDE.md) for the full module-by-module breakdown.
 
 ---
 
@@ -75,7 +113,8 @@ cp .env.example .env
 
 Then fill in `GROQ_API_KEY` and `GH_TOKEN` (see `.env.example` for every option, including
 per-collector timeouts and feature toggles for hosts where `ruff`/`semgrep`/`bandit` aren't
-installed).
+installed, and the agentic-investigation knobs `ENABLE_DEEP_INVESTIGATION`,
+`MAX_TOOL_CALLS_PER_INVESTIGATOR`, `INVESTIGATOR_TIMEOUT_SECONDS`).
 
 ### Run
 
@@ -93,7 +132,7 @@ python scripts/run_health_api.py                          # Health API on port 8
 |---|---|---|
 | Code Quality | ruff, semgrep | Unused imports, anti-patterns, complexity smells |
 | Security | bandit, secret scanner | Hardcoded credentials, unsafe subprocess/eval usage |
-| Dependencies | OSV.dev | Known CVEs in `requirements.txt`/`pyproject.toml`/`package.json` |
+| Dependencies | OSV.dev, deps.dev | Known CVEs, plus a strong-copyleft dependency (e.g. GPL) in a permissively-licensed project |
 | Documentation | Custom README analyzer | Missing sections, no code examples, no badges/images |
 | Maintainability | GitHub API | No tests/CI/license, inactive repository |
 
@@ -101,6 +140,22 @@ Each collector degrades gracefully: if a tool isn't installed on the host, or a 
 too large or an unsupported language, that collector reports `skipped` with a reason instead of
 failing the whole analysis — the final report's `collector_status` field is always transparent
 about what actually ran.
+
+**License compatibility checking** cross-checks each dependency's license (looked up via
+[deps.dev](https://deps.dev), one request per package since it has no batch endpoint) against
+the repository's own license from GitHub. It only raises a flag for the one case it can judge
+with real confidence — a strong-copyleft dependency (GPL/AGPL) in a permissively-licensed
+project — and says so explicitly in the finding rather than pretending to give legal advice.
+Set `ENABLE_LICENSE_AUDIT=false` to skip the extra lookups.
+
+---
+
+## Exporting Reports
+
+Every analysis produces three files under `reports/`: `.json` (the full report), `.md` (a
+human-readable summary), and `.sarif` (SARIF 2.1.0, for uploading to GitHub's code scanning /
+Security tab, or any other SARIF-consuming tool). The Streamlit UI offers all three as download
+buttons.
 
 ---
 

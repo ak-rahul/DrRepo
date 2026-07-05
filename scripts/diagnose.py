@@ -1,4 +1,4 @@
-"""Diagnostic script for DrRepo v2 troubleshooting."""
+"""Diagnostic script for DrRepo troubleshooting (recon collectors + agentic layer)."""
 
 import os
 import shutil
@@ -97,6 +97,9 @@ def check_imports():
         "src.utils.exceptions",
         "src.collectors.github_metadata",
         "src.collectors.readme",
+        "src.agents.planner",
+        "src.agents.investigator",
+        "src.tools.file_tools",
         "src.graph.workflow",
         "src.main",
     ]
@@ -125,8 +128,8 @@ def check_api_connectivity():
 
         auth = Auth.Token(config.github_token) if config.github_token else None
         gh = Github(auth=auth, timeout=5) if auth else Github(timeout=5)
-        user_or_limit = gh.get_rate_limit()
-        print(f"OK   GitHub API: Connected (rate limit resources available)")
+        gh.get_rate_limit()
+        print("OK   GitHub API: Connected (rate limit resources available)")
         github_ok = True
     except Exception as e:
         print(f"FAIL GitHub API: {str(e)[:60]}")
@@ -182,7 +185,7 @@ def check_file_permissions():
 
 
 def main():
-    print("\nDrRepo v2 Diagnostic Tool")
+    print("\nDrRepo Diagnostic Tool")
     print("=" * 60)
 
     results = {

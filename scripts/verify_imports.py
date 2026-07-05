@@ -1,4 +1,4 @@
-"""Verify all DrRepo v2 imports work correctly."""
+"""Verify all DrRepo imports work correctly (recon collectors + agentic layer)."""
 
 import os
 import sys
@@ -33,6 +33,13 @@ def verify_imports():
         ("src.agents.security_analyst", "SecurityAnalyst"),
         ("src.agents.dependency_analyst", "DependencyAnalyst"),
         ("src.agents.maintainability_analyst", "MaintainabilityAnalyst"),
+        ("src.agents.planner", "LeadInvestigator"),
+        ("src.agents.investigator", "investigate"),
+        # Tools (the agentic surface: LLM-callable, read-only, sandboxed)
+        ("src.tools.file_tools", "make_file_tools"),
+        ("src.tools.scan_tools", "make_scan_tools"),
+        ("src.tools.dependency_tools", "make_dependency_tools"),
+        ("src.tools.git_tools", "make_git_history_tools"),
         # Graph / report / main
         ("src.graph.state", "State"),
         ("src.graph.workflow", "Workflow"),

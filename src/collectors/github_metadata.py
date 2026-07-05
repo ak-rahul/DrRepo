@@ -108,6 +108,7 @@ def collect_github_metadata(repo_url: str, config: Config) -> CollectorResult:
             "language": repo.language or "Unknown",
             "topics": repo.get_topics(),
             "license": repo.license.name if repo.license else None,
+            "license_spdx_id": repo.license.spdx_id if repo.license else None,
             "created_at": repo.created_at.isoformat(),
             "updated_at": repo.updated_at.isoformat(),
             "pushed_at": repo.pushed_at.isoformat(),

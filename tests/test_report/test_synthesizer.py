@@ -4,6 +4,49 @@ from src.report.synthesizer import synthesize_report
 
 
 class TestSynthesizeReport:
+    def test_shallow_category_defaults_when_fields_absent(self):
+        """Existing single-call agents don't emit investigation_depth/trace --
+        must default cleanly rather than raise."""
+        category_findings = {
+            "security": {"summary": "s", "score": 100.0, "issues": []},
+        }
+
+        report = synthesize_report({"name": "test"}, category_findings, {})
+
+        cs = report.category_scores["security"]
+        assert cs.investigation_depth.value == "shallow"
+        assert cs.investigation_trace == []
+
+    def test_deep_category_carries_investigation_trace(self):
+        category_findings = {
+            "security": {
+                "summary": "investigated",
+                "score": 80.0,
+                "issues": [],
+                "investigation_depth": "deep",
+                "investigation_trace": [
+                    {
+                        "tool": "read_file",
+                        "tool_input": {"path": "app.py"},
+                        "observation": "import os\n...",
+                    }
+                ],
+            },
+        }
+
+        report = synthesize_report({"name": "test"}, category_findings, {})
+
+        cs = report.category_scores["security"]
+        assert cs.investigation_depth.value == "deep"
+        assert len(cs.investigation_trace) == 1
+        assert cs.investigation_trace[0].tool == "read_file"
+
+        as_dict = report.to_dict()
+        assert as_dict["category_scores"]["security"]["investigation_depth"] == "deep"
+        assert (
+            as_dict["category_scores"]["security"]["investigation_trace"][0]["tool"] == "read_file"
+        )
+
     def test_perfect_scores_yield_100_overall(self):
         category_findings = {
             "documentation": {"summary": "great docs", "score": 100.0, "issues": []},

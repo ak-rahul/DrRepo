@@ -1,16 +1,110 @@
-"""Dependency analyst: turns OSV.dev vulnerability hits into issues + a narrative."""
+"""Dependency analyst: turns OSV.dev vulnerability hits and deps.dev license data
+into issues + a narrative."""
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
 
 _SYSTEM_PROMPT = """You are a dependency security specialist. Write a concise, honest \
 narrative (2-4 sentences) about the dependency health of a repository given a list of \
-known vulnerabilities in its declared packages. Do not invent vulnerabilities that weren't \
-given to you."""
+known vulnerabilities in its declared packages and any license compatibility concerns. Do \
+not invent vulnerabilities or licenses that weren't given to you."""
+
+# SPDX identifiers, grouped by how they typically interact with a permissively
+# licensed project. This is a heuristic, not legal advice -- see `_license_issues`.
+_PERMISSIVE_LICENSES = {
+    "MIT",
+    "APACHE-2.0",
+    "BSD-2-CLAUSE",
+    "BSD-3-CLAUSE",
+    "ISC",
+    "PYTHON-2.0",
+    "UNLICENSE",
+    "0BSD",
+    "CC0-1.0",
+    "ZLIB",
+    "BSL-1.0",
+}
+_STRONG_COPYLEFT_LICENSES = {
+    "GPL-2.0",
+    "GPL-2.0-ONLY",
+    "GPL-2.0-OR-LATER",
+    "GPL-3.0",
+    "GPL-3.0-ONLY",
+    "GPL-3.0-OR-LATER",
+    "AGPL-3.0",
+    "AGPL-3.0-ONLY",
+    "AGPL-3.0-OR-LATER",
+}
+
+
+def _license_category(spdx_id: Optional[str]) -> str:
+    if not spdx_id:
+        return "unknown"
+    normalized = spdx_id.strip().upper()
+    if normalized in _STRONG_COPYLEFT_LICENSES:
+        return "strong_copyleft"
+    if normalized in _PERMISSIVE_LICENSES:
+        return "permissive"
+    return "unknown"
+
+
+def _license_issues(
+    licenses: List[Dict[str, Any]], repo_license_spdx: Optional[str]
+) -> List[Issue]:
+    """Flag dependency licenses that may conflict with the repository's own license.
+
+    Only a permissively-licensed repository has a well-understood compatibility
+    risk from a strong-copyleft dependency; anything else needs case-by-case
+    legal judgment this heuristic can't automate, so it stays silent there.
+    """
+    if _license_category(repo_license_spdx) != "permissive":
+        return []
+
+    issues = []
+    for lic in licenses:
+        if _license_category(lic.get("license")) != "strong_copyleft":
+            continue
+        issues.append(
+            Issue(
+                severity=Severity.MEDIUM,
+                category=Category.DEPENDENCIES,
+                title=f"{lic['package']}: {lic['license']} dependency in a {repo_license_spdx}-licensed project",
+                description=(
+                    f"{lic['package']}@{lic['version']} is licensed under {lic['license']}, a "
+                    f"strong copyleft license, while this repository is licensed under "
+                    f"{repo_license_spdx}. Depending on how this dependency is used, this may "
+                    "create license compliance obligations for downstream users."
+                ),
+                recommendation=(
+                    "Have this reviewed manually -- automated scanning can't determine whether "
+                    f"{lic['package']} is statically linked, dynamically linked, or invoked as a "
+                    "separate process, which changes the actual compliance risk."
+                ),
+                source="license-audit",
+            )
+        )
+
+    unknown_count = sum(1 for lic in licenses if lic.get("license") is None)
+    if unknown_count >= 3:
+        issues.append(
+            Issue(
+                severity=Severity.LOW,
+                category=Category.DEPENDENCIES,
+                title=f"{unknown_count} dependencies have an undeterminable license",
+                description=(
+                    "License metadata could not be retrieved from deps.dev for these packages, "
+                    f"so they weren't checked for compatibility with this project's "
+                    f"{repo_license_spdx} license."
+                ),
+                recommendation="Verify these dependencies' licenses manually if compliance matters for this project.",
+                source="license-audit",
+            )
+        )
+    return issues
 
 
 def _vulns_to_issues(vulnerabilities: list[dict]) -> list[Issue]:
@@ -49,9 +143,13 @@ class DependencyAnalyst(BaseAnalystAgent):
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         dep_data = collector_results.get("dependency_audit", {})
         vulnerabilities = dep_data.get("vulnerabilities", [])
+        licenses = dep_data.get("licenses", [])
         packages_checked = dep_data.get("packages_checked", 0)
+        repo_license_spdx = collector_results.get("github_metadata", {}).get("license_spdx_id")
 
-        issues = _vulns_to_issues(vulnerabilities)
+        vuln_issues = _vulns_to_issues(vulnerabilities)
+        license_issues = _license_issues(licenses, repo_license_spdx)
+        issues = vuln_issues + license_issues
         score = _score(issues, packages_checked)
 
         if packages_checked == 0:
@@ -60,18 +158,23 @@ class DependencyAnalyst(BaseAnalystAgent):
                 "score": score,
                 "issues": [],
             }
-        if not vulnerabilities:
+        if not issues:
             return {
-                "summary": f"Checked {packages_checked} dependencies against OSV.dev; no known vulnerabilities found.",
+                "summary": (
+                    f"Checked {packages_checked} dependencies against OSV.dev; no known "
+                    "vulnerabilities or license concerns found."
+                ),
                 "score": score,
                 "issues": [],
             }
 
         prompt = (
-            f"Checked {packages_checked} dependencies against OSV.dev.\n"
-            f"Found {len(vulnerabilities)} known vulnerabilities: "
-            f"{[i.title for i in issues[:10]]}\n\n"
-            "Summarize the dependency health of this repository."
+            f"Checked {packages_checked} dependencies against OSV.dev and cross-checked "
+            f"licenses against this repository's {repo_license_spdx or 'unspecified'} license.\n"
+            f"Found {len(vuln_issues)} known vulnerabilities: {[i.title for i in vuln_issues[:10]]}\n"
+            f"Found {len(license_issues)} license concerns: {[i.title for i in license_issues[:5]]}\n\n"
+            "Summarize the dependency health of this repository, covering both vulnerabilities "
+            "and license risk."
         )
         summary = self._call_llm(prompt)
 

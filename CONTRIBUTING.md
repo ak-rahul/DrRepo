@@ -182,32 +182,39 @@ mypy src/
 
 ### Naming Conventions
 
-- **Classes**: `PascalCase` (e.g., `RepoAnalyzerAgent`)
-- **Functions**: `snake_case` (e.g., `analyze_repository`)
+- **Classes**: `PascalCase` (e.g., `LeadInvestigator`, `DocsAnalyst`)
+- **Functions**: `snake_case` (e.g., `collect_github_metadata`)
 - **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRIES`)
-- **Private**: Prefix with `_` (e.g., `_internal_method`)
+- **Private**: Prefix with `_` (e.g., `_run_category`)
+
+One naming exception worth knowing before you touch `src/agents/`: pydantic `response_format`/
+structured-output classes passed to `create_agent`/`with_structured_output` must **not** start
+with an underscore (`InvestigationOutput`, not `_InvestigationOutput`) -- Groq's tool-calling
+mangles the name and the call fails. See the "Naming gotcha" note in [CLAUDE.md](CLAUDE.md).
 
 ### Docstrings
 
 Use Google-style docstrings:
 
+```python
+def resolve_safe_path(root: Path, requested: str) -> Path:
+    """Resolve a requested path against the clone root, rejecting escapes.
+
+    Args:
+        root: Absolute path to the sandboxed clone directory.
+        requested: Path as supplied by an LLM tool call, relative to root.
+
+    Returns:
+        The resolved, absolute path -- guaranteed to stay inside root.
+
+    Raises:
+        PathEscapesSandboxError: If the requested path would resolve outside root.
+    """
 ```
-def analyze_repository(repo_url: str, description: str = "") -> dict:
-"""Analyze a GitHub repository.
 
-Args:
-    repo_url: GitHub repository URL
-    description: Optional repository description
-
-Returns:
-    Analysis results dictionary
-
-Raises:
-    ValueError: If URL is invalid
-    GithubException: If API call fails
-"""
-pass
-```
+Per [CLAUDE.md](CLAUDE.md), default to **no comments** in code bodies -- only add one when the
+*why* is non-obvious (a hidden constraint, a workaround, a surprising invariant). Well-named
+functions and the docstring above already cover the *what*.
 
 ---
 
@@ -216,8 +223,12 @@ pass
 ### Writing Tests
 
 - Place tests in `tests/` directory
-- Match source structure: `src/agents/` → `tests/test_agents/`
-- Use descriptive test names: `test_repo_analyzer_handles_invalid_url`
+- Match source structure: `src/agents/` → `tests/test_agents/`, `src/tools/` → `tests/test_tools/`
+- Use descriptive test names: `test_investigator_falls_back_gracefully_on_recursion_limit`
+- If a test needs real credentials or network access (e.g. a live LLM call), mark it
+  `@pytest.mark.integration` and keep it out of the hermetic default run -- see
+  `tests/test_integration/test_investigator_live.py` for the pattern, including how to document
+  known model-variance flakiness rather than pretending a live LLM test is deterministic.
 
 ### Test Structure
 
@@ -248,7 +259,7 @@ pytest tests/ -v
 
 Specific file
 ```
-pytest tests/test_agents/test_repo_analyzer.py -v
+pytest tests/test_agents/test_investigator.py -v
 ```
 
 With coverage

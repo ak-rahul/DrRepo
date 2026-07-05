@@ -1,7 +1,8 @@
-"""Dependency vulnerability audit via the OSV.dev API.
+"""Dependency vulnerability + license audit via the OSV.dev and deps.dev APIs.
 
 Only reads manifest files already present in the local clone (requirements.txt,
-pyproject.toml, package.json) and queries OSV.dev's public batch endpoint --
+pyproject.toml, package.json), queries OSV.dev's public batch endpoint for known
+vulnerabilities, and queries deps.dev for each package's declared license --
 no package installation of any kind, matching the "never execute untrusted
 code" invariant.
 """
@@ -12,7 +13,8 @@ import json
 import re
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import httpx
 
@@ -22,6 +24,13 @@ from src.utils.logger import logger
 
 _OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
 _MAX_PACKAGES = 200  # keep batch requests bounded for very large monorepos
+
+_DEPS_DEV_URL = "https://api.deps.dev/v3/systems/{system}/packages/{name}/versions/{version}"
+_DEPS_DEV_SYSTEM = {"PyPI": "pypi", "npm": "npm"}
+# deps.dev has no batch endpoint, so license lookups are one HTTP request per
+# package -- cap how many we do per run so a monorepo with hundreds of
+# dependencies doesn't turn one collector into a multi-minute serial fetch.
+_MAX_LICENSE_LOOKUPS = 30
 
 _REQ_LINE_RE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*(==|>=|~=)\s*([A-Za-z0-9_.\-]+)")
 
@@ -121,6 +130,38 @@ def _query_osv(packages: List[Tuple[str, str, str]], timeout: int) -> List[Dict[
     return findings
 
 
+def _query_licenses(
+    packages: List[Tuple[str, str, str]], timeout: int
+) -> List[Dict[str, Optional[str]]]:
+    """Look up each package's declared license via deps.dev.
+
+    Unlike `_query_osv` (one batched call), this is one request per package --
+    deps.dev has no batch endpoint. A single package's lookup failing (network
+    error, unknown package/version, unsupported ecosystem) just yields a
+    `None` license for that package rather than aborting the whole audit.
+    """
+    results: List[Dict[str, Optional[str]]] = []
+    with httpx.Client(timeout=timeout) as client:
+        for ecosystem, name, version in packages[:_MAX_LICENSE_LOOKUPS]:
+            system = _DEPS_DEV_SYSTEM.get(ecosystem)
+            license_id: Optional[str] = None
+            if system:
+                url = _DEPS_DEV_URL.format(
+                    system=system, name=quote(name, safe=""), version=quote(version, safe="")
+                )
+                try:
+                    resp = client.get(url)
+                    if resp.status_code == 200:
+                        licenses = resp.json().get("licenses", [])
+                        license_id = licenses[0] if licenses else None
+                except (httpx.HTTPError, ValueError) as e:
+                    logger.warning(f"deps.dev license lookup failed for {name}@{version}: {e}")
+            results.append(
+                {"package": name, "ecosystem": ecosystem, "version": version, "license": license_id}
+            )
+    return results
+
+
 def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult:
     """Parse dependency manifests in the clone and check them against OSV.dev."""
     if not config.enable_dependency_audit:
@@ -141,7 +182,7 @@ def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult
         return CollectorResult(
             name="dependency_audit",
             status=CollectorStatus.OK,
-            data={"packages_checked": 0, "vulnerabilities": []},
+            data={"packages_checked": 0, "vulnerabilities": [], "licenses": []},
             detail="No supported manifest files found",
         )
 
@@ -164,8 +205,21 @@ def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult
             detail=f"OSV.dev lookup failed: {e}",
         )
 
+    licenses: List[Dict[str, Optional[str]]] = []
+    if config.enable_license_audit:
+        try:
+            licenses = _query_licenses(all_packages, config.collector_timeout_seconds)
+        except Exception as e:
+            # A license-lookup failure is a degraded result, not a failed audit --
+            # the vulnerability data above is still valid and worth returning.
+            logger.warning(f"deps.dev license audit failed: {e}")
+
     return CollectorResult(
         name="dependency_audit",
         status=CollectorStatus.OK,
-        data={"packages_checked": len(all_packages), "vulnerabilities": vulnerabilities},
+        data={
+            "packages_checked": len(all_packages),
+            "vulnerabilities": vulnerabilities,
+            "licenses": licenses,
+        },
     )

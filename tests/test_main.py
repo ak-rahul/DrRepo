@@ -41,9 +41,29 @@ class TestPrintSummary:
         captured = capsys.readouterr()
         assert "Unknown" in captured.out
 
+    def test_shows_investigation_trace_for_deep_categories(self, capsys):
+        result = _sample_result()
+        result["category_scores"]["security"]["investigation_depth"] = "deep"
+        result["category_scores"]["security"]["investigation_trace"] = [
+            {"tool": "read_file", "tool_input": {"path": "app.py"}, "observation": "..."}
+        ]
+
+        print_summary(result)
+        captured = capsys.readouterr()
+
+        assert "[investigated]" in captured.out
+        assert "How it investigated" in captured.out
+        assert "read_file" in captured.out
+
+    def test_no_investigation_section_for_shallow_only_result(self, capsys):
+        print_summary(_sample_result())
+        captured = capsys.readouterr()
+
+        assert "How it investigated" not in captured.out
+
 
 class TestSaveReport:
-    def test_saves_json_and_markdown(self, tmp_path, monkeypatch):
+    def test_saves_json_markdown_and_sarif(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
         json_path = save_report(_sample_result())
@@ -51,7 +71,12 @@ class TestSaveReport:
         assert json_path.exists()
         md_path = json_path.with_suffix(".md")
         assert md_path.exists()
+        sarif_path = json_path.with_suffix(".sarif")
+        assert sarif_path.exists()
 
         saved = json.loads(json_path.read_text(encoding="utf-8"))
         assert saved["repository"]["name"] == "test-repo"
         assert "hardcoded secret" in md_path.read_text(encoding="utf-8")
+
+        sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
+        assert sarif["version"] == "2.1.0"

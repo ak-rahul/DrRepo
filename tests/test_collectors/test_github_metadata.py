@@ -45,7 +45,10 @@ class TestCollectGithubMetadata:
         mock_repo.watchers_count = 75
         mock_repo.language = "Python"
         mock_repo.get_topics.return_value = ["python", "testing"]
-        mock_repo.license = None
+        mock_license = Mock()
+        mock_license.name = "MIT License"
+        mock_license.spdx_id = "MIT"
+        mock_repo.license = mock_license
         mock_repo.created_at.isoformat.return_value = "2024-01-01T00:00:00"
         mock_repo.updated_at.isoformat.return_value = "2024-01-02T00:00:00"
         mock_repo.pushed_at.isoformat.return_value = "2024-01-03T00:00:00"
@@ -67,6 +70,39 @@ class TestCollectGithubMetadata:
         assert result.status == CollectorStatus.OK
         assert result.data["name"] == "test-repo"
         assert result.data["stars"] == 100
+        assert result.data["license"] == "MIT License"
+        assert result.data["license_spdx_id"] == "MIT"
+
+    @patch("src.collectors.github_metadata.Github")
+    def test_no_license_gives_none_for_both_fields(self, mock_github_cls, fake_config):
+        mock_repo = Mock()
+        mock_repo.name = "test-repo"
+        mock_repo.full_name = "user/test-repo"
+        mock_repo.description = ""
+        mock_repo.html_url = "https://github.com/user/test-repo"
+        mock_repo.stargazers_count = 0
+        mock_repo.forks_count = 0
+        mock_repo.watchers_count = 0
+        mock_repo.language = "Python"
+        mock_repo.get_topics.return_value = []
+        mock_repo.license = None
+        mock_repo.created_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.updated_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.pushed_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.size = 10
+        mock_repo.default_branch = "main"
+        mock_repo.open_issues_count = 0
+        mock_repo.get_readme.side_effect = GithubException(404, "Not Found", {})
+        mock_repo.get_contents.return_value = []
+
+        mock_gh_instance = Mock()
+        mock_gh_instance.get_repo.return_value = mock_repo
+        mock_github_cls.return_value = mock_gh_instance
+
+        result = collect_github_metadata("https://github.com/user/test-repo", fake_config)
+
+        assert result.data["license"] is None
+        assert result.data["license_spdx_id"] is None
 
     @patch("src.collectors.github_metadata.Github")
     def test_repository_not_found(self, mock_github_cls, fake_config):

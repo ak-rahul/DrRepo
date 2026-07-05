@@ -1,4 +1,8 @@
-"""Basic usage example for DrRepo v2."""
+"""Basic usage example for DrRepo.
+
+Runs the full recon -> plan -> investigate -> synthesize pipeline against one repository. See
+`examples/agent_outputs_explained.md` for what `investigation_depth`/`investigation_trace` mean.
+"""
 
 from src.config import Config
 from src.graph.workflow import Workflow
@@ -23,7 +27,8 @@ def main():
     print(f"Repository: {result['repository']['name']}")
     print(f"Overall Score: {result['overall_score']:.1f}/100")
     for name, cs in result["category_scores"].items():
-        print(f"  {name}: {cs['score']:.1f}/100")
+        depth_tag = " [deep investigation]" if cs["investigation_depth"] == "deep" else ""
+        print(f"  {name}: {cs['score']:.1f}/100{depth_tag}")
 
     print("\nTop Issues:")
     for issue in result["issues"][:5]:

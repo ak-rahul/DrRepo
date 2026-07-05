@@ -39,6 +39,14 @@ class CollectorStatus(str, Enum):
     ERROR = "error"
 
 
+class InvestigationDepth(str, Enum):
+    """How a category was analyzed: v2's single-call summary, or v3's
+    tool-calling investigation loop."""
+
+    SHALLOW = "shallow"
+    DEEP = "deep"
+
+
 @dataclass
 class CollectorResult:
     """Uniform output shape for every collector.
@@ -70,11 +78,47 @@ class Issue:
 
 
 @dataclass
+class ToolCallTrace:
+    """One tool invocation an investigator agent made, for report transparency.
+
+    `observation` is the (possibly truncated) string the tool returned --
+    this is what lets a report reader verify an agent's claim came from a
+    real file/command/API response rather than being invented.
+    """
+
+    tool: str
+    tool_input: dict[str, Any]
+    observation: str
+
+
+@dataclass
 class CategoryScore:
     category: Category
     score: float  # 0-100
     summary: str
     issues: list[Issue] = field(default_factory=list)
+    investigation_depth: InvestigationDepth = InvestigationDepth.SHALLOW
+    investigation_trace: list[ToolCallTrace] = field(default_factory=list)
+
+
+@dataclass
+class CategoryPlan:
+    """The Lead Investigator's decision for one category."""
+
+    category: Category
+    depth: InvestigationDepth
+    rationale: str
+
+
+@dataclass
+class InvestigationPlan:
+    """The Lead Investigator's full per-repo plan, one `CategoryPlan` per category."""
+
+    plans: dict[str, CategoryPlan]
+
+    def depth_for(self, category: Category) -> InvestigationDepth:
+        plan = self.plans.get(category.value)
+        return plan.depth if plan else InvestigationDepth.SHALLOW
 
 
 @dataclass
@@ -99,6 +143,11 @@ class Report:
                     "score": round(cs.score, 1),
                     "summary": cs.summary,
                     "issues": [issue_to_dict(i) for i in cs.issues],
+                    "investigation_depth": cs.investigation_depth.value,
+                    "investigation_trace": [
+                        {"tool": t.tool, "tool_input": t.tool_input, "observation": t.observation}
+                        for t in cs.investigation_trace
+                    ],
                 }
                 for name, cs in self.category_scores.items()
             },

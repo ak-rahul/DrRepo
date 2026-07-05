@@ -44,6 +44,14 @@ class Config:
     enable_semgrep: bool = True
     enable_bandit: bool = True
     enable_dependency_audit: bool = True
+    enable_license_audit: bool = True
+
+    # Agentic investigation (v3): bounds on the tool-calling investigator loops
+    max_tool_calls_per_investigator: int = 8
+    investigator_timeout_seconds: int = 90
+    # Kill switch: force every category "shallow" (v2 behavior) -- a regression
+    # safety net and a cost control for anyone who wants the fast/cheap mode.
+    enable_deep_investigation: bool = True
 
     extra: dict = field(default_factory=dict)
 
@@ -79,6 +87,11 @@ class Config:
             enable_semgrep=os.getenv("ENABLE_SEMGREP", "true").lower() == "true",
             enable_bandit=os.getenv("ENABLE_BANDIT", "true").lower() == "true",
             enable_dependency_audit=os.getenv("ENABLE_DEPENDENCY_AUDIT", "true").lower() == "true",
+            enable_license_audit=os.getenv("ENABLE_LICENSE_AUDIT", "true").lower() == "true",
+            max_tool_calls_per_investigator=int(os.getenv("MAX_TOOL_CALLS_PER_INVESTIGATOR", "8")),
+            investigator_timeout_seconds=int(os.getenv("INVESTIGATOR_TIMEOUT_SECONDS", "90")),
+            enable_deep_investigation=os.getenv("ENABLE_DEEP_INVESTIGATION", "true").lower()
+            == "true",
         )
 
     def validate_for_llm(self) -> list[str]:

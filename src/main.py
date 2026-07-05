@@ -8,7 +8,7 @@ from pathlib import Path
 
 from src.config import Config
 from src.graph.workflow import Workflow
-from src.report.exporters import to_json, to_markdown
+from src.report.exporters import to_json, to_markdown, to_sarif
 from src.utils.logger import logger
 
 
@@ -26,7 +26,20 @@ def print_summary(report: dict) -> None:
 
     print("Category Scores:")
     for name, cs in report.get("category_scores", {}).items():
-        print(f"   {name.replace('_', ' ').title():<18} {cs['score']:.1f}/100")
+        depth_tag = " [investigated]" if cs.get("investigation_depth") == "deep" else ""
+        print(f"   {name.replace('_', ' ').title():<18} {cs['score']:.1f}/100{depth_tag}")
+
+    deep_categories = {
+        name: cs
+        for name, cs in report.get("category_scores", {}).items()
+        if cs.get("investigation_depth") == "deep" and cs.get("investigation_trace")
+    }
+    if deep_categories:
+        print("\nHow it investigated:")
+        for name, cs in deep_categories.items():
+            print(f"   {name.replace('_', ' ').title()}:")
+            for call in cs["investigation_trace"]:
+                print(f"      -> {call['tool']}({call['tool_input']})")
 
     print("\nTop Issues:\n")
     issues = report.get("issues", [])
@@ -42,7 +55,7 @@ def print_summary(report: dict) -> None:
 
 
 def save_report(result: dict) -> Path:
-    """Save an already-computed report result as both JSON and Markdown in reports/."""
+    """Save an already-computed report result as JSON, Markdown, and SARIF in reports/."""
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
 
@@ -53,8 +66,10 @@ def save_report(result: dict) -> Path:
     json_path.write_text(to_json(result), encoding="utf-8")
     md_path = json_path.with_suffix(".md")
     md_path.write_text(to_markdown(result), encoding="utf-8")
+    sarif_path = json_path.with_suffix(".sarif")
+    sarif_path.write_text(to_sarif(result), encoding="utf-8")
 
-    logger.info(f"Reports saved to {json_path} and {md_path}")
+    logger.info(f"Reports saved to {json_path}, {md_path}, and {sarif_path}")
     return json_path
 
 

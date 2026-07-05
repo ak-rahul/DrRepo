@@ -14,7 +14,7 @@ import streamlit as st
 
 from src.config import Config
 from src.graph.workflow import Workflow
-from src.report.exporters import to_json, to_markdown
+from src.report.exporters import to_json, to_markdown, to_sarif
 from src.utils.health_check import HealthChecker
 from src.utils.logger import logger
 
@@ -173,7 +173,28 @@ if result:
     # strict=False: if an analyst category is ever missing (e.g. a failed run),
     # display whatever categories are present rather than crashing the page.
     for col, (name, cs) in zip(cat_cols, category_scores.items(), strict=False):
-        col.metric(name.replace("_", " ").title(), f"{cs['score']:.0f}/100")
+        label = name.replace("_", " ").title()
+        if cs.get("investigation_depth") == "deep":
+            label = f"🕵️ {label}"
+        col.metric(label, f"{cs['score']:.0f}/100")
+
+    deep_categories = {
+        name: cs for name, cs in category_scores.items() if cs.get("investigation_depth") == "deep"
+    }
+    if deep_categories:
+        st.markdown("---")
+        st.markdown("### 🕵️ How It Investigated This")
+        st.caption(
+            "These categories were flagged by the Lead Investigator for a deeper, "
+            "tool-calling investigation rather than a quick pass over recon data."
+        )
+        for name, cs in deep_categories.items():
+            with st.expander(
+                f"{name.replace('_', ' ').title()} — {len(cs.get('investigation_trace', []))} tool calls"
+            ):
+                for call in cs.get("investigation_trace", []):
+                    st.markdown(f"**{call['tool']}**`({call['tool_input']})`")
+                    st.code(call["observation"], language="text")
 
     st.markdown("---")
     st.markdown("### 📝 Issues")
@@ -195,7 +216,7 @@ if result:
         st.success("✨ No issues found!")
 
     st.markdown("---")
-    col_json, col_md = st.columns(2)
+    col_json, col_md, col_sarif = st.columns(3)
     with col_json:
         st.download_button(
             "📥 Download JSON Report",
@@ -210,6 +231,14 @@ if result:
             to_markdown(result),
             f"drrepo_{repo.get('name', 'report')}.md",
             "text/markdown",
+            use_container_width=True,
+        )
+    with col_sarif:
+        st.download_button(
+            "📥 Download SARIF (GitHub code scanning)",
+            to_sarif(result),
+            f"drrepo_{repo.get('name', 'report')}.sarif",
+            "application/sarif+json",
             use_container_width=True,
         )
 

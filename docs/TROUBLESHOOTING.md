@@ -85,6 +85,11 @@ Test OSV.dev connectivity (used by the dependency audit collector)
 python -c "import httpx; print(httpx.get('https://api.osv.dev/v1/query', timeout=5).status_code)"
 ```
 
+Test deps.dev connectivity (used by license compatibility checking)
+```
+python -c "import httpx; print(httpx.get('https://api.deps.dev/v3/systems/pypi/packages/requests/versions/2.6.0', timeout=5).status_code)"
+```
+
 **D. Check Rate Limits**
 Check GitHub rate limit
 ```
@@ -118,13 +123,18 @@ Slow response times (>30 seconds)
 
 #### Solutions
 
-**A. Reduce Token Limits**
+**A. Reduce Token Limits, or Give Deep Investigations More Room**
 
 Edit `.env`:
 ```
-MAX_TOKENS=1000 # Reduced from 2000
-TIMEOUT=60 # Increased from 30
+MAX_TOKENS=1000                       # Reduced from the default 2000
+INVESTIGATOR_TIMEOUT_SECONDS=180      # Increased from the default 90, for slow models
+MAX_TOOL_CALLS_PER_INVESTIGATOR=4     # Reduced from the default 8, if deep investigations time out
 ```
+
+If it's specifically a deep (agentic) investigation timing out or looping, see
+[Deep Investigation Issues](#8-deep-investigation-agentic-issues) below rather than tuning
+tokens/timeouts blindly.
 
 **B. Check Groq API Status**
 
@@ -431,6 +441,56 @@ docker exec drrepo curl http://localhost:8501/_stcore/health
 
 ---
 
+### 8. Deep Investigation (Agentic) Issues
+
+#### Symptom
+```
+Investigation stopped after reaching its tool-call budget before concluding.
+Deep investigation failed: <error>
+```
+
+#### Root Causes
+- The Lead Investigator (`src/agents/planner.py`) sent a category "deep," and its investigator
+  (`src/agents/investigator.py`) hit its step budget (`GraphRecursionError`) before it finished
+  reasoning, or the underlying LLM call raised an exception mid-investigation.
+- Both cases are caught and degrade to a neutral fallback result (score 50, no issues, a
+  message saying so) rather than failing the whole report -- so this shows up as a suspiciously
+  neutral score for one category, not a crash.
+
+#### Solutions
+
+**A. Give it more tool calls**
+
+Edit `.env`:
+```
+MAX_TOOL_CALLS_PER_INVESTIGATOR=12   # Increased from the default 8
+```
+Each tool call costs roughly 2 steps of the internal recursion budget, so this is the first
+thing to raise if a category keeps hitting its budget.
+
+**B. Check `investigation_depth` and `investigation_trace` in the report**
+
+Every category score carries `investigation_depth` (`"shallow"` or `"deep"`) and, for deep
+categories, an `investigation_trace` listing the exact tool calls made. If the trace is short or
+empty despite a "deep" verdict, that's this fallback path, not a genuine clean bill of health.
+
+**C. Fall back to the deterministic shallow pipeline**
+
+Edit `.env`:
+```
+ENABLE_DEEP_INVESTIGATION=false
+```
+This forces every category through the fast, single-LLM-call shallow path (the planner isn't
+even invoked) -- useful to isolate whether an issue is in the agentic layer specifically, and as
+a cheaper/faster mode in general.
+
+#### Prevention
+- Keep `MAX_TOOL_CALLS_PER_INVESTIGATOR` proportional to repository size/complexity.
+- Watch `logs/app.log` for `Investigator for <category> hit its step limit` /
+  `Investigator for <category> failed` warnings -- both are logged before the fallback kicks in.
+
+---
+
 ## Health Check Commands
 
 ### System Health
@@ -469,6 +529,11 @@ c = Config.from_env(); ChatGroq(api_key=c.groq_api_key, model=c.model_name).invo
 OSV.dev (used by the dependency audit collector)
 ```
 python -c "import httpx; print(httpx.get('https://api.osv.dev/v1/query', timeout=5).status_code)"
+```
+
+deps.dev (used by license compatibility checking)
+```
+python -c "import httpx; print(httpx.get('https://api.deps.dev/v3/systems/pypi/packages/requests/versions/2.6.0', timeout=5).status_code)"
 ```
 
 ### Dependency Check
@@ -518,11 +583,13 @@ grep "2025-12-19" logs/app.log
 
 ### Log Locations
 
+`src/utils/logger.py`'s `setup_logger()` writes everything -- app, Streamlit, and health-check
+logging alike, since they all import the same `logger` -- to a single file:
+
+```
 logs/
-├── app.log # Main application log
-├── error.log # Error-only log
-├── streamlit.log # Streamlit-specific log
-└── health.log # Health check log
+└── app.log   # Every component logs here; there is no separate error/streamlit/health log
+```
 
 
 ### Common Log Patterns
@@ -591,14 +658,8 @@ Look for functions taking >5 seconds
 
 ### Memory Optimization
 
-Monitor memory during analysis
-```
-python scripts/memory_profiler.py <repo_url>
-```
-
-Optimize RAG chunk size
-
-Edit src/tools/rag_retriever.py
+Lower the clone size limit (see [Memory Issues](#4-memory-issues) above) or disable a
+collector/feature toggle in `.env` to reduce what gets pulled into memory per run.
 
 
 ### Cache Responses
@@ -644,9 +705,13 @@ A: `git pull origin main && pip install -r requirements.txt --upgrade`
 A: Yes, keys are stored in `.env` (not committed to git). Never share your `.env` file.
 
 **Q: Can I analyze private repositories?**
-A: Not currently -- v2 only supports public repositories (the clone collector rejects anything
-other than a plain `https://github.com/<owner>/<repo>` URL, and never embeds credentials in the
-clone URL). This is a deliberate scope boundary, not a bug.
+A: Not currently -- DrRepo only supports public repositories (the clone collector rejects
+anything other than a plain `https://github.com/<owner>/<repo>` URL, and never embeds
+credentials in the clone URL). This is a deliberate scope boundary, not a bug.
+
+**Q: Why does one category's score look suspiciously neutral (around 50) with a vague summary?**
+A: That's the deep-investigation fallback path, not a real verdict -- see
+[Deep Investigation Issues](#8-deep-investigation-agentic-issues).
 
 **Q: How much does it cost to run?**
 A: Groq is free (with limits), a GitHub token is free, and OSV.dev's API is free and

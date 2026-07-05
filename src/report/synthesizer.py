@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from src.models import Category, CategoryScore, Issue, Report, Severity
+from src.models import (
+    Category,
+    CategoryScore,
+    InvestigationDepth,
+    Issue,
+    Report,
+    Severity,
+    ToolCallTrace,
+)
 
 _CATEGORY_WEIGHTS = {
     Category.DOCUMENTATION: 0.15,
@@ -52,9 +60,18 @@ def synthesize_report(
 
         issues = [_issue_from_dict(i) for i in finding.get("issues", [])]
         score = float(finding.get("score", 0.0))
+        trace = [
+            ToolCallTrace(tool=t["tool"], tool_input=t["tool_input"], observation=t["observation"])
+            for t in finding.get("investigation_trace", [])
+        ]
 
         category_scores[category.value] = CategoryScore(
-            category=category, score=score, summary=finding.get("summary", ""), issues=issues
+            category=category,
+            score=score,
+            summary=finding.get("summary", ""),
+            issues=issues,
+            investigation_depth=InvestigationDepth(finding.get("investigation_depth", "shallow")),
+            investigation_trace=trace,
         )
         all_issues.extend(issues)
 
