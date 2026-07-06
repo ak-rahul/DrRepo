@@ -121,6 +121,48 @@ class TestCollectGithubMetadata:
         assert result.status == CollectorStatus.ERROR
 
     @patch("src.collectors.github_metadata.Github")
+    def test_empty_repository_is_not_misreported_as_not_found(self, mock_github_cls, fake_config):
+        """A real, existing-but-empty repo (no commits) makes `get_contents("")`
+        404 with 'This repository is empty.' -- that must not be conflated
+        with the repo itself not existing (which is checked separately, by
+        which point stars/forks/readme were already fetched successfully)."""
+        mock_repo = Mock()
+        mock_repo.name = "empty-repo"
+        mock_repo.full_name = "user/empty-repo"
+        mock_repo.description = ""
+        mock_repo.html_url = "https://github.com/user/empty-repo"
+        mock_repo.stargazers_count = 0
+        mock_repo.forks_count = 0
+        mock_repo.watchers_count = 0
+        mock_repo.language = "Unknown"
+        mock_repo.get_topics.return_value = []
+        mock_repo.license = None
+        mock_repo.created_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.updated_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.pushed_at.isoformat.return_value = "2024-01-01T00:00:00"
+        mock_repo.size = 0
+        mock_repo.default_branch = "main"
+        mock_repo.open_issues_count = 0
+        mock_repo.get_readme.side_effect = GithubException(404, "Not Found", {})
+        mock_repo.get_contents.side_effect = GithubException(404, "This repository is empty.", {})
+
+        mock_gh_instance = Mock()
+        mock_gh_instance.get_repo.return_value = mock_repo
+        mock_github_cls.return_value = mock_gh_instance
+
+        result = collect_github_metadata("https://github.com/user/empty-repo", fake_config)
+
+        assert result.status == CollectorStatus.OK
+        assert result.data["file_structure"] == {
+            "has_tests": False,
+            "has_ci": False,
+            "has_docs": False,
+            "has_license": False,
+            "has_contributing": False,
+            "has_changelog": False,
+        }
+
+    @patch("src.collectors.github_metadata.Github")
     def test_file_structure_detection(self, mock_github_cls, fake_config):
         mock_contents = []
         for filename in ["tests", ".github", "docs", "LICENSE", "CONTRIBUTING.md", "CHANGELOG.md"]:

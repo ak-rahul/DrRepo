@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker
 
 _SYSTEM_PROMPT = """You are a dependency security specialist. Write a concise, honest \
 narrative (2-4 sentences) about the dependency health of a repository given a list of \
@@ -137,11 +139,36 @@ def _score(issues: list[Issue], packages_checked: int) -> float:
 
 
 class DependencyAnalyst(BaseAnalystAgent):
-    def __init__(self, llm_client: LLMClient):
-        super().__init__("DependencyAnalyst", _SYSTEM_PROMPT, llm_client)
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
+        super().__init__(
+            "DependencyAnalyst",
+            _SYSTEM_PROMPT,
+            llm_client,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+        )
 
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         dep_data = collector_results.get("dependency_audit", {})
+
+        if "packages_checked" not in dep_data:
+            # The collector always sets this key on a real run (even a
+            # genuine zero-manifest repo gets `packages_checked: 0`
+            # explicitly) -- its absence means the audit itself failed
+            # (e.g. OSV.dev lookup error) or never ran, which must not be
+            # reported as a clean "no dependencies" pass.
+            return {
+                "summary": "Dependency audit could not be completed (the vulnerability lookup "
+                "failed or was skipped), so dependency health is unknown rather than clean.",
+                "score": 50.0,
+                "issues": [],
+            }
+
         vulnerabilities = dep_data.get("vulnerabilities", [])
         licenses = dep_data.get("licenses", [])
         packages_checked = dep_data.get("packages_checked", 0)

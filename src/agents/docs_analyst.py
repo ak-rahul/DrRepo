@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker
 
 _SYSTEM_PROMPT = """You are a technical writing expert. Given structured facts about a \
 repository's README (word count, missing sections, quality score) and a short excerpt, \
@@ -61,12 +63,35 @@ def _readme_issues(readme_data: Dict[str, Any]) -> list[Issue]:
 
 
 class DocsAnalyst(BaseAnalystAgent):
-    def __init__(self, llm_client: LLMClient):
-        super().__init__("DocsAnalyst", _SYSTEM_PROMPT, llm_client)
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
+        super().__init__(
+            "DocsAnalyst",
+            _SYSTEM_PROMPT,
+            llm_client,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+        )
 
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         readme_data = collector_results.get("readme", {})
         github_data = collector_results.get("github_metadata", {})
+
+        if "quality_score" not in readme_data:
+            # analyze_readme() always sets this key, even for genuinely empty
+            # content -- its absence means the README was never actually
+            # fetched (github_metadata failed upstream), which must not be
+            # reported as "README is empty, every section missing".
+            return {
+                "summary": "Documentation could not be assessed because the README could not "
+                "be fetched from GitHub.",
+                "score": 50.0,
+                "issues": [],
+            }
 
         issues = _readme_issues(readme_data)
         score = readme_data.get("quality_score", 0.0)

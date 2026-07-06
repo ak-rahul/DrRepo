@@ -15,6 +15,7 @@ fixed call over pre-packaged data.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List, Optional
 
 from langchain.agents import create_agent
@@ -22,9 +23,45 @@ from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 
 from src.models import Category
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.exceptions import APIConnectionError
+from src.utils.llm_budget import LLMBudgetTracker, estimate_tokens, extract_actual_tokens
 from src.utils.logger import logger
 
 _VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+
+# Raw collector data can include a full README dump and long finding lists;
+# stuffed directly into a prompt this can balloon to 100k+ tokens for a repo
+# with many static-analysis findings (confirmed live against Groq: a single
+# request asked for ~112k tokens against a 100k/day quota -- see CLAUDE.md).
+# Investigators have file/search tools to pull more detail themselves, so the
+# prompt only needs a bounded overview, not everything.
+_MAX_LIST_ITEMS_IN_PROMPT = 15
+_MAX_TEXT_FIELD_CHARS = 1500
+
+
+def _summarize_value(value: Any) -> Any:
+    if isinstance(value, str) and len(value) > _MAX_TEXT_FIELD_CHARS:
+        return value[:_MAX_TEXT_FIELD_CHARS] + f"... [truncated, {len(value)} chars total]"
+    if isinstance(value, list):
+        if len(value) > _MAX_LIST_ITEMS_IN_PROMPT:
+            kept = [_summarize_value(v) for v in value[:_MAX_LIST_ITEMS_IN_PROMPT]]
+            return kept + [f"... and {len(value) - _MAX_LIST_ITEMS_IN_PROMPT} more"]
+        return [_summarize_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _summarize_value(v) for k, v in value.items()}
+    return value
+
+
+def summarize_recon_data(recon_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Shrink recon_data before it goes into an investigator's prompt.
+
+    Bounds every long text field and every long list (recursively, through
+    nested collector dicts) so a single investigation prompt stays a bounded
+    size regardless of how much a repo's static analysis/README/dependency
+    data adds up to.
+    """
+    return {name: _summarize_value(data) for name, data in recon_data.items()}
 
 
 class IssueOutput(BaseModel):
@@ -50,6 +87,9 @@ def investigate(
     llm_client: Any,
     recon_data: Dict[str, Any],
     max_tool_calls: int,
+    timeout_seconds: Optional[float] = None,
+    llm_breaker: Optional[CircuitBreaker] = None,
+    llm_budget: Optional[LLMBudgetTracker] = None,
 ) -> Dict[str, Any]:
     """Run a bounded tool-calling investigation for one category.
 
@@ -65,7 +105,8 @@ def investigate(
     )
 
     prompt = (
-        f"Initial recon data already collected for this repository:\n{recon_data}\n\n"
+        f"Initial recon data already collected for this repository:\n"
+        f"{summarize_recon_data(recon_data)}\n\n"
         "Investigate this category using the tools available to you. Only call tools that "
         "are actually useful -- stop and give your final findings once you have enough evidence. "
         "Only report issues you found real evidence for through the tools; do not invent findings."
@@ -76,13 +117,53 @@ def investigate(
     # investigation isn't cut short, while still bounding runaway loops.
     recursion_limit = max_tool_calls * 2 + 4
 
-    try:
+    def _invoke() -> Any:
         # The ("user", prompt) shorthand is a real, documented LangChain
         # convenience accepted at runtime (verified live against Groq), but
         # narrower than what create_agent's strict overloads declare.
-        result = agent.invoke(
+        return agent.invoke(
             {"messages": [("user", prompt)]},  # type: ignore[call-overload]
             config={"recursion_limit": recursion_limit},
+        )
+
+    def _invoke_with_breaker() -> Any:
+        return llm_breaker.call(_invoke) if llm_breaker else _invoke()
+
+    try:
+        if timeout_seconds is None:
+            result = _invoke_with_breaker()
+        else:
+            # A plain daemon thread, not `concurrent.futures.ThreadPoolExecutor`:
+            # the executor's worker threads are non-daemon and it registers an
+            # `atexit` hook that joins every outstanding one, so a stuck call
+            # would hang the whole process at interpreter shutdown even after
+            # `shutdown(wait=False)` -- exactly what this timeout exists to
+            # avoid. A daemon thread is simply abandoned (and killed) at
+            # process exit instead, with no such hook to block on.
+            outcome: Dict[str, Any] = {}
+
+            def _run() -> None:
+                try:
+                    outcome["result"] = _invoke_with_breaker()
+                except (
+                    BaseException
+                ) as e:  # noqa: BLE001 -- re-raised below, on the caller's thread
+                    outcome["error"] = e
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+            thread.join(timeout=timeout_seconds)
+            if thread.is_alive():
+                raise TimeoutError(f"investigation exceeded its {timeout_seconds}s time budget")
+            if "error" in outcome:
+                raise outcome["error"]
+            result = outcome["result"]
+    except TimeoutError:
+        logger.warning(
+            f"Investigator for {category.value} exceeded its {timeout_seconds}s time budget"
+        )
+        return _fallback_result(
+            f"Investigation stopped after exceeding its {timeout_seconds}s time budget."
         )
     except GraphRecursionError:
         logger.warning(
@@ -91,9 +172,18 @@ def investigate(
         return _fallback_result(
             "Investigation stopped after reaching its tool-call budget before concluding."
         )
+    except APIConnectionError as e:
+        logger.warning(f"Investigator for {category.value} skipped, circuit breaker open: {e}")
+        return _fallback_result(
+            "Deep investigation skipped: LLM circuit breaker is open (likely an exhausted "
+            "quota from earlier in this run)."
+        )
     except Exception as e:
         logger.error(f"Investigator for {category.value} failed: {e}")
         return _fallback_result(f"Deep investigation failed: {e}")
+
+    if llm_budget is not None:
+        llm_budget.record(_estimate_run_tokens(prompt, result["messages"]))
 
     structured: InvestigationOutput = result["structured_response"]
     trace = _extract_trace(result["messages"])
@@ -140,6 +230,25 @@ def _fallback_result(summary: str) -> Dict[str, Any]:
         "investigation_depth": "deep",
         "investigation_trace": [],
     }
+
+
+def _estimate_run_tokens(prompt: str, messages: List[Any]) -> int:
+    """Total token usage for one investigation.
+
+    Each tool-calling turn is its own LLM request that resends the growing
+    conversation so far, so summing every message's real `total_tokens` (when
+    the provider reports it) correctly reflects cumulative usage against a
+    tokens-per-day-style quota -- it's not double-counting, each turn really
+    was billed for its own full context. Messages without usage metadata
+    (tool outputs, the initial prompt) fall back to the character estimate.
+    """
+    total = estimate_tokens(prompt)
+    for msg in messages:
+        tokens = extract_actual_tokens(msg)
+        if tokens is None:
+            tokens = estimate_tokens(str(getattr(msg, "content", "")))
+        total += tokens
+    return total
 
 
 def _extract_trace(messages: List[Any]) -> List[Dict[str, Any]]:

@@ -356,9 +356,8 @@ git push origin feature/your-feature-name
 
 1. Go to your fork on GitHub
 2. Click "New Pull Request"
-3. Fill in the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
-4. Link related issues
-5. Submit PR
+3. Describe what changed and why, and link any related issues
+4. Submit PR
 
 ### 6. Code Review
 
@@ -433,7 +432,7 @@ Contributors will be:
 
 ## 📜 License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE.md).
 
 ---
 

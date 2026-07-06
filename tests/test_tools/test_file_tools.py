@@ -32,6 +32,14 @@ class TestResolveSafePath:
         with pytest.raises(PathEscapesSandboxError):
             resolve_safe_path(tmp_path, "src/../../outside")
 
+    def test_embedded_null_byte_raises_sandbox_error_not_bare_value_error(self, tmp_path):
+        """Path.resolve() raises a bare ValueError for an embedded NUL byte --
+        that must come back as our own PathEscapesSandboxError (a ValueError
+        subclass, but a distinguishable/expected one), not propagate as an
+        unrelated uncaught exception from deep inside pathlib."""
+        with pytest.raises(PathEscapesSandboxError):
+            resolve_safe_path(tmp_path, "app.py\x00.txt")
+
 
 class TestReadFileTool:
     def test_reads_file_contents(self, tmp_path):
@@ -72,6 +80,26 @@ class TestReadFileTool:
 
         assert "truncated" in result
         assert len(result) < 100_000
+
+    def test_null_byte_in_path_returns_error_string_not_exception(self, tmp_path):
+        read_file, _, _ = make_file_tools(str(tmp_path))
+
+        result = read_file.invoke({"path": "app.py\x00.txt"})
+
+        assert result.startswith("ERROR")
+
+    def test_oversized_file_rejected_before_reading_into_memory(self, tmp_path):
+        """Unlike the post-read truncation above, a file past the byte cap
+        must be rejected before `read_text()` loads the whole thing into
+        memory -- confirmed by checking the file is never actually read."""
+        big_file = tmp_path / "huge.txt"
+        big_file.write_bytes(b"x" * 3_000_000)
+        read_file, _, _ = make_file_tools(str(tmp_path))
+
+        result = read_file.invoke({"path": "huge.txt"})
+
+        assert result.startswith("ERROR")
+        assert "too large" in result
 
 
 class TestListDirectoryTool:

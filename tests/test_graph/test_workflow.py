@@ -14,6 +14,9 @@ from src.models import (
     InvestigationDepth,
     InvestigationPlan,
 )
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.dependency_cache import DependencyLookupCache
+from src.utils.llm_budget import LLMBudgetTracker
 
 
 def _ok(data=None, detail=None):
@@ -25,6 +28,43 @@ class TestWorkflowGraph:
         with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
             workflow = Workflow(fake_config)
         assert workflow.graph is not None
+
+    def test_readme_node_skips_analysis_when_github_metadata_failed(self, fake_config):
+        """A failed github_metadata collector must not make _readme_node
+        analyze an empty string as if that were the repo's real README --
+        that would report "every section missing" purely from an upstream
+        API failure, not a genuinely empty README."""
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(fake_config)
+
+        state = {
+            "collector_results": {
+                "github_metadata": {"status": "error", "data": {}, "detail": "rate limited"}
+            }
+        }
+        result = workflow._readme_node(state)
+
+        readme_result = result["collector_results"]["readme"]
+        assert readme_result["status"] == "skipped"
+        assert readme_result["data"] == {}
+
+    def test_readme_node_analyzes_normally_when_github_metadata_ok(self, fake_config):
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(fake_config)
+
+        state = {
+            "collector_results": {
+                "github_metadata": {
+                    "status": "ok",
+                    "data": {"readme_content": "# Real Project\n" * 50},
+                }
+            }
+        }
+        result = workflow._readme_node(state)
+
+        readme_result = result["collector_results"]["readme"]
+        assert readme_result["status"] == "ok"
+        assert "quality_score" in readme_result["data"]
 
     @patch("src.graph.workflow.clone_repo")
     @patch("src.graph.workflow.collect_dependency_audit")
@@ -236,3 +276,119 @@ class TestWorkflowGraph:
         for cs in report["category_scores"].values():
             assert cs["investigation_depth"] == "shallow"
             assert cs["investigation_trace"] == []
+
+
+class TestSharedRunScopedInstances:
+    """Cost-awareness/resilience features 1 and 4: a circuit breaker and a
+    token budget tracker shared across every analyst and investigator in one
+    run, so a failure/quota-exhaustion signal in one category actually
+    affects the others instead of each finding out independently."""
+
+    def test_workflow_builds_one_shared_breaker_used_by_every_analyst(self, fake_config):
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(fake_config)
+
+        assert workflow.llm_breaker is not None
+        assert workflow.docs_analyst.llm_breaker is workflow.llm_breaker
+        assert workflow.code_quality_analyst.llm_breaker is workflow.llm_breaker
+        assert workflow.security_analyst.llm_breaker is workflow.llm_breaker
+        assert workflow.dependency_analyst.llm_breaker is workflow.llm_breaker
+        assert workflow.maintainability_analyst.llm_breaker is workflow.llm_breaker
+        assert workflow.lead_investigator._llm_breaker is workflow.llm_breaker
+
+    def test_workflow_builds_one_shared_budget_tracker_used_by_every_analyst(self, fake_config):
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(fake_config)
+
+        assert workflow.llm_budget is not None
+        assert workflow.docs_analyst.llm_budget is workflow.llm_budget
+        assert workflow.lead_investigator._llm_budget is workflow.llm_budget
+
+    def test_disabling_circuit_breaker_via_config_means_no_breaker_anywhere(self, fake_config):
+        fake_config.enable_llm_circuit_breaker = False
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(fake_config)
+
+        assert workflow.llm_breaker is None
+        assert workflow.docs_analyst.llm_breaker is None
+
+    def test_injected_breaker_and_budget_are_used_instead_of_fresh_ones(self, fake_config):
+        """The Streamlit app persists these across analyses via st.cache_resource
+        -- prove Workflow actually uses an injected instance rather than always
+        building its own."""
+        injected_breaker = CircuitBreaker(failure_threshold=1, timeout=60, name="persisted")
+        injected_budget = LLMBudgetTracker(max_tokens=5)
+        injected_cache = DependencyLookupCache()
+
+        with patch("src.graph.workflow.build_llm_client", return_value=Mock()):
+            workflow = Workflow(
+                fake_config,
+                llm_breaker=injected_breaker,
+                llm_budget=injected_budget,
+                dependency_cache=injected_cache,
+            )
+
+        assert workflow.llm_breaker is injected_breaker
+        assert workflow.llm_budget is injected_budget
+        assert workflow.dependency_cache is injected_cache
+        assert workflow.docs_analyst.llm_breaker is injected_breaker
+
+    @patch("src.graph.workflow.investigate")
+    @patch("src.agents.planner.LeadInvestigator.plan")
+    @patch("src.graph.workflow.clone_repo")
+    @patch("src.graph.workflow.collect_dependency_audit")
+    @patch("src.graph.workflow.collect_security")
+    @patch("src.graph.workflow.collect_static_analysis")
+    @patch("src.graph.workflow.collect_github_metadata")
+    def test_exhausted_budget_downgrades_a_planned_deep_investigation_to_shallow(
+        self,
+        mock_github,
+        mock_static,
+        mock_security,
+        mock_dep,
+        mock_clone,
+        mock_plan,
+        mock_investigate,
+        fake_config,
+        sample_repo_data,
+        mock_llm_response,
+    ):
+        fake_cloned = Mock()
+        fake_cloned.path = "/tmp/fake-clone"
+        mock_clone.return_value = (
+            fake_cloned,
+            _ok(data={"path": "/tmp/fake-clone", "size_mb": 1.0}),
+        )
+        mock_github.return_value = _ok(data=sample_repo_data)
+        mock_static.return_value = _ok(data={"findings": [], "tool_status": {}})
+        mock_security.return_value = _ok(data={"findings": [], "tool_status": {}})
+        mock_dep.return_value = _ok(data={"packages_checked": 0, "vulnerabilities": []})
+
+        mock_plan.return_value = InvestigationPlan(
+            plans={
+                Category.SECURITY.value: CategoryPlan(
+                    category=Category.SECURITY, depth=InvestigationDepth.DEEP, rationale="test"
+                ),
+                **{
+                    c.value: CategoryPlan(
+                        category=c, depth=InvestigationDepth.SHALLOW, rationale="test"
+                    )
+                    for c in Category
+                    if c != Category.SECURITY
+                },
+            }
+        )
+
+        fake_llm = Mock()
+        fake_llm.invoke = Mock(return_value=Mock(content=mock_llm_response))
+
+        # A budget that's already exhausted before any category runs --
+        # simulates "earlier in this run/session the quota already ran dry".
+        exhausted_budget = LLMBudgetTracker(max_tokens=1)
+
+        with patch("src.graph.workflow.build_llm_client", return_value=fake_llm):
+            workflow = Workflow(fake_config, llm_budget=exhausted_budget)
+            report = workflow.execute("https://github.com/user/test-repo")
+
+        mock_investigate.assert_not_called()
+        assert report["category_scores"]["security"]["investigation_depth"] == "shallow"

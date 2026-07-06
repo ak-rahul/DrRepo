@@ -57,6 +57,29 @@ DrRepo's deep path is different: the LLM decides what to look at.
 
 ---
 
+## Reliability and cost-awareness
+
+Built after a live run hit a real LLM provider rate limit mid-analysis:
+
+- **A shared circuit breaker** wraps every LLM call. Since the five category nodes run in
+  parallel, without this each would independently retry against an already-exhausted quota; with
+  it, one sustained failure opens the circuit and everything else fails fast instead of hammering
+  a dead quota.
+- **A run-scoped token budget** makes the shallow/deep decision cost-aware, not just
+  repo-signal-aware — a category the planner flagged "deep" still falls back to shallow if the
+  run doesn't have enough budget left to afford it.
+- **Trimmed investigator prompts** — recon data handed to a deep investigator is bounded (long
+  README/finding lists get truncated with a note) instead of dumped in full, since an untrimmed
+  prompt was observed requesting ~112k tokens in one request against a 100k/day quota.
+- **A per-package OSV/deps.dev cache** skips re-querying a package version already looked up,
+  within one run or (in the Streamlit app, which persists it for the process lifetime) across runs.
+- **Score history** — re-analyzing a repository shows the score delta since the last time,
+  stored in a local `reports/history.json`.
+
+All of the above are optional and configurable via `.env` — see `.env.example`.
+
+---
+
 ## Architecture
 
 ```

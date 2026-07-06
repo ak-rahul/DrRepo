@@ -56,3 +56,15 @@ class TestDocsAnalyst:
         result = agent.analyze({"readme": readme_data, "github_metadata": {}})
 
         assert result["issues"] == []
+
+    def test_missing_readme_collector_data_does_not_fabricate_issues(self, fake_llm_client):
+        """When github_metadata failed upstream, `readme` collector data is {}
+        (no "quality_score" key at all) -- this must not be treated the same
+        as a genuinely empty README, which would otherwise flag every
+        possible missing section as a confident HIGH-severity finding."""
+        agent = DocsAnalyst(fake_llm_client)
+
+        result = agent.analyze({"readme": {}, "github_metadata": {}})
+
+        assert result["issues"] == []
+        assert result["score"] == 50.0

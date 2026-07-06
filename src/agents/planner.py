@@ -9,11 +9,13 @@ hardcoded.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from src.models import Category, CategoryPlan, InvestigationDepth, InvestigationPlan
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker, estimate_tokens
 from src.utils.logger import logger
 
 _SYSTEM_PROMPT = """You are the lead investigator planning a repository audit. Given initial \
@@ -55,28 +57,44 @@ class LeadInvestigator:
     Protocol guarantees.
     """
 
-    def __init__(self, llm_client: Any):
+    def __init__(
+        self,
+        llm_client: Any,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
         self._structured_client = llm_client.with_structured_output(InvestigationPlanOutput)
+        self._llm_breaker = llm_breaker
+        self._llm_budget = llm_budget
 
     def plan(self, recon_summary: Dict[str, Any]) -> InvestigationPlan:
         """Produce an `InvestigationPlan` from a recon summary.
 
         Falls back to an all-shallow plan (equivalent to v2's fixed behavior)
         if the LLM call fails for any reason -- planning failures must never
-        block the analysis.
+        block the analysis. A circuit breaker in the OPEN state counts as
+        exactly this kind of failure, so a dead LLM quota degrades to the
+        same safe shallow-everything behavior rather than raising.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        prompt = self._build_prompt(recon_summary)
+        messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+
+        def _invoke() -> Any:
+            return self._structured_client.invoke(messages)
+
         try:
-            result = self._structured_client.invoke(
-                [
-                    SystemMessage(content=_SYSTEM_PROMPT),
-                    HumanMessage(content=self._build_prompt(recon_summary)),
-                ]
-            )
+            result = self._llm_breaker.call(_invoke) if self._llm_breaker else _invoke()
         except Exception as e:
             logger.error(f"LeadInvestigator planning failed, defaulting to all-shallow: {e}")
             return _all_shallow_plan("planner call failed, defaulted to shallow")
+
+        if self._llm_budget is not None:
+            # Structured-output calls return a parsed pydantic object, not a
+            # raw AIMessage, so there's no usage metadata to extract here --
+            # always an estimate.
+            self._llm_budget.record(estimate_tokens(_SYSTEM_PROMPT + prompt))
 
         return _plan_from_output(result)
 

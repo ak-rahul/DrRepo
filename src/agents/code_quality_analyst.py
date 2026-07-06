@@ -8,10 +8,12 @@ summarize and call out the highest-impact patterns.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker
 
 _SYSTEM_PROMPT = """You are a senior code reviewer. You will be given a summary of static \
 analysis findings (from ruff and semgrep) for a repository. Write a concise, honest \
@@ -54,8 +56,19 @@ def _score(issues: list[Issue]) -> float:
 
 
 class CodeQualityAnalyst(BaseAnalystAgent):
-    def __init__(self, llm_client: LLMClient):
-        super().__init__("CodeQualityAnalyst", _SYSTEM_PROMPT, llm_client)
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
+        super().__init__(
+            "CodeQualityAnalyst",
+            _SYSTEM_PROMPT,
+            llm_client,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+        )
 
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         static = collector_results.get("static_analysis", {})

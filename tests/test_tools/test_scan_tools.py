@@ -27,6 +27,13 @@ class TestRunScannerOnPath:
 
         assert result.startswith("ERROR")
 
+    def test_null_byte_in_path_returns_error_string_not_exception(self, fake_config, tmp_path):
+        (run_scanner,) = make_scan_tools(str(tmp_path), fake_config)
+
+        result = run_scanner.invoke({"scanner": "ruff", "path": "app.py\x00.txt"})
+
+        assert result.startswith("ERROR")
+
     def test_no_findings_message(self, fake_config, tmp_path):
         (tmp_path / "clean.py").write_text("x = 1\n")
         mock_run_ruff = Mock(return_value={"available": True, "findings": []})

@@ -20,6 +20,7 @@ import httpx
 
 from src.config import Config
 from src.models import CollectorResult, CollectorStatus
+from src.utils.dependency_cache import DependencyLookupCache
 from src.utils.logger import logger
 
 _OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
@@ -33,6 +34,12 @@ _DEPS_DEV_SYSTEM = {"PyPI": "pypi", "npm": "npm"}
 _MAX_LICENSE_LOOKUPS = 30
 
 _REQ_LINE_RE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*(==|>=|~=)\s*([A-Za-z0-9_.\-]+)")
+
+# Same vendor/build-output directories security.py's secret scanner skips --
+# a repo that commits node_modules/ would otherwise have its manifest cap
+# (matches[:3]) consumed by vendored third-party manifests instead of the
+# project's own.
+_SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
 
 
 def _parse_requirements_txt(text: str) -> List[Tuple[str, str, str]]:
@@ -89,15 +96,22 @@ _MANIFEST_PARSERS = {
 def _find_manifests(repo_path: Path) -> List[Tuple[str, Path]]:
     found = []
     for filename in _MANIFEST_PARSERS:
-        matches = list(repo_path.rglob(filename))
+        matches = [
+            m
+            for m in repo_path.rglob(filename)
+            if not any(part in _SKIP_DIRS for part in m.relative_to(repo_path).parts)
+        ]
         for m in matches[:3]:  # cap per-manifest-type in case of many nested packages
             found.append((filename, m))
     return found
 
 
-def _query_osv(packages: List[Tuple[str, str, str]], timeout: int) -> List[Dict[str, Any]]:
+def _query_osv_batch(
+    packages: List[Tuple[str, str, str]], timeout: int
+) -> Dict[Tuple[str, str, str], List[Dict[str, Any]]]:
+    """Query OSV.dev's batch endpoint, returning per-package finding lists."""
     if not packages:
-        return []
+        return {}
 
     queries = [
         {"package": {"name": name, "ecosystem": ecosystem}, "version": version}
@@ -112,26 +126,54 @@ def _query_osv(packages: List[Tuple[str, str, str]], timeout: int) -> List[Dict[
         logger.warning(f"OSV.dev query failed: {e}")
         raise
 
-    findings = []
+    per_package: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
     # OSV's batch API guarantees one result per query, in order; a length
     # mismatch means something is wrong with the response and results would
     # otherwise get silently paired with the wrong package.
-    for (ecosystem, name, version), result in zip(packages, results, strict=True):
+    for pkg, result in zip(packages, results, strict=True):
+        ecosystem, name, version = pkg
         vulns = result.get("vulns", [])
-        for vuln in vulns:
-            findings.append(
-                {
-                    "package": name,
-                    "ecosystem": ecosystem,
-                    "version": version,
-                    "vuln_id": vuln.get("id"),
-                }
-            )
+        per_package[pkg] = [
+            {"package": name, "ecosystem": ecosystem, "version": version, "vuln_id": vuln.get("id")}
+            for vuln in vulns
+        ]
+    return per_package
+
+
+def _query_osv(
+    packages: List[Tuple[str, str, str]],
+    timeout: int,
+    cache: Optional[DependencyLookupCache] = None,
+) -> List[Dict[str, Any]]:
+    """Check `packages` against OSV.dev, skipping any already present in `cache`."""
+    if not packages:
+        return []
+    if cache is None:
+        per_package = _query_osv_batch(packages, timeout)
+        return [finding for vulns in per_package.values() for finding in vulns]
+
+    findings: List[Dict[str, Any]] = []
+    to_query: List[Tuple[str, str, str]] = []
+    for pkg in packages:
+        cached = cache.get_osv(pkg)
+        if cached is not None:
+            findings.extend(cached)
+        else:
+            to_query.append(pkg)
+
+    if to_query:
+        fresh = _query_osv_batch(to_query, timeout)
+        for pkg, vulns in fresh.items():
+            cache.set_osv(pkg, vulns)
+            findings.extend(vulns)
+
     return findings
 
 
 def _query_licenses(
-    packages: List[Tuple[str, str, str]], timeout: int
+    packages: List[Tuple[str, str, str]],
+    timeout: int,
+    cache: Optional[DependencyLookupCache] = None,
 ) -> List[Dict[str, Optional[str]]]:
     """Look up each package's declared license via deps.dev.
 
@@ -139,10 +181,27 @@ def _query_licenses(
     deps.dev has no batch endpoint. A single package's lookup failing (network
     error, unknown package/version, unsupported ecosystem) just yields a
     `None` license for that package rather than aborting the whole audit.
+    `cache`, when given, skips the network call entirely for a package/version
+    already looked up (by this run or an earlier one sharing the same cache).
     """
     results: List[Dict[str, Optional[str]]] = []
     with httpx.Client(timeout=timeout) as client:
         for ecosystem, name, version in packages[:_MAX_LICENSE_LOOKUPS]:
+            pkg = (ecosystem, name, version)
+
+            if cache is not None:
+                was_cached, cached_license = cache.get_license(pkg)
+                if was_cached:
+                    results.append(
+                        {
+                            "package": name,
+                            "ecosystem": ecosystem,
+                            "version": version,
+                            "license": cached_license,
+                        }
+                    )
+                    continue
+
             system = _DEPS_DEV_SYSTEM.get(ecosystem)
             license_id: Optional[str] = None
             if system:
@@ -156,14 +215,25 @@ def _query_licenses(
                         license_id = licenses[0] if licenses else None
                 except (httpx.HTTPError, ValueError) as e:
                     logger.warning(f"deps.dev license lookup failed for {name}@{version}: {e}")
+
+            if cache is not None:
+                cache.set_license(pkg, license_id)
             results.append(
                 {"package": name, "ecosystem": ecosystem, "version": version, "license": license_id}
             )
     return results
 
 
-def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult:
-    """Parse dependency manifests in the clone and check them against OSV.dev."""
+def collect_dependency_audit(
+    clone_path: str, config: Config, cache: Optional[DependencyLookupCache] = None
+) -> CollectorResult:
+    """Parse dependency manifests in the clone and check them against OSV.dev.
+
+    `cache`, when provided, is checked before every OSV/deps.dev network call
+    and populated as results come in -- shared across an entire process (see
+    `Workflow`/`app.py`) it turns a repeat lookup of the same popular
+    package/version into a free cache hit instead of a fresh network round trip.
+    """
     if not config.enable_dependency_audit:
         return CollectorResult(
             name="dependency_audit", status=CollectorStatus.SKIPPED, detail="Disabled by config"
@@ -196,8 +266,10 @@ def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult
 
     all_packages = all_packages[:_MAX_PACKAGES]
 
+    lookup_cache = cache if config.enable_dependency_lookup_cache else None
+
     try:
-        vulnerabilities = _query_osv(all_packages, config.collector_timeout_seconds)
+        vulnerabilities = _query_osv(all_packages, config.collector_timeout_seconds, lookup_cache)
     except Exception as e:
         return CollectorResult(
             name="dependency_audit",
@@ -208,7 +280,7 @@ def collect_dependency_audit(clone_path: str, config: Config) -> CollectorResult
     licenses: List[Dict[str, Optional[str]]] = []
     if config.enable_license_audit:
         try:
-            licenses = _query_licenses(all_packages, config.collector_timeout_seconds)
+            licenses = _query_licenses(all_packages, config.collector_timeout_seconds, lookup_cache)
         except Exception as e:
             # A license-lookup failure is a degraded result, not a failed audit --
             # the vulnerability data above is still valid and worth returning.

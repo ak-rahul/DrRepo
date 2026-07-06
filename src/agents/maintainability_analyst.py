@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker
 
 _SYSTEM_PROMPT = """You are a senior engineer assessing the long-term maintainability of a \
 repository. Given structural facts (tests, CI, license, activity recency), write a concise, \
@@ -93,11 +95,35 @@ def _score(issues: list[Issue]) -> float:
 
 
 class MaintainabilityAnalyst(BaseAnalystAgent):
-    def __init__(self, llm_client: LLMClient):
-        super().__init__("MaintainabilityAnalyst", _SYSTEM_PROMPT, llm_client)
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
+        super().__init__(
+            "MaintainabilityAnalyst",
+            _SYSTEM_PROMPT,
+            llm_client,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+        )
 
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         github_data = collector_results.get("github_metadata", {})
+
+        if "file_structure" not in github_data:
+            # The collector always sets this key on a successful run (even a
+            # repo with none of the expected directories gets an all-False
+            # dict) -- its absence means the GitHub API call itself failed,
+            # which must not be reported as "no tests/CI/license/etc found".
+            return {
+                "summary": "Maintainability could not be assessed because repository metadata "
+                "could not be fetched from GitHub.",
+                "score": 50.0,
+                "issues": [],
+            }
+
         file_structure = github_data.get("file_structure", {})
         stars = github_data.get("stars", 0)
 

@@ -1,5 +1,6 @@
 """Tests for circuit breaker pattern."""
 
+import threading
 import time
 from unittest.mock import Mock
 
@@ -150,3 +151,22 @@ class TestCircuitBreaker:
 
         # Failure count should still be 1 (KeyError didn't count)
         assert breaker.failure_count == 1
+
+    def test_concurrent_failures_are_counted_without_loss(self):
+        """One breaker is shared across category nodes LangGraph runs
+        concurrently -- `failure_count += 1` must not lose increments to a
+        race between threads."""
+        breaker = CircuitBreaker(failure_threshold=10_000, timeout=60)
+        mock_func = Mock(side_effect=Exception("Error"))
+
+        def fail_once():
+            with pytest.raises(Exception):
+                breaker.call(mock_func)
+
+        threads = [threading.Thread(target=fail_once) for _ in range(200)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert breaker.failure_count == 200

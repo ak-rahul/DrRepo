@@ -8,9 +8,11 @@ makes agents testable with a fake/mock client and no environment coupling.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 from src.config import Config
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker, estimate_tokens, extract_actual_tokens
 from src.utils.logger import logger
 from src.utils.retry import retry_with_backoff
 
@@ -61,25 +63,59 @@ class BaseAnalystAgent(ABC):
     name: str
     system_prompt: str
 
-    def __init__(self, name: str, system_prompt: str, llm_client: LLMClient):
+    def __init__(
+        self,
+        name: str,
+        system_prompt: str,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
         self.name = name
         self.system_prompt = system_prompt
         self.llm_client = llm_client
+        self.llm_breaker = llm_breaker
+        self.llm_budget = llm_budget
 
     @abstractmethod
     def analyze(self, collector_results: dict[str, Any]) -> dict[str, Any]:
         """Return `{"summary": str, "score": float, "issues": [Issue-as-dict]}`."""
         raise NotImplementedError
 
-    @retry_with_backoff(max_retries=3, initial_delay=2.0, max_delay=30.0)
     def _call_llm(self, user_prompt: str) -> str:
+        """Call the LLM, guarded by the circuit breaker (if configured) and
+        recording token usage against the budget tracker (if configured).
+
+        The breaker check happens *outside* `_invoke_with_retry`'s retry loop
+        deliberately: retries handle transient failures within one logical
+        call (a single network blip), while the breaker guards against
+        sustained failure across many logical calls (e.g. a provider's daily
+        quota being exhausted). Nesting them the other way around would make
+        every retry attempt re-check an already-open breaker and still pay
+        the full exponential backoff sleep between them for no benefit.
+        """
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=user_prompt)]
+
         try:
-            response = self.llm_client.invoke(
-                [SystemMessage(content=self.system_prompt), HumanMessage(content=user_prompt)]
+            response = (
+                self.llm_breaker.call(self._invoke_with_retry, messages)
+                if self.llm_breaker
+                else self._invoke_with_retry(messages)
             )
-            return str(response.content)
         except Exception as e:
             logger.error(f"LLM call failed in {self.name}: {e}")
             raise
+
+        if self.llm_budget is not None:
+            tokens = extract_actual_tokens(response)
+            if tokens is None:
+                tokens = estimate_tokens(self.system_prompt + user_prompt + str(response.content))
+            self.llm_budget.record(tokens)
+
+        return str(response.content)
+
+    @retry_with_backoff(max_retries=3, initial_delay=2.0, max_delay=30.0)
+    def _invoke_with_retry(self, messages: list) -> Any:
+        return self.llm_client.invoke(messages)

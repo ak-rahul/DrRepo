@@ -67,6 +67,14 @@ def _analyze_file_structure(repo) -> Dict[str, bool]:
     except GithubException as e:
         if e.status == 403:
             logger.warning("Rate limit hit while analyzing file structure")
+        elif e.status == 404:
+            # A real, existing repo with zero commits ("this repository is
+            # empty") also 404s here -- that's not the same as the repo
+            # itself not existing (checked earlier, by which point stars/
+            # forks/readme were already fetched successfully), so this
+            # correctly reports "no files found" instead of discarding the
+            # whole collector result as "repository not found".
+            logger.info("Repository has no files (empty repository)")
         else:
             raise
     return structure

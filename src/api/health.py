@@ -13,7 +13,7 @@ from src.utils.logger import logger
 app = FastAPI(
     title="DrRepo Health Check API",
     description="Health monitoring endpoint for DrRepo system components",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 # Loaded once at import time -- this module IS the real entrypoint, so this is
@@ -26,7 +26,7 @@ async def root():
     """Root endpoint with API information."""
     return {
         "service": "DrRepo Health Check API",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "endpoints": {
             "/health": "Comprehensive health check",
             "/health/simple": "Simple health status",

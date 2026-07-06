@@ -114,7 +114,7 @@ def analyze_readme(content: str) -> CollectorResult:
             "image_count": 0,
             "link_count": 0,
             "badge_count": 0,
-            "missing_sections": list(_ESSENTIAL_SECTIONS.keys()),
+            "missing_sections": [s.title() for s in _ESSENTIAL_SECTIONS],
             "has_table_of_contents": False,
             "quality_score": 0.0,
         }

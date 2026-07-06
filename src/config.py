@@ -1,4 +1,4 @@
-"""Configuration for DrRepo v2.
+"""Configuration for DrRepo v3.
 
 Deliberately NOT a module-level singleton. Every collector/agent takes a
 `Config` instance via constructor injection, so tests can build one with fake
@@ -53,6 +53,33 @@ class Config:
     # safety net and a cost control for anyone who wants the fast/cheap mode.
     enable_deep_investigation: bool = True
 
+    # LLM circuit breaker: opens after repeated LLM-call failures within a run
+    # (e.g. a real provider rate limit) so parallel/subsequent category nodes
+    # fail fast instead of each independently retrying against an exhausted
+    # quota. Built in direct response to a live Groq 413 "tokens per day"
+    # failure hit during manual testing.
+    enable_llm_circuit_breaker: bool = True
+    llm_circuit_breaker_threshold: int = 3
+    llm_circuit_breaker_timeout_seconds: int = 300
+
+    # LLM token budget: a rough, run-scoped cap so the planner's shallow/deep
+    # decisions are cost-aware, not just repo-signal-aware. A category the
+    # planner marked "deep" still falls back to shallow if the run doesn't
+    # have enough budget left to afford it.
+    enable_llm_budget_tracking: bool = True
+    llm_token_budget_per_run: int = 60000
+    estimated_tokens_per_deep_investigation: int = 12000
+
+    # Per-package OSV/deps.dev lookup cache: skips re-querying a package
+    # version this process has already looked up (within one run, or across
+    # runs if the caller shares one cache instance -- see app.py).
+    enable_dependency_lookup_cache: bool = True
+
+    # Score-history tracking: append each run's scores to a local JSON file,
+    # keyed by repository, so a later run can report a regression/improvement
+    # delta against the previous analysis of the same repo.
+    enable_score_history: bool = True
+
     extra: dict = field(default_factory=dict)
 
     @classmethod
@@ -92,6 +119,23 @@ class Config:
             investigator_timeout_seconds=int(os.getenv("INVESTIGATOR_TIMEOUT_SECONDS", "90")),
             enable_deep_investigation=os.getenv("ENABLE_DEEP_INVESTIGATION", "true").lower()
             == "true",
+            enable_llm_circuit_breaker=os.getenv("ENABLE_LLM_CIRCUIT_BREAKER", "true").lower()
+            == "true",
+            llm_circuit_breaker_threshold=int(os.getenv("LLM_CIRCUIT_BREAKER_THRESHOLD", "3")),
+            llm_circuit_breaker_timeout_seconds=int(
+                os.getenv("LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", "300")
+            ),
+            enable_llm_budget_tracking=os.getenv("ENABLE_LLM_BUDGET_TRACKING", "true").lower()
+            == "true",
+            llm_token_budget_per_run=int(os.getenv("LLM_TOKEN_BUDGET_PER_RUN", "60000")),
+            estimated_tokens_per_deep_investigation=int(
+                os.getenv("ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION", "12000")
+            ),
+            enable_dependency_lookup_cache=os.getenv(
+                "ENABLE_DEPENDENCY_LOOKUP_CACHE", "true"
+            ).lower()
+            == "true",
+            enable_score_history=os.getenv("ENABLE_SCORE_HISTORY", "true").lower() == "true",
         )
 
     def validate_for_llm(self) -> list[str]:

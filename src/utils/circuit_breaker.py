@@ -1,5 +1,6 @@
 """Circuit breaker pattern for external services."""
 
+import threading
 import time
 from enum import Enum
 from functools import wraps
@@ -60,6 +61,11 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time: Optional[float] = None
         self.state = CircuitState.CLOSED
+        # One breaker instance is shared across category nodes that LangGraph
+        # runs concurrently in the same superstep -- without this, concurrent
+        # `_on_failure()` calls race on `failure_count += 1` (a non-atomic
+        # read-modify-write), silently undercounting failures.
+        self._lock = threading.Lock()
 
         logger.info(
             f"CircuitBreaker '{name}' initialized: "
@@ -82,24 +88,28 @@ class CircuitBreaker:
             Exception: If func raises an exception
         """
         # Check if circuit is OPEN
-        if self.state == CircuitState.OPEN:
-            if self._should_attempt_reset():
-                logger.info(f"CircuitBreaker '{self.name}': Attempting recovery (HALF_OPEN)")
-                self.state = CircuitState.HALF_OPEN
-            else:
-                # Reached only when `_should_attempt_reset()` returned False,
-                # which itself requires `last_failure_time` to be set.
-                assert self.last_failure_time is not None
-                wait_time = self.timeout - (time.time() - self.last_failure_time)
-                logger.warning(
-                    f"CircuitBreaker '{self.name}': Circuit is OPEN. " f"Retry in {wait_time:.0f}s"
-                )
-                raise APIConnectionError(
-                    f"Circuit breaker is OPEN for {self.name}. "
-                    f"Service unavailable. Retry after {wait_time:.0f}s"
-                )
+        with self._lock:
+            if self.state == CircuitState.OPEN:
+                if self._should_attempt_reset():
+                    logger.info(f"CircuitBreaker '{self.name}': Attempting recovery (HALF_OPEN)")
+                    self.state = CircuitState.HALF_OPEN
+                else:
+                    # Reached only when `_should_attempt_reset()` returned False,
+                    # which itself requires `last_failure_time` to be set.
+                    assert self.last_failure_time is not None
+                    wait_time = self.timeout - (time.time() - self.last_failure_time)
+                    logger.warning(
+                        f"CircuitBreaker '{self.name}': Circuit is OPEN. "
+                        f"Retry in {wait_time:.0f}s"
+                    )
+                    raise APIConnectionError(
+                        f"Circuit breaker is OPEN for {self.name}. "
+                        f"Service unavailable. Retry after {wait_time:.0f}s"
+                    )
 
-        # Execute function
+        # Execute function outside the lock -- this is what lets concurrent
+        # category nodes actually run in parallel instead of serializing on
+        # the breaker.
         try:
             result = func(*args, **kwargs)
             self._on_success()
@@ -122,31 +132,35 @@ class CircuitBreaker:
 
     def _on_success(self):
         """Handle successful function execution."""
-        if self.state == CircuitState.HALF_OPEN:
-            logger.info(f"CircuitBreaker '{self.name}': Recovery successful, closing circuit")
+        with self._lock:
+            if self.state == CircuitState.HALF_OPEN:
+                logger.info(f"CircuitBreaker '{self.name}': Recovery successful, closing circuit")
 
-        self.failure_count = 0
-        self.state = CircuitState.CLOSED
+            self.failure_count = 0
+            self.state = CircuitState.CLOSED
 
     def _on_failure(self):
         """Handle failed function execution."""
-        self.failure_count += 1
-        self.last_failure_time = time.time()
+        with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
 
-        logger.warning(
-            f"CircuitBreaker '{self.name}': Failure {self.failure_count}/{self.failure_threshold}"
-        )
+            logger.warning(
+                f"CircuitBreaker '{self.name}': "
+                f"Failure {self.failure_count}/{self.failure_threshold}"
+            )
 
-        if self.failure_count >= self.failure_threshold:
-            logger.error(f"CircuitBreaker '{self.name}': Threshold reached, opening circuit")
-            self.state = CircuitState.OPEN
+            if self.failure_count >= self.failure_threshold:
+                logger.error(f"CircuitBreaker '{self.name}': Threshold reached, opening circuit")
+                self.state = CircuitState.OPEN
 
     def reset(self):
         """Manually reset circuit breaker to CLOSED state."""
-        logger.info(f"CircuitBreaker '{self.name}': Manual reset")
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.state = CircuitState.CLOSED
+        with self._lock:
+            logger.info(f"CircuitBreaker '{self.name}': Manual reset")
+            self.failure_count = 0
+            self.last_failure_time = None
+            self.state = CircuitState.CLOSED
 
     def get_state(self) -> Dict[str, Any]:
         """Get current circuit breaker state.
@@ -154,14 +168,15 @@ class CircuitBreaker:
         Returns:
             Dictionary with current state information
         """
-        return {
-            "name": self.name,
-            "state": self.state.value,
-            "failure_count": self.failure_count,
-            "failure_threshold": self.failure_threshold,
-            "last_failure_time": self.last_failure_time,
-            "timeout": self.timeout,
-        }
+        with self._lock:
+            return {
+                "name": self.name,
+                "state": self.state.value,
+                "failure_count": self.failure_count,
+                "failure_threshold": self.failure_threshold,
+                "last_failure_time": self.last_failure_time,
+                "timeout": self.timeout,
+            }
 
 
 def circuit_breaker(

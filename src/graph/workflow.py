@@ -27,12 +27,21 @@ from src.collectors.security import collect_security
 from src.collectors.static_analysis import collect_static_analysis
 from src.config import Config
 from src.graph.state import State
-from src.models import Category, CollectorResult, InvestigationDepth, InvestigationPlan
+from src.models import (
+    Category,
+    CollectorResult,
+    CollectorStatus,
+    InvestigationDepth,
+    InvestigationPlan,
+)
 from src.report.synthesizer import synthesize_report
 from src.tools.dependency_tools import make_dependency_tools
 from src.tools.file_tools import make_file_tools
 from src.tools.git_tools import make_git_history_tools
 from src.tools.scan_tools import make_scan_tools
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.dependency_cache import DependencyLookupCache
+from src.utils.llm_budget import LLMBudgetTracker
 from src.utils.logger import logger
 
 _INVESTIGATOR_PROMPTS = {
@@ -85,20 +94,65 @@ def _all_shallow_plan() -> InvestigationPlan:
 
 
 class Workflow:
-    """Orchestrates a full repository analysis run."""
+    """Orchestrates a full repository analysis run.
 
-    def __init__(self, config: Config):
+    `llm_breaker`/`llm_budget`/`dependency_cache` are all optional and each
+    build a fresh, config-gated instance when omitted -- but a caller that
+    lives longer than one run (the Streamlit app) can construct these once
+    and pass the *same* instances into every `Workflow(...)` it creates, so
+    "this run already knows the quota is dead" and "we already looked up
+    this package" both carry over to the next analysis instead of resetting
+    every time. See `app.py`.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+        dependency_cache: Optional[DependencyLookupCache] = None,
+    ):
         self.config = config
         llm_client = build_llm_client(config)
         self._llm_client = llm_client
 
-        self.lead_investigator = LeadInvestigator(llm_client)
+        self.llm_breaker = llm_breaker or (
+            CircuitBreaker(
+                failure_threshold=config.llm_circuit_breaker_threshold,
+                timeout=config.llm_circuit_breaker_timeout_seconds,
+                name="llm",
+            )
+            if config.enable_llm_circuit_breaker
+            else None
+        )
+        self.llm_budget = llm_budget or (
+            LLMBudgetTracker(config.llm_token_budget_per_run)
+            if config.enable_llm_budget_tracking
+            else None
+        )
+        self.dependency_cache = dependency_cache or (
+            DependencyLookupCache() if config.enable_dependency_lookup_cache else None
+        )
 
-        self.docs_analyst = DocsAnalyst(llm_client)
-        self.code_quality_analyst = CodeQualityAnalyst(llm_client)
-        self.security_analyst = SecurityAnalyst(llm_client)
-        self.dependency_analyst = DependencyAnalyst(llm_client)
-        self.maintainability_analyst = MaintainabilityAnalyst(llm_client)
+        self.lead_investigator = LeadInvestigator(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
+
+        self.docs_analyst = DocsAnalyst(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
+        self.code_quality_analyst = CodeQualityAnalyst(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
+        self.security_analyst = SecurityAnalyst(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
+        self.dependency_analyst = DependencyAnalyst(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
+        self.maintainability_analyst = MaintainabilityAnalyst(
+            llm_client, llm_breaker=self.llm_breaker, llm_budget=self.llm_budget
+        )
 
         self.graph = self._build_graph()
 
@@ -109,7 +163,22 @@ class Workflow:
         return {"collector_results": {"github_metadata": _as_dict(result)}}
 
     def _readme_node(self, state: State) -> Dict[str, Any]:
-        github_data = state["collector_results"].get("github_metadata", {}).get("data", {})
+        github_result = state["collector_results"].get("github_metadata", {})
+        if github_result.get("status") != CollectorStatus.OK.value:
+            # Don't call analyze_readme("") here -- that would report a
+            # confident "no README, all sections missing" finding when the
+            # real reason is that github_metadata (and thus readme_content)
+            # never actually loaded, not that the README is genuinely empty.
+            return {
+                "collector_results": {
+                    "readme": {
+                        "status": CollectorStatus.SKIPPED.value,
+                        "data": {},
+                        "detail": "Skipped: github_metadata unavailable",
+                    }
+                }
+            }
+        github_data = github_result.get("data", {})
         result = analyze_readme(github_data.get("readme_content", ""))
         return {"collector_results": {"readme": _as_dict(result)}}
 
@@ -139,7 +208,7 @@ class Workflow:
                     "dependency_audit": {"status": "skipped", "detail": "no clone"}
                 }
             }
-        result = collect_dependency_audit(clone_path, self.config)
+        result = collect_dependency_audit(clone_path, self.config, cache=self.dependency_cache)
         return {"collector_results": {"dependency_audit": _as_dict(result)}}
 
     # ---- planner -----------------------------------------------------------
@@ -197,6 +266,21 @@ class Workflow:
             and clone_path is not None
         )
 
+        # Cost-aware override: the planner decided this category deserves a
+        # deep dive based on repo signal alone, with no idea what the other
+        # 4 categories (running in parallel) will end up spending. If the
+        # run's shared token budget can't afford another deep investigation,
+        # fall back to shallow rather than risk exhausting a real quota.
+        if go_deep and self.llm_budget is not None:
+            if not self.llm_budget.has_budget_for(
+                self.config.estimated_tokens_per_deep_investigation
+            ):
+                logger.warning(
+                    f"LLM token budget too low for a deep {category.value} investigation "
+                    f"({self.llm_budget.usage()}); falling back to shallow"
+                )
+                go_deep = False
+
         if go_deep:
             findings = investigate(
                 category=category,
@@ -205,6 +289,9 @@ class Workflow:
                 llm_client=self._llm_client,
                 recon_data=self._collector_data(state),
                 max_tool_calls=self.config.max_tool_calls_per_investigator,
+                timeout_seconds=self.config.investigator_timeout_seconds,
+                llm_breaker=self.llm_breaker,
+                llm_budget=self.llm_budget,
             )
         else:
             findings = shallow_analyst.analyze(self._collector_data(state))
@@ -243,7 +330,12 @@ class Workflow:
     def _dependency_node(self, state: State) -> Dict[str, Any]:
         clone_path = state.get("clone_path")
         tools = (
-            (make_file_tools(clone_path) + make_dependency_tools(self.config)) if clone_path else []
+            (
+                make_file_tools(clone_path)
+                + make_dependency_tools(self.config, cache=self.dependency_cache)
+            )
+            if clone_path
+            else []
         )
         return self._run_category(state, Category.DEPENDENCIES, self.dependency_analyst, tools)
 

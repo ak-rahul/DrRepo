@@ -1,9 +1,10 @@
-"""DrRepo v2 Streamlit application.
+"""DrRepo v3 Streamlit application.
 
-Analysis now involves cloning + running static analysis tools, so it takes
-noticeably longer than v1's pure-API-call flow. The job runs in a background
-thread and the UI polls `st.session_state` for progress instead of blocking
-the whole page on a single synchronous call.
+Analysis now involves cloning + running static analysis tools, plus an
+agentic deep-investigation layer, so it takes noticeably longer than v1's
+pure-API-call flow. The job runs in a background thread and the UI polls
+`st.session_state` for progress instead of blocking the whole page on a
+single synchronous call.
 """
 
 import threading
@@ -11,11 +12,16 @@ import time
 from datetime import datetime
 
 import streamlit as st
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 from src.config import Config
 from src.graph.workflow import Workflow
 from src.report.exporters import to_json, to_markdown, to_sarif
+from src.report.history import attach_and_record_history
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.dependency_cache import DependencyLookupCache
 from src.utils.health_check import HealthChecker
+from src.utils.llm_budget import LLMBudgetTracker
 from src.utils.logger import logger
 
 st.set_page_config(
@@ -54,6 +60,40 @@ def get_config() -> Config:
 
 
 config = get_config()
+
+
+# These three persist for the lifetime of the Streamlit server process (not
+# per-run) so a quota-exhaustion signal or a package lookup from one analysis
+# actually carries over to the next, instead of every run starting cold --
+# see Workflow's docstring for why that matters.
+@st.cache_resource
+def get_llm_breaker() -> CircuitBreaker | None:
+    if not config.enable_llm_circuit_breaker:
+        return None
+    return CircuitBreaker(
+        failure_threshold=config.llm_circuit_breaker_threshold,
+        timeout=config.llm_circuit_breaker_timeout_seconds,
+        name="llm",
+    )
+
+
+@st.cache_resource
+def get_llm_budget() -> LLMBudgetTracker | None:
+    if not config.enable_llm_budget_tracking:
+        return None
+    return LLMBudgetTracker(config.llm_token_budget_per_run)
+
+
+@st.cache_resource
+def get_dependency_cache() -> DependencyLookupCache | None:
+    if not config.enable_dependency_lookup_cache:
+        return None
+    return DependencyLookupCache()
+
+
+llm_breaker = get_llm_breaker()
+llm_budget = get_llm_budget()
+dependency_cache = get_dependency_cache()
 
 # Sidebar
 with st.sidebar:
@@ -118,8 +158,15 @@ def _run_analysis_in_background(repo_url: str, description: str):
         st.session_state["analysis_status_text"] = (
             "Cloning and analyzing... this can take 1-3 minutes"
         )
-        workflow = Workflow(config)
+        workflow = Workflow(
+            config,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+            dependency_cache=dependency_cache,
+        )
         result = workflow.execute(repo_url, description)
+        if config.enable_score_history:
+            result = attach_and_record_history(result)
         st.session_state["analysis_result"] = result
         st.session_state["analysis_status"] = "done"
     except Exception as e:
@@ -145,6 +192,11 @@ if analyze_button:
         thread = threading.Thread(
             target=_run_analysis_in_background, args=(repo_url, description), daemon=True
         )
+        # Without this, the thread has no ScriptRunContext and its
+        # st.session_state writes either warn-and-noop or land in the wrong
+        # session, so the polling loop below can spin in "running" forever
+        # even after the analysis actually finishes.
+        add_script_run_ctx(thread)
         thread.start()
 
 if st.session_state.get("analysis_status") == "running":
@@ -163,11 +215,16 @@ if result:
     st.markdown("### 📊 Results")
 
     repo = result.get("repository", {})
+    score_history = result.get("score_history")
+    overall_delta = f"{score_history['overall_score_delta']:+.1f}" if score_history else None
+
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Overall Score", f"{result.get('overall_score', 0):.0f}/100")
+    col1.metric("Overall Score", f"{result.get('overall_score', 0):.0f}/100", delta=overall_delta)
     col2.metric("Stars", f"{repo.get('stars', 0):,}")
     col3.metric("Forks", f"{repo.get('forks', 0):,}")
     col4.metric("Issues Found", len(result.get("issues", [])))
+    if score_history:
+        st.caption(f"vs. previous analysis on {score_history['previous_timestamp'][:10]}")
 
     st.markdown("#### Category Scores")
     category_scores = result.get("category_scores", {})
@@ -245,4 +302,4 @@ if result:
         )
 
 st.markdown("---")
-st.caption(f"DrRepo v2 • {datetime.now().year}")
+st.caption(f"DrRepo v3 • {datetime.now().year}")

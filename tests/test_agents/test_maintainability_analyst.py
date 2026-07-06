@@ -66,3 +66,16 @@ class TestMaintainabilityAnalyst:
         result = agent.analyze({"github_metadata": github_data})
 
         assert not any("contributing" in i["title"].lower() for i in result["issues"])
+
+    def test_missing_file_structure_does_not_fabricate_issues(self, fake_llm_client):
+        """When github_metadata's collector call itself failed (rate limit,
+        network error, repo not found), `data` is `{}` -- no "file_structure"
+        key at all. That must not be treated the same as a successful check
+        that found no tests/CI/license, which would otherwise fabricate a
+        confident HIGH-severity penalty from a mere API failure."""
+        agent = MaintainabilityAnalyst(fake_llm_client)
+
+        result = agent.analyze({"github_metadata": {}})
+
+        assert result["issues"] == []
+        assert result["score"] == 50.0

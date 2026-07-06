@@ -47,6 +47,15 @@ class TestExporters:
         assert "hardcoded secret" in md
         assert "app.py:10" in md
 
+    def test_to_markdown_escapes_pipe_in_summary(self):
+        report = _sample_report()
+        report["category_scores"]["security"]["summary"] = "found a | in the summary"
+
+        md = to_markdown(report)
+
+        table_row = next(line for line in md.splitlines() if line.startswith("| Security"))
+        assert table_row == "| Security | 70.0/100 | found a \\| in the summary |"
+
     def test_to_sarif_is_valid_json_with_expected_shape(self):
         report = _sample_report()
         sarif = json.loads(to_sarif(report))

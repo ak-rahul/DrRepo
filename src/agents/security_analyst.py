@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.agents.base import BaseAnalystAgent, LLMClient
 from src.models import Category, Issue, Severity, issue_to_dict
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.llm_budget import LLMBudgetTracker
 
 _SYSTEM_PROMPT = """You are a security engineer reviewing static analysis results for a \
 repository. Write a concise, honest narrative (3-5 sentences) about the security posture. \
@@ -52,8 +54,19 @@ def _score(issues: list[Issue]) -> float:
 
 
 class SecurityAnalyst(BaseAnalystAgent):
-    def __init__(self, llm_client: LLMClient):
-        super().__init__("SecurityAnalyst", _SYSTEM_PROMPT, llm_client)
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        llm_breaker: Optional[CircuitBreaker] = None,
+        llm_budget: Optional[LLMBudgetTracker] = None,
+    ):
+        super().__init__(
+            "SecurityAnalyst",
+            _SYSTEM_PROMPT,
+            llm_client,
+            llm_breaker=llm_breaker,
+            llm_budget=llm_budget,
+        )
 
     def analyze(self, collector_results: Dict[str, Any]) -> Dict[str, Any]:
         security_data = collector_results.get("security", {})

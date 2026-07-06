@@ -719,7 +719,7 @@ unauthenticated. Costs vary only with Groq usage if you exceed the free tier.
 
 ---
 
-**DrRepo Version**: 2.0.0
+**DrRepo Version**: 3.0.0
 
 For more help, visit: https://github.com/ak-rahul/DrRepo
 

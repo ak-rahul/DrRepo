@@ -35,7 +35,13 @@ def make_scan_tools(clone_root: str, config: Config) -> List:
         if scanner not in _SCANNERS:
             return f"ERROR: unknown scanner '{scanner}'. Choose from: {sorted(_SCANNERS)}"
 
-        target = (root / path).resolve()
+        try:
+            target = (root / path).resolve()
+        except ValueError as e:
+            # e.g. an embedded NUL byte -- Path.resolve() raises a bare
+            # ValueError for this, and the LLM controls this argument, so it
+            # must come back as a normal tool error, not an uncaught exception.
+            return f"ERROR: path '{path}' is invalid: {e}"
         if target != root and root not in target.parents:
             return f"ERROR: path '{path}' escapes the repository root"
         if not target.exists():

@@ -2,9 +2,18 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# Without this, setuptools' automatic src-layout detection treats `src/` as
+# a container and installs its subdirectories (agents, collectors, ...) as
+# top-level packages -- but every module in this repo imports via `src.xxx`
+# (see "Import hygiene" in CLAUDE.md), so an editable install without this
+# points sys.path at `src/` instead of the repo root, and `import src` fails.
+where = ["."]
+include = ["src*"]
+
 [project]
 name = "drrepo"
-version = "2.0.0"
+version = "3.0.0"
 description = "Multi-agent AI system for comprehensive GitHub repository analysis"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -128,3 +137,6 @@ ignore = ["E501"]
 # raise (circuit breaker / retry decorator tests exercise "any exception"
 # passthrough behavior, not a specific exception type).
 "tests/*" = ["B017"]
+# sys.path must be fixed up before the src.* imports below it -- see the
+# module docstring for why this script needs it and app.py/main.py don't.
+"scripts/run_health_api.py" = ["E402"]

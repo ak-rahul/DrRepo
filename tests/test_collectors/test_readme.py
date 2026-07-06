@@ -14,6 +14,13 @@ class TestAnalyzeReadme:
         assert result.data["word_count"] == 0
         assert result.data["quality_score"] == 0.0
         assert len(result.data["missing_sections"]) == 7
+        # Must be title-cased the same way as the non-empty-content path
+        # (`_find_missing_sections`) -- `docs_analyst._CRITICAL_SECTIONS`
+        # compares against title-cased names, and a casing mismatch here
+        # silently downgrades every missing-section issue to MEDIUM for a
+        # repo with no README at all, instead of HIGH.
+        assert "Installation" in result.data["missing_sections"]
+        assert "installation" not in result.data["missing_sections"]
 
     def test_counts_images_links_and_badges_correctly(self, sample_readme_with_badges_and_images):
         result = analyze_readme(sample_readme_with_badges_and_images)

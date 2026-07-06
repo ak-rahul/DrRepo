@@ -37,7 +37,10 @@ def to_markdown(report: Dict[str, Any]) -> str:
         "|---|---|---|",
     ]
     for name, cs in report["category_scores"].items():
-        summary = cs["summary"].replace("\n", " ").strip()
+        # LLM-generated summaries are free text and can contain "|", which
+        # would otherwise misalign the table -- escape it like any other
+        # Markdown table cell.
+        summary = cs["summary"].replace("\n", " ").replace("|", "\\|").strip()
         lines.append(f"| {name.replace('_', ' ').title()} | {cs['score']}/100 | {summary} |")
 
     lines += ["", "## Issues", ""]

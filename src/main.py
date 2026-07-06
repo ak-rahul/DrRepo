@@ -1,4 +1,4 @@
-"""CLI entry point for DrRepo v2."""
+"""CLI entry point for DrRepo v3."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from src.config import Config
 from src.graph.workflow import Workflow
 from src.report.exporters import to_json, to_markdown, to_sarif
+from src.report.history import attach_and_record_history
 from src.utils.logger import logger
 
 
@@ -22,7 +23,16 @@ def print_summary(report: dict) -> None:
 
     print(f"Repository: {repo.get('name', 'Unknown')}")
     print(f"   URL: {repo.get('url', 'N/A')}")
-    print(f"   Overall Score: {report.get('overall_score', 0):.1f}/100\n")
+    print(f"   Overall Score: {report.get('overall_score', 0):.1f}/100")
+
+    score_history = report.get("score_history")
+    if score_history:
+        delta = score_history["overall_score_delta"]
+        trend = "up" if delta > 0 else "down" if delta < 0 else "unchanged"
+        since = score_history["previous_timestamp"][:10]
+        print(f"   Since last analysis ({since}): {delta:+.1f} ({trend})\n")
+    else:
+        print()
 
     print("Category Scores:")
     for name, cs in report.get("category_scores", {}).items():
@@ -94,6 +104,8 @@ def main() -> None:
         workflow = Workflow(config)
 
         result = workflow.execute(repo_url, description)
+        if config.enable_score_history:
+            result = attach_and_record_history(result)
         print_summary(result)
 
         json_path = save_report(result)

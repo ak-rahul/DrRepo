@@ -15,6 +15,7 @@ from typing import List, Optional
 from langchain_core.tools import tool
 
 _MAX_READ_CHARS = 50_000
+_MAX_READ_FILE_BYTES = 2_000_000
 _MAX_FILE_BYTES_TO_SCAN = 512_000
 _MAX_LIST_ENTRIES = 200
 _MAX_SEARCH_MATCHES = 100
@@ -28,7 +29,14 @@ class PathEscapesSandboxError(ValueError):
 def resolve_safe_path(root: Path, requested: str) -> Path:
     """Resolve `requested` relative to `root`, rejecting any path that escapes it."""
     root = root.resolve()
-    candidate = (root / requested).resolve()
+    try:
+        candidate = (root / requested).resolve()
+    except ValueError as e:
+        # e.g. an embedded NUL byte -- Path.resolve() raises a bare ValueError
+        # for this (not a PathEscapesSandboxError), and the LLM controls this
+        # argument, so any malformed-path OSError-adjacent failure must come
+        # back as a normal tool error, not an uncaught exception.
+        raise PathEscapesSandboxError(f"Path '{requested}' is invalid: {e}") from e
     if candidate != root and root not in candidate.parents:
         raise PathEscapesSandboxError(f"Path '{requested}' escapes the repository root")
     return candidate
@@ -59,6 +67,16 @@ def make_file_tools(clone_root: str) -> List:
 
         if not target.is_file():
             return f"ERROR: '{path}' is not a file"
+
+        try:
+            size = target.stat().st_size
+        except OSError as e:
+            return f"ERROR: could not read '{path}': {e}"
+        if size > _MAX_READ_FILE_BYTES:
+            return (
+                f"ERROR: '{path}' is {size:,} bytes, too large to read directly "
+                f"(limit {_MAX_READ_FILE_BYTES:,}); use start_line/end_line or search_code instead"
+            )
 
         try:
             text = target.read_text(encoding="utf-8", errors="ignore")

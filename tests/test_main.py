@@ -61,6 +61,27 @@ class TestPrintSummary:
 
         assert "How it investigated" not in captured.out
 
+    def test_shows_score_delta_when_history_present(self, capsys):
+        result = _sample_result()
+        result["score_history"] = {
+            "previous_timestamp": "2026-07-04T12:00:00+00:00",
+            "overall_score_delta": -18.9,
+            "category_score_deltas": {"security": -10.0},
+        }
+
+        print_summary(result)
+        captured = capsys.readouterr()
+
+        assert "-18.9" in captured.out
+        assert "down" in captured.out
+        assert "2026-07-04" in captured.out
+
+    def test_no_score_delta_line_on_first_ever_run(self, capsys):
+        print_summary(_sample_result())
+        captured = capsys.readouterr()
+
+        assert "Since last analysis" not in captured.out
+
 
 class TestSaveReport:
     def test_saves_json_markdown_and_sarif(self, tmp_path, monkeypatch):

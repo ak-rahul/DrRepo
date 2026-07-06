@@ -23,6 +23,20 @@ class TestDependencyAnalyst:
         assert result["score"] == 100.0
         fake_llm_client.invoke.assert_not_called()
 
+    def test_failed_audit_is_not_reported_as_clean(self, fake_llm_client):
+        """A collector ERROR (e.g. OSV.dev lookup failed) leaves `data` at
+        `{}` -- no "packages_checked" key at all, unlike a genuine
+        zero-manifest repo which always gets `packages_checked: 0`
+        explicitly. These must not be conflated into the same "100/100,
+        nothing to report" result."""
+        agent = DependencyAnalyst(fake_llm_client)
+
+        result = agent.analyze({"dependency_audit": {}})
+
+        assert result["score"] == 50.0
+        assert result["issues"] == []
+        fake_llm_client.invoke.assert_not_called()
+
     def test_vulnerability_produces_issue_with_osv_link(self, fake_llm_client):
         agent = DependencyAnalyst(fake_llm_client)
         vulns = [

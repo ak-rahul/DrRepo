@@ -5,6 +5,9 @@ from unittest.mock import Mock
 
 from src.agents.planner import CategoryPlanOutput, InvestigationPlanOutput, LeadInvestigator
 from src.models import InvestigationDepth
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.exceptions import APIConnectionError
+from src.utils.llm_budget import LLMBudgetTracker
 
 
 def _fake_llm_with_plan(output: InvestigationPlanOutput) -> Mock:
@@ -80,6 +83,45 @@ class TestLeadInvestigator:
         llm_client.with_structured_output = Mock(return_value=structured_client)
 
         investigator = LeadInvestigator(llm_client)
+        plan = investigator.plan({"stars": 100})
+
+        assert len(plan.plans) == 5
+        assert all(p.depth == InvestigationDepth.SHALLOW for p in plan.plans.values())
+
+    def test_open_circuit_breaker_falls_back_to_all_shallow_without_calling_llm(self):
+        output = InvestigationPlanOutput(
+            plans=[CategoryPlanOutput(category="security", depth="deep", rationale="x")]
+        )
+        llm_client = _fake_llm_with_plan(output)
+        breaker = CircuitBreaker(failure_threshold=1, timeout=300, name="test")
+        breaker._on_failure()  # simulate an earlier failure elsewhere in this run
+        assert breaker.state.value == "open"
+
+        investigator = LeadInvestigator(llm_client, llm_breaker=breaker)
+        plan = investigator.plan({"stars": 100})
+
+        assert all(p.depth == InvestigationDepth.SHALLOW for p in plan.plans.values())
+        llm_client.with_structured_output.return_value.invoke.assert_not_called()
+
+    def test_records_budget_usage_on_successful_plan(self):
+        output = InvestigationPlanOutput(
+            plans=[CategoryPlanOutput(category="security", depth="deep", rationale="x")]
+        )
+        llm_client = _fake_llm_with_plan(output)
+        budget = LLMBudgetTracker(max_tokens=10_000)
+
+        investigator = LeadInvestigator(llm_client, llm_budget=budget)
+        investigator.plan({"stars": 100})
+
+        assert budget.usage()["used_tokens"] > 0
+
+    def test_breaker_open_error_is_treated_like_any_other_planning_failure(self):
+        output = InvestigationPlanOutput(plans=[])
+        llm_client = _fake_llm_with_plan(output)
+        breaker = Mock()
+        breaker.call = Mock(side_effect=APIConnectionError("circuit open"))
+
+        investigator = LeadInvestigator(llm_client, llm_breaker=breaker)
         plan = investigator.plan({"stars": 100})
 
         assert len(plan.plans) == 5
