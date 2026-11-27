@@ -84,7 +84,7 @@ def _recommendation(finding: dict[str, Any]) -> str:
 
 class SecurityAnalyst(Analyst):
     category = Category.SECURITY
-    tool_families = ("files", "scanners", "git_history")
+    tool_families = ("files", "symbols", "scanners", "git_history")
     rescore_scale = _SCALE
 
     def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:

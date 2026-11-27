@@ -68,6 +68,7 @@ Each collector is a plain function returning `CollectorResult(name, status, data
 | `scorecard` | `recon/scorecard.py` | OpenSSF Scorecard checks a shallow clone can't see (branch protection, code review, signed releases, binary artifacts, fuzzing, SAST). Checks that overlap DrRepo's own are skipped, and a scan of a different commit is noted |
 | `infrastructure` | `recon/infrastructure.py` | zizmor over GitHub Actions workflows and Dependabot config (offline; the repo's own config and ignore comments are disabled), hadolint over Dockerfiles (run from a neutral directory with ignore pragmas disabled), and a built-in check for containers that never drop root |
 | `dependency_audit` | `recon/dependencies.py` + `recon/manifests.py` | OSV `querybatch` → advisory details → deps.dev licenses, all bounded and cached |
+| `doc_checks` | `recon/doc_checks.py` | internal links and anchors in the README and `docs/` (GitHub slug rules; external URLs never fetched), docstring coverage of public Python APIs (`ast`), documented `npm`/`yarn`/`make`/project commands that don't exist |
 
 Scanners run with `cwd` set to the clone, and every path is rewritten repo-relative by `recon.files.relative_posix`.
 

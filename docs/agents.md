@@ -50,10 +50,10 @@ Each analyst lives in `agents/analysts/<category>.py` and has three parts:
 
 | Category | Evidence `assess()` scores | Tool families on the deep path |
 |---|---|---|
-| security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (workflows), hadolint and root-user check (Dockerfiles) | files, scanners, git_history |
-| code_quality | ruff bug-class rules, normalized per 1k lines | files, scanners |
+| security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (workflows), hadolint and root-user check (Dockerfiles) | files, symbols, scanners, git_history |
+| code_quality | ruff bug-class rules, normalized per 1k lines | files, symbols, scanners |
 | dependencies | OSV.dev advisories (exact versions) with direct-import evidence, deps.dev licenses against the license policy, pinning | files, dependencies |
-| documentation | README structure metrics | files |
+| documentation | README structure metrics; broken links and anchors, documented commands that don't exist, docstring coverage | files |
 | maintainability | tests, CI, license, policies, activity, archived status | files, git_history |
 
 ### Tools
@@ -66,6 +66,7 @@ All tools are read-only and treat every argument as hostile; see [architecture.m
 | scanners | `run_scanner_on_path` | Re-runs ruff, bandit or semgrep on one path. Respects `ENABLE_BANDIT` and `ENABLE_SEMGREP`. |
 | dependencies | `query_osv` | OSV.dev lookup for one exact version. Uses the shared lookup cache. |
 | git_history | `get_file_git_history` | GitHub API, because the clone is shallow and has one commit. |
+| symbols | `find_definition`, `find_references`, `outline` | A per-run, in-memory symbol index (`agents/symbols.py`), built on the first call and shared by every investigation in the run. Python definitions come from `ast` (exact nesting, signatures and line ranges); JS/TS, Go, Java/Kotlin/C#, Ruby, Rust and PHP from conservative line patterns. References are whole-word name matches, not a call graph. |
 
 ### Bounds on a deep investigation
 

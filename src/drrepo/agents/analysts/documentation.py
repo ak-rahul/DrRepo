@@ -1,16 +1,95 @@
-"""Documentation analyst: README metrics, plus a bounded LLM rubric when available."""
+"""Documentation analyst: README metrics and deterministic doc checks, plus a bounded
+LLM rubric when available.
+
+The score is the README quality metric, minus a bounded penalty (at most
+`DOC_CHECK_MAX_PENALTY` points) for what `recon/doc_checks.py` found: broken
+links and anchors, documented commands that don't exist, and low docstring
+coverage of public Python APIs.
+"""
 
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 from drrepo.agents import rubric
-from drrepo.agents.analysts.base import Analyst, Assessment, Recon, collector_data
+from drrepo.agents.analysts.base import (
+    Analyst,
+    Assessment,
+    Recon,
+    collector_data,
+    issue_penalty,
+)
 from drrepo.agents.llm import LLMRuntime
 from drrepo.log import logger
 from drrepo.models import Category, Issue, Location, Severity
 
 _CRITICAL_SECTIONS = {"Installation", "Usage"}
+DOC_CHECK_MAX_PENALTY = 15.0
+MIN_PUBLIC_APIS_FOR_COVERAGE = 10
+_MAX_LOCATIONS = 20
+
+
+def doc_check_issues(checks: dict[str, Any] | None, readme_file: str) -> list[Issue]:
+    """Issues from the `doc_checks` collector: one per file with broken links, one per
+    missing command, and one for low docstring coverage."""
+    if not checks:
+        return []
+    issues: list[Issue] = []
+    by_file: dict[str, list[dict[str, Any]]] = {}
+    for link in checks.get("broken_links", []):
+        by_file.setdefault(link["file"], []).append(link)
+    for file, links in by_file.items():
+        shown = "; ".join(f"{link['target']} ({link['reason']})" for link in links[:5])
+        more = f"; and {len(links) - 5} more" if len(links) > 5 else ""
+        issues.append(
+            Issue(
+                severity=Severity.MEDIUM if file == readme_file else Severity.LOW,
+                category=Category.DOCUMENTATION,
+                title=f"{len(links)} broken link(s) in {file}",
+                description=f"Links to files or anchors that don't exist: {shown}{more}.",
+                recommendation="Fix or remove the links; anchors must match a heading's slug.",
+                source="doc_checks",
+                rule_id="broken-link",
+                locations=[Location(file, link["line"]) for link in links[:_MAX_LOCATIONS]],
+                occurrences=len(links),
+            )
+        )
+    issues.extend(
+        Issue(
+            severity=Severity.MEDIUM,
+            category=Category.DOCUMENTATION,
+            title=f"Documented command doesn't exist: {command['command'][:80]}",
+            description=f"The docs show `{command['command']}`, but {command['reason']}.",
+            recommendation="Update the docs, or add the script, target or entry point they describe.",
+            source="doc_checks",
+            rule_id="missing-command",
+            locations=[Location(command["file"], command["line"])],
+        )
+        for command in checks.get("missing_commands", [])
+    )
+    docstrings = checks.get("docstrings") or {}
+    coverage, public = docstrings.get("coverage"), int(docstrings.get("public", 0))
+    if coverage is not None and public >= MIN_PUBLIC_APIS_FOR_COVERAGE and coverage < 0.5:
+        samples = docstrings.get("undocumented", [])
+        issues.append(
+            Issue(
+                severity=Severity.MEDIUM if coverage < 0.2 else Severity.LOW,
+                category=Category.DOCUMENTATION,
+                title=f"Docstrings cover {coverage:.0%} of {public} public Python APIs",
+                description=(
+                    f"{public - int(docstrings.get('documented', 0))} public functions, classes "
+                    "or methods in package code have no docstring, for example "
+                    + ", ".join(f"{s['name']} ({s['file']}:{s['line']})" for s in samples[:5])
+                    + "."
+                ),
+                recommendation="Document the public API, starting with the entry points users call first.",
+                source="doc_checks",
+                rule_id="docstring-coverage",
+                locations=[Location(s["file"], s["line"]) for s in samples[:_MAX_LOCATIONS]],
+            )
+        )
+    return issues
 
 
 class DocumentationAnalyst(Analyst):
@@ -97,7 +176,12 @@ class DocumentationAnalyst(Analyst):
                     )
                 )
 
-        score = float(readme.get("quality_score", 0.0))
+        checks = collector_data(recon, "doc_checks")
+        check_issues = doc_check_issues(checks, readme_file)
+        issues += check_issues
+        metric = float(readme.get("quality_score", 0.0))
+        penalty = min(DOC_CHECK_MAX_PENALTY, issue_penalty(check_issues))
+        score = round(max(0.0, metric - penalty), 1)
         # The clone's README is the pinned commit's; the API serves HEAD.
         excerpt = (
             layout.get("readme_content")
@@ -108,11 +192,15 @@ class DocumentationAnalyst(Analyst):
             f"README quality score: {score:.0f}/100; {words} words; "
             f"{readme.get('section_count', 0)} headings; {readme.get('code_block_count', 0)} code blocks.\n"
             f"Missing sections: {readme.get('missing_sections', [])}\n"
+            f"Doc checks: {len((checks or {}).get('broken_links', []))} broken links, "
+            f"{len((checks or {}).get('missing_commands', []))} documented commands that don't exist, "
+            f"docstring coverage {((checks or {}).get('docstrings') or {}).get('coverage')}\n"
             f"Has docs/ directory: {structure.get('has_docs', 'unknown')}\n"
             f"README excerpt:\n{excerpt}"
         )
         summary = (
-            f"README scores {score:.0f}/100 ({words} words, {readme.get('section_count', 0)} sections). "
+            f"README scores {metric:.0f}/100 ({words} words, {readme.get('section_count', 0)} sections)"
+            + (f", minus {penalty:.0f} for documentation checks. " if penalty else ". ")
             + (
                 f"Missing: {', '.join(readme.get('missing_sections', []))}."
                 if readme.get("missing_sections")

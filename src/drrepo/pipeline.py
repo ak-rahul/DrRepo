@@ -45,6 +45,7 @@ from drrepo.agents.grounding import ground_issues
 from drrepo.agents.investigator import investigate
 from drrepo.agents.llm import LLMRuntime
 from drrepo.agents.planner import LeadInvestigator, restrict_plan
+from drrepo.agents.symbols import SymbolIndex
 from drrepo.agents.tools import build_tools
 from drrepo.config import Config
 from drrepo.errors import InvestigationError
@@ -61,6 +62,7 @@ from drrepo.models import (
 )
 from drrepo.recon.clone import clone_repo
 from drrepo.recon.dependencies import DependencyLookupCache, collect_dependency_audit
+from drrepo.recon.doc_checks import collect_doc_checks
 from drrepo.recon.files import collect_repo_layout
 from drrepo.recon.github import collect_github_metadata
 from drrepo.recon.infrastructure import collect_infrastructure
@@ -104,6 +106,9 @@ class RunContext:
     # Categories the plan may investigate with tools; None means all (diff mode
     # passes only the categories that got worse).
     deep_allowed: frozenset[str] | None = None
+    # The clone's symbol index, shared by every investigation of this run (built
+    # lazily on the first symbol tool call). Set by `Workflow.run`.
+    symbol_index: SymbolIndex | None = None
 
     def deep_estimate(self) -> tuple[int, str]:
         """Tokens one deep investigation is expected to cost, and where that came from."""
@@ -204,6 +209,12 @@ COLLECTORS: tuple[CollectorSpec, ...] = (
         "scorecard",
         lambda s, c: collect_scorecard(s["repo"].html_url, c.config),
         "Fetching OpenSSF Scorecard",
+    ),
+    CollectorSpec(
+        "doc_checks",
+        lambda s, c: collect_doc_checks(s["clone_path"] or ""),
+        "Checking documentation links, docstrings and commands",
+        needs_clone=True,
     ),
     CollectorSpec("readme", _readme, after=("github_metadata", "repo_layout")),
 )
@@ -360,6 +371,7 @@ class Workflow:
             config=ctx.config,
             cache=ctx.cache,
             repo_full_name=state["repo"].full_name,
+            symbol_index=ctx.symbol_index,
         )
         ctx.emit(f"{category.label}: {depth.value} investigation started ({len(tools)} tools)")
         try:
@@ -530,6 +542,8 @@ class Workflow:
         """
         ctx.emit(f"Cloning {repo.full_name}" + (f" at {ref}" if ref else ""))
         cloned, clone_result = clone_repo(repo.html_url, ctx.config, ref)
+        if cloned:
+            ctx.symbol_index = SymbolIndex(Path(cloned.path))
         suppressions, suppression_status = self._load_suppressions(
             ctx, cloned.path if cloned else None
         )
@@ -572,6 +586,7 @@ def recon_summary(results: Recon) -> dict[str, Any]:
     github = collector_data(results, "github_metadata") or {}
     layout = collector_data(results, "repo_layout") or {}
     readme = collector_data(results, "readme") or {}
+    doc_checks = collector_data(results, "doc_checks")
     static = collector_data(results, "static_analysis")
     security = collector_data(results, "security")
     deps = collector_data(results, "dependency_audit")
@@ -584,6 +599,9 @@ def recon_summary(results: Recon) -> dict[str, Any]:
         "file_structure": layout.get("file_structure") or github.get("file_structure"),
         "readme_quality_score": readme.get("quality_score"),
         "readme_missing_sections": readme.get("missing_sections"),
+        "broken_doc_links": len(doc_checks.get("broken_links", []))
+        if doc_checks
+        else "unavailable",
         "static_analysis_findings": len(static["findings"]) if static else "unavailable",
         "security_findings": len(findings) if security is not None else "unavailable",
         "possible_secrets": sum(1 for f in findings if f.get("tool") == "secret_scan"),

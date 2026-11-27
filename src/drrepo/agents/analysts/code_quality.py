@@ -55,7 +55,7 @@ def _recommendation(finding: dict[str, Any]) -> str:
 
 class CodeQualityAnalyst(Analyst):
     category = Category.CODE_QUALITY
-    tool_families = ("files", "scanners")
+    tool_families = ("files", "symbols", "scanners")
     rescore_scale = 60.0
 
     def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:

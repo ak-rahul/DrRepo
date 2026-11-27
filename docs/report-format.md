@@ -57,7 +57,7 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
   "title": "bandit B602 (3 occurrences)",
   "description": "…", "recommendation": "…",
   "source": "bandit",          // collector/tool: ruff, bandit, semgrep, secret_scan, osv.dev,
-                               // license-audit, license-policy, dependency_audit, readme_analyzer, repo_hygiene,
+                               // license-audit, license-policy, dependency_audit, readme_analyzer, doc_checks, repo_hygiene,
                                // investigator:<category>. Agent titles may start with
                                // "[unverified]" (grounding) or "[disputed]" (critic)
   "rule_id": "B602",           // tool-specific check id (null for some deterministic checks)
@@ -77,7 +77,7 @@ Severity weights: critical 25, high 10, medium 4, low 1. An aggregated issue cos
 | Code quality | 100, penalty divided by thousands of Python lines (min 1) | 30 per kLOC (80 when size is unknown) |
 | Dependencies | 100 | 40. Dev-only advisories are two severity levels lower; unrated advisories count as high |
 | Maintainability | 100 | 50 |
-| Documentation | README quality score (0–100) | — |
+| Documentation | README quality score (0–100), minus at most 15 for documentation checks (broken links, missing commands, low docstring coverage) | — |
 
 After a deep investigation, the investigator's *new* issues are applied on top of the deterministic score with the category's rescore scale (documentation 60, code quality 60, security 40, dependencies 40, maintainability 50).
 

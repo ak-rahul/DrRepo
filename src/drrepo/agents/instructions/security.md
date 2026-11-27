@@ -28,4 +28,4 @@ You are investigating the security of this repository.
 3. **CI and containers:** zizmor and hadolint findings for workflows and Dockerfiles are listed. For any `template-injection` or `dangerous-triggers` finding, read the workflow and say whether attacker-controlled input (PR titles, branch names, issue bodies) can actually reach a `run:` step.
 4. **Check change history** with `get_file_git_history` on files that handle credentials or authentication, when that would clarify whether a secret was ever committed.
 
-Useful starting searches: `search_code` for `subprocess|os\.system|eval\(|exec\(|pickle\.loads|yaml\.load|verify=False|shell=True`.
+Useful starting searches: `search_code` for `subprocess|os\.system|eval\(|exec\(|pickle\.loads|yaml\.load|verify=False|shell=True`. To follow untrusted input, use `find_definition` to jump to a function, `find_references` to see who calls it, and `outline` to map a file before reading it, instead of searching for names by hand.

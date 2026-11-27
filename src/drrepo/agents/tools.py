@@ -6,6 +6,7 @@ Families (an analyst lists the ones it may use in `Analyst.tool_families`):
     scanners      run_scanner_on_path  (same wrappers as recon)
     dependencies  query_osv            (exact version; shared with the MCP server)
     git_history   get_file_git_history (GitHub API: shallow clones have one commit)
+    symbols       find_definition, find_references, outline  (agents/symbols.py)
 
 The LLM picks every argument, so every argument is hostile: paths go through
 `resolve_safe_path`, globs may not contain `..`/absolute paths/drive letters,
@@ -27,6 +28,7 @@ import regex
 from github import GithubException
 from langchain_core.tools import tool
 
+from drrepo.agents.symbols import NAME_RE, Symbol, SymbolIndex
 from drrepo.config import Config
 from drrepo.recon.dependencies import DependencyLookupCache, build_vulnerabilities, query_osv_ids
 from drrepo.recon.files import SKIP_DIRS, iter_repo_files, read_text_file, relative_posix
@@ -391,7 +393,115 @@ def make_git_history_tools(repo_full_name: str, config: Config) -> list[Any]:
 
 # ------------------------------------------------------------- registry ---
 
-TOOL_FAMILIES = ("files", "scanners", "dependencies", "git_history")
+# -------------------------------------------------------------- symbols ---
+
+MAX_DEFINITIONS_SHOWN = 20
+MAX_REFERENCES_SHOWN = 40
+MAX_OUTLINE_ENTRIES = 150
+REFERENCE_TIME_BUDGET_SECONDS = 10.0
+
+
+def _symbol_line(s: Symbol) -> str:
+    span = f"{s.line}-{s.end_line}" if s.end_line and s.end_line != s.line else str(s.line)
+    return f"{s.path}:{span}: {s.kind} {s.name}: {s.signature}"
+
+
+def make_symbol_tools(clone_root: str, index: SymbolIndex | None = None) -> list[Any]:
+    """Symbol tools over `index` (built lazily on first use; pass the run's shared one)."""
+    root = Path(clone_root).resolve()
+    symbols = index or SymbolIndex(root)
+
+    def _note() -> str:
+        return f"\n(index incomplete: {symbols.truncated})" if symbols.truncated else ""
+
+    @tool
+    def find_definition(name: str) -> str:
+        """Where a function, method, class or type is defined: file, line range and signature.
+
+        Args:
+            name: The symbol name, e.g. "authenticate" or "UserService.login".
+        """
+        if not NAME_RE.match(name.strip()):
+            return "ERROR: name must be an identifier, optionally dotted (e.g. 'Class.method')"
+        found = symbols.definitions(name.strip())
+        if not found:
+            return (
+                f"No definition of {name!r} found in {len(symbols.files)} indexed files.{_note()}"
+            )
+        lines = [_symbol_line(s) for s in found[:MAX_DEFINITIONS_SHOWN]]
+        if len(found) > MAX_DEFINITIONS_SHOWN:
+            lines.append(f"... and {len(found) - MAX_DEFINITIONS_SHOWN} more")
+        return "\n".join(lines) + _note()
+
+    @tool
+    def find_references(name: str, glob: str | None = None) -> str:
+        """Lines that mention a symbol by name (whole word), definitions excluded.
+
+        Matches by name only (no import or scope resolution), so treat results as leads.
+
+        Args:
+            name: The symbol name; for "Class.method" the final segment is searched.
+            glob: Optional file filter, e.g. "src/**/*.py".
+        """
+        if not NAME_RE.match(name.strip()):
+            return "ERROR: name must be an identifier, optionally dotted (e.g. 'Class.method')"
+        try:
+            glob = _safe_glob(glob)
+        except PathEscapesSandboxError as e:
+            return f"ERROR: {e}"
+        short = name.strip().rsplit(".", 1)[-1]
+        word = regex.compile(rf"(?<![\w$]){regex.escape(short)}(?![\w$])")
+        definitions = {(s.path, s.line) for s in symbols.definitions(short)}
+        started = time.monotonic()
+        hits: list[str] = []
+        for rel in symbols.build().files:
+            if glob and not _matches(rel, glob):
+                continue
+            if time.monotonic() - started > REFERENCE_TIME_BUDGET_SECONDS:
+                hits.append("... stopped: time budget reached")
+                break
+            text = read_text_file(root / rel) or ""
+            if short not in text:
+                continue
+            for number, line in enumerate(text.splitlines(), start=1):
+                if (rel, number) in definitions or short not in line:
+                    continue
+                if word.search(line[:MAX_SEARCH_LINE_CHARS]):
+                    hits.append(f"{rel}:{number}: {line.strip()[:200]}")
+                    if len(hits) >= MAX_REFERENCES_SHOWN:
+                        return (
+                            "\n".join(hits) + f"\n... stopped at {MAX_REFERENCES_SHOWN} references"
+                        )
+        return ("\n".join(hits) or f"No references to {short!r} outside its definitions.") + _note()
+
+    @tool
+    def outline(path: str) -> str:
+        """The classes, functions and methods defined in one source file, with line ranges.
+
+        Args:
+            path: File path relative to the repository root, e.g. "src/app/auth.py".
+        """
+        try:
+            target = resolve_safe_path(root, path)
+        except PathEscapesSandboxError as e:
+            return f"ERROR: {e}"
+        rel = relative_posix(target, root)
+        entries = symbols.outline(rel)
+        if not entries:
+            if rel not in symbols.build().files:
+                return f"'{path}' is not an indexed source file (use read_file)."
+            return f"No definitions found in '{rel}'."
+        lines = [
+            f"{'  ' * s.name.count('.')}{_symbol_line(s)}" for s in entries[:MAX_OUTLINE_ENTRIES]
+        ]
+        if len(entries) > MAX_OUTLINE_ENTRIES:
+            lines.append(f"... and {len(entries) - MAX_OUTLINE_ENTRIES} more")
+        return "\n".join(lines)
+
+    return [find_definition, find_references, outline]
+
+
+TOOL_FAMILIES = ("files", "scanners", "dependencies", "git_history", "symbols")
 
 
 def build_tools(
@@ -401,6 +511,7 @@ def build_tools(
     config: Config,
     cache: DependencyLookupCache | None = None,
     repo_full_name: str | None = None,
+    symbol_index: SymbolIndex | None = None,
 ) -> list[Any]:
     """LangChain tools for the requested families.
 
@@ -421,4 +532,6 @@ def build_tools(
         tools += make_dependency_tools(config, cache)
     if "git_history" in families and repo_full_name:
         tools += make_git_history_tools(repo_full_name, config)
+    if "symbols" in families and clone_root:
+        tools += make_symbol_tools(clone_root, symbol_index)
     return tools

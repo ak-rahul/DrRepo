@@ -22,4 +22,4 @@ You are investigating code quality. The listed ruff findings are already reporte
 - dead code, and modules whose names no longer describe what they contain;
 - resource leaks: files, sockets, or connections opened without a context manager.
 
-Use `run_scanner_on_path` with ruff to look closer at hot spots. Every issue must cite a file, and a line wherever possible. Do not report style preferences (naming, formatting, quotes) unless they hide a bug.
+Use `run_scanner_on_path` with ruff to look closer at hot spots. Use `outline` to see a large file's structure, and `find_definition` and `find_references` to check how a suspicious function is used before reporting it. Every issue must cite a file, and a line wherever possible. Do not report style preferences (naming, formatting, quotes) unless they hide a bug.
