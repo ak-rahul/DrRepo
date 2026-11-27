@@ -22,18 +22,18 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from drrepo.agents.llm import LLMRuntime
-from drrepo.core.log import logger
+from drrepo.log import logger
 from drrepo.models import (
     Category,
     CategoryFinding,
-    CollectorStatus,
+    CollectorResult,
     InvestigationDepth,
     Issue,
     Location,
     Severity,
 )
 
-Recon = dict[str, dict[str, Any]]  # collector name -> {"status", "data", "detail"}
+Recon = dict[str, CollectorResult]  # collector name -> result
 
 SEVERITY_WEIGHTS = {
     Severity.CRITICAL: 25.0,
@@ -46,11 +46,14 @@ MAX_SAMPLE_LOCATIONS = 20
 
 def collector_data(recon: Recon, name: str) -> dict[str, Any] | None:
     """`data` for collector `name` if it ran successfully, else None."""
-    entry = recon.get(name) or {}
-    if entry.get("status") != CollectorStatus.OK.value:
-        return None
-    data = entry.get("data")
-    return data if isinstance(data, dict) else {}
+    result = recon.get(name)
+    return result.data if result is not None and result.ok else None
+
+
+def collector_detail(recon: Recon, name: str, default: str) -> str:
+    """Why collector `name` produced no data (its `detail`), or `default`."""
+    result = recon.get(name)
+    return (result.detail if result is not None else None) or default
 
 
 def issue_penalty(issues: Iterable[Issue]) -> float:
@@ -163,8 +166,11 @@ class Analyst(ABC):
         return Assessment(issues=[], score=0.0, summary=reason, assessed=False)
 
     def run_shallow(self, recon: Recon, llm: LLMRuntime | None) -> CategoryFinding:
-        """Deterministic assessment plus (optionally) one LLM-written summary."""
-        assessment = self.assess(recon)
+        """`assess` + `narrate`: the complete shallow path."""
+        return self.narrate(self.assess(recon), llm)
+
+    def narrate(self, assessment: Assessment, llm: LLMRuntime | None) -> CategoryFinding:
+        """Turn an assessment into a finding, with one LLM-written summary if possible."""
         summary = assessment.summary
         notes = list(assessment.notes)
         if assessment.narrative_facts and llm is not None and llm.available:

@@ -11,6 +11,7 @@ from drrepo.agents.analysts.base import (
     Recon,
     aggregate,
     collector_data,
+    collector_detail,
     decay_score,
     issue_penalty,
 )
@@ -87,7 +88,7 @@ class SecurityAnalyst(Analyst):
     def assess(self, recon: Recon) -> Assessment:
         security = collector_data(recon, "security")
         if security is None:
-            detail = (recon.get("security") or {}).get("detail") or "security scanners did not run"
+            detail = collector_detail(recon, "security", "security scanners did not run")
             return self.unassessed(f"Security could not be assessed: {detail}.")
 
         findings = dedupe_cross_tool(security.get("findings", []))

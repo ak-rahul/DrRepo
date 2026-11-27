@@ -13,13 +13,23 @@ import pytest
 
 from drrepo.agents.llm import LLMRuntime
 from drrepo.config import Config
-from drrepo.models import CollectorStatus
+from drrepo.models import CollectorResult, CollectorStatus
 
 
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail loudly if a unit test accidentally opens a real HTTP connection."""
+    """Fail loudly if a unit test opens a real HTTP connection or runs a real clone."""
 
+    def _no_clone(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError(
+            "unit tests must not run a real git clone; patch drrepo.pipeline.clone_repo"
+        )
+
+    monkeypatch.setattr("drrepo.pipeline.clone_repo", _no_clone)
+    _block_http(monkeypatch)
+
+
+def _block_http(monkeypatch: pytest.MonkeyPatch) -> None:
     def _blocked(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError(
             "unit tests must not make real HTTP requests; inject an httpx.MockTransport"
@@ -31,7 +41,7 @@ def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _reset_drrepo_logger():
     """Tests that call configure_logging() (CLI, Streamlit) must not leak handlers."""
-    from drrepo.core.log import logger
+    from drrepo.log import logger
 
     before = list(logger.handlers)
     yield
@@ -61,12 +71,18 @@ def llm(fake_chat_model: MagicMock) -> LLMRuntime:
     return LLMRuntime(client=fake_chat_model)
 
 
-def ok(data: dict[str, Any] | None = None, detail: str | None = None) -> dict[str, Any]:
-    return {"status": CollectorStatus.OK.value, "data": data or {}, "detail": detail}
+def ok(
+    data: dict[str, Any] | None = None, detail: str | None = None, name: str = "x"
+) -> CollectorResult:
+    return CollectorResult(name=name, status=CollectorStatus.OK, data=data or {}, detail=detail)
 
 
-def skipped(detail: str = "skipped") -> dict[str, Any]:
-    return {"status": CollectorStatus.SKIPPED.value, "data": {}, "detail": detail}
+def skipped(detail: str = "skipped", name: str = "x") -> CollectorResult:
+    return CollectorResult.skipped(name, detail)
+
+
+def failed(detail: str, name: str = "x") -> CollectorResult:
+    return CollectorResult(name=name, status=CollectorStatus.ERROR, detail=detail)
 
 
 @pytest.fixture

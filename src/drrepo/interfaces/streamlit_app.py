@@ -22,11 +22,11 @@ import streamlit as st
 
 from drrepo import __version__
 from drrepo.config import Config
-from drrepo.core.github_url import parse_github_url
-from drrepo.core.log import configure_logging, logger
-from drrepo.interfaces.health_checks import check_all
-from drrepo.report.exporters import to_json, to_markdown, to_sarif
-from drrepo.report.synthesizer import grade
+from drrepo.exporters import to_json, to_markdown, to_sarif
+from drrepo.interfaces.health import check_all
+from drrepo.log import configure_logging, logger
+from drrepo.models import RepoRef
+from drrepo.reporting import grade
 from drrepo.service import AnalysisService
 
 SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
@@ -290,7 +290,7 @@ def main() -> None:
 
     if submitted:
         try:
-            ref = parse_github_url(repo_url)
+            ref = RepoRef.parse(repo_url)
         except ValueError as e:
             st.error(str(e))
         else:

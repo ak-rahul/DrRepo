@@ -1,0 +1,441 @@
+"""The analysis graph: recon -> plan -> investigate -> synthesize.
+
+    START ─┬─ repo_layout ─────┐
+           ├─ github_metadata ─┴─► readme ─┐
+           ├─ static_analysis ─────────────┤
+           ├─ security ────────────────────┼─► planner ─► 5 category nodes ─► synthesizer ─► END
+           └─ dependency_audit ────────────┘
+
+Design:
+- **Compiled once, run many times.** `Workflow` holds no per-run state. Every
+  run-specific collaborator (config, LLM runtime with a fresh token budget,
+  dependency cache, progress callback) travels in a `RunContext` through
+  LangGraph's runtime context, so one compiled graph serves concurrent runs.
+- **Recon is declarative.** `COLLECTORS` lists `CollectorSpec`s; the graph is
+  generated from them. A spec that needs a clone is skipped uniformly when
+  there is none.
+- **Typed state.** Nodes exchange `CollectorResult`/`CategoryFinding` objects;
+  only the final `Report` is converted to a dict.
+- **Cloning happens outside the graph**, in `Workflow.run`, inside try/finally.
+
+Fan-in gotcha (verified): a node whose predecessors sit at *different* depths
+fires once per superstep in which any predecessor finishes, unless it has
+`defer=True`. `_needs_defer` decides that from the topology. Never defer a node
+that feeds another deferred node: both become pending together, the downstream
+one runs first and then again (observed live: every category ran twice).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
+
+from drrepo import __version__
+from drrepo.agents.analysts import default_analysts
+from drrepo.agents.analysts.base import Analyst, Recon, collector_data, merge_issues
+from drrepo.agents.investigator import investigate
+from drrepo.agents.llm import LLMRuntime
+from drrepo.agents.planner import LeadInvestigator
+from drrepo.agents.tools import build_tools
+from drrepo.config import Config
+from drrepo.errors import InvestigationError
+from drrepo.log import logger
+from drrepo.models import (
+    Category,
+    CategoryFinding,
+    CollectorResult,
+    InvestigationDepth,
+    InvestigationPlan,
+    RepoRef,
+    Report,
+)
+from drrepo.recon.clone import clone_repo
+from drrepo.recon.dependencies import DependencyLookupCache, collect_dependency_audit
+from drrepo.recon.files import collect_repo_layout
+from drrepo.recon.github import collect_github_metadata
+from drrepo.recon.readme import analyze_readme
+from drrepo.recon.scanners import collect_security, collect_static_analysis
+from drrepo.reporting import synthesize_report
+
+ProgressCallback = Callable[[str], None]
+
+
+def _no_progress(_message: str) -> None:
+    return None
+
+
+# ------------------------------------------------------------- context ---
+
+
+@dataclass
+class RunContext:
+    """Everything one run needs besides graph state. Built by `AnalysisService`."""
+
+    config: Config
+    llm: LLMRuntime
+    cache: DependencyLookupCache | None = None
+    progress: ProgressCallback = field(default=_no_progress)
+
+    def emit(self, message: str) -> None:
+        logger.info(message)
+        try:
+            self.progress(message)
+        except Exception as e:  # a broken UI callback must never break an analysis
+            logger.debug(f"progress callback failed: {e}")
+
+
+def _merge(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    return {**left, **right}
+
+
+class State(TypedDict):
+    repo: RepoRef
+    description: str
+    clone_path: str | None
+    collector_results: Annotated[dict[str, CollectorResult], _merge]
+    investigation_plan: InvestigationPlan
+    category_findings: Annotated[dict[str, CategoryFinding], _merge]
+    report: Report | None
+
+
+# ---------------------------------------------------------- collectors ---
+
+
+@dataclass(frozen=True)
+class CollectorSpec:
+    name: str
+    run: Callable[[State, RunContext], CollectorResult]
+    progress: str | None = None
+    needs_clone: bool = False
+    after: tuple[str, ...] = ()
+
+
+def _readme(state: State, ctx: RunContext) -> CollectorResult:
+    """README from the GitHub API, falling back to the clone. SKIPPED (never an
+    analysis of "") when neither source is available -- otherwise an upstream
+    failure would be reported as "every section missing"."""
+    github = collector_data(state["collector_results"], "github_metadata")
+    layout = collector_data(state["collector_results"], "repo_layout")
+    if github is not None and github.get("readme_content"):
+        return analyze_readme(github["readme_content"])
+    if layout is not None:
+        return analyze_readme(layout.get("readme_content", ""))
+    if github is not None:
+        return analyze_readme("")
+    return CollectorResult.skipped("readme", "no README source available")
+
+
+COLLECTORS: tuple[CollectorSpec, ...] = (
+    CollectorSpec(
+        "repo_layout",
+        lambda s, c: collect_repo_layout(s["clone_path"] or ""),
+        "Mapping repository layout",
+        needs_clone=True,
+    ),
+    CollectorSpec(
+        "github_metadata",
+        lambda s, c: collect_github_metadata(s["repo"].html_url, c.config),
+        "Fetching GitHub metadata",
+    ),
+    CollectorSpec(
+        "static_analysis",
+        lambda s, c: collect_static_analysis(s["clone_path"] or "", c.config),
+        "Running ruff",
+        needs_clone=True,
+    ),
+    CollectorSpec(
+        "security",
+        lambda s, c: collect_security(s["clone_path"] or "", c.config),
+        "Running bandit, semgrep and the secret scanner",
+        needs_clone=True,
+    ),
+    CollectorSpec(
+        "dependency_audit",
+        lambda s, c: collect_dependency_audit(s["clone_path"] or "", c.config, cache=c.cache),
+        "Auditing dependencies against OSV.dev",
+        needs_clone=True,
+    ),
+    CollectorSpec("readme", _readme, after=("github_metadata", "repo_layout")),
+)
+
+
+def _depths(specs: tuple[CollectorSpec, ...]) -> dict[str, int]:
+    by_name = {s.name: s for s in specs}
+    depths: dict[str, int] = {}
+
+    def depth(name: str) -> int:
+        if name not in depths:
+            depths[name] = 1 + max((depth(p) for p in by_name[name].after), default=0)
+        return depths[name]
+
+    for spec in specs:
+        depth(spec.name)
+    return depths
+
+
+def _needs_defer(predecessor_depths: list[int]) -> bool:
+    return len(set(predecessor_depths)) > 1
+
+
+# ------------------------------------------------------------ workflow ---
+
+
+class Workflow:
+    """A compiled analysis graph. Stateless between runs; safe to share."""
+
+    def __init__(
+        self,
+        analysts: dict[Category, Analyst] | None = None,
+        collectors: tuple[CollectorSpec, ...] = COLLECTORS,
+    ):
+        self.analysts = analysts or default_analysts()
+        self.collectors = collectors
+        self.graph = self._build_graph()
+
+    # ---- nodes -------------------------------------------------------------
+
+    @staticmethod
+    def _collector_node(
+        spec: CollectorSpec,
+    ) -> Callable[[State, Runtime[RunContext]], dict[str, Any]]:
+        def node(state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
+            ctx = runtime.context
+            if spec.needs_clone and not state["clone_path"]:
+                result = CollectorResult.skipped(spec.name, "no clone")
+            else:
+                if spec.progress:
+                    ctx.emit(spec.progress)
+                result = spec.run(state, ctx)
+            return {"collector_results": {spec.name: result}}
+
+        return node
+
+    def _planner_node(self, state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
+        ctx = runtime.context
+        reason = None
+        if not ctx.config.enable_deep_investigation:
+            reason = "deep investigation disabled by config"
+        elif not state["clone_path"]:
+            reason = "no clone available to investigate"
+        elif not ctx.llm.available:
+            reason = "no LLM provider configured"
+        if reason:
+            return {"investigation_plan": InvestigationPlan.all_shallow(reason)}
+
+        # Reserve budget before the parallel fan-out: checking it inside each
+        # category node would let all five see a full budget at the same
+        # instant and all go deep.
+        max_deep = len(Category)
+        if ctx.llm.budget is not None:
+            max_deep = min(
+                max_deep,
+                ctx.llm.budget.affordable_count(ctx.config.estimated_tokens_per_deep_investigation),
+            )
+
+        ctx.emit("Lead Investigator is planning the investigation")
+        plan = LeadInvestigator(ctx.llm).plan(
+            recon_summary(state["collector_results"]), max_deep, state["description"]
+        )
+        for name, p in plan.plans.items():
+            logger.info(f"Plan for {name}: {p.depth.value} ({p.rationale})")
+        return {"investigation_plan": plan}
+
+    def _category_node(
+        self, category: Category
+    ) -> Callable[[State, Runtime[RunContext]], dict[str, Any]]:
+        def node(state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
+            finding = self.analyze_category(category, state, runtime.context)
+            return {"category_findings": {category.value: finding}}
+
+        return node
+
+    def analyze_category(
+        self, category: Category, state: State, ctx: RunContext
+    ) -> CategoryFinding:
+        """Deterministic assessment, then (if planned) a deep investigation on top of it."""
+        analyst = self.analysts[category]
+        recon = state["collector_results"]
+        assessment = analyst.assess(recon)
+        shallow = analyst.narrate(assessment, ctx.llm)
+
+        if (
+            state["investigation_plan"].depth_for(category) != InvestigationDepth.DEEP
+            or not state["clone_path"]
+        ):
+            ctx.emit(f"{category.label}: automated pass complete")
+            return shallow
+
+        tools = build_tools(
+            analyst.tool_families,
+            clone_root=state["clone_path"],
+            config=ctx.config,
+            cache=ctx.cache,
+            repo_full_name=state["repo"].full_name,
+        )
+        ctx.emit(f"{category.label}: deep investigation started ({len(tools)} tools)")
+        try:
+            result = investigate(
+                category=category,
+                system_prompt=analyst.investigation_prompt,
+                tools=tools,
+                llm=ctx.llm,
+                recon_data={name: r.data for name, r in recon.items()},
+                known_issues=shallow.issues,
+                max_tool_calls=ctx.config.max_tool_calls_per_investigator,
+                timeout_seconds=ctx.config.investigator_timeout_seconds,
+                user_context=state["description"],
+            )
+        except InvestigationError as e:
+            ctx.emit(f"{category.label}: deep investigation {e.reason}; using automated pass")
+            shallow.notes.append(
+                f"Deep investigation {e.reason}; showing the automated pass instead."
+            )
+            return shallow
+
+        known = {i.dedupe_key() for i in shallow.issues}
+        new_issues = [i for i in result.issues if i.dedupe_key() not in known]
+        ctx.emit(
+            f"{category.label}: deep investigation finished "
+            f"({len(result.trace)} tool calls, {len(new_issues)} new issues)"
+        )
+        return CategoryFinding(
+            category=category,
+            score=analyst.rescore(recon, assessment, new_issues)
+            if assessment.assessed
+            else shallow.score,
+            summary=result.summary or shallow.summary,
+            issues=merge_issues(shallow.issues, new_issues),
+            assessed=shallow.assessed,
+            investigation_depth=InvestigationDepth.DEEP,
+            investigation_trace=result.trace,
+            notes=shallow.notes,
+        )
+
+    def _synthesizer_node(self, state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
+        runtime.context.emit("Synthesizing report")
+        results = state["collector_results"]
+        github = collector_data(results, "github_metadata") or {}
+        layout = collector_data(results, "repo_layout") or {}
+        languages = list((layout.get("lines_by_language") or {}).keys())
+        repo = state["repo"]
+        repository = {
+            "name": github.get("name", repo.name),
+            "full_name": github.get("full_name", repo.full_name),
+            "url": github.get("url", repo.html_url),
+            "description": github.get("description", ""),
+            "language": github.get("language") or (languages[0] if languages else "Unknown"),
+            "stars": github.get("stars", 0),
+            "forks": github.get("forks", 0),
+            "license": github.get("license_spdx_id"),
+        }
+        report = synthesize_report(
+            repository=repository,
+            category_findings=state["category_findings"],
+            collector_status={
+                n: {"status": r.status.value, "detail": r.detail} for n, r in results.items()
+            },
+            investigation_plan=state["investigation_plan"],
+            generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            drrepo_version=__version__,
+        )
+        return {"report": report}
+
+    # ---- graph -------------------------------------------------------------
+
+    def _build_graph(self) -> Any:
+        # Typed as Any: LangGraph's add_node overloads can't match closures over Runtime[...].
+        graph: Any = StateGraph(State, context_schema=RunContext)
+        depths = _depths(self.collectors)
+        feeds_other = {p for spec in self.collectors for p in spec.after}
+
+        for spec in self.collectors:
+            graph.add_node(
+                spec.name,
+                self._collector_node(spec),
+                defer=_needs_defer([depths[p] for p in spec.after]),
+            )
+            for predecessor in spec.after or (START,):
+                graph.add_edge(predecessor, spec.name)
+
+        leaves = [s.name for s in self.collectors if s.name not in feeds_other]
+        graph.add_node(
+            "planner", self._planner_node, defer=_needs_defer([depths[n] for n in leaves])
+        )
+        for name in leaves:
+            graph.add_edge(name, "planner")
+
+        # All category nodes sit one hop after the planner (symmetric), but the
+        # synthesizer keeps defer=True as a guard; it has been verified safe.
+        graph.add_node("synthesizer", self._synthesizer_node, defer=True)
+        for category in self.analysts:
+            node_name = f"{category.value}_review"
+            graph.add_node(node_name, self._category_node(category))
+            graph.add_edge("planner", node_name)
+            graph.add_edge(node_name, "synthesizer")
+        graph.add_edge("synthesizer", END)
+        return graph.compile()
+
+    # ---- entrypoint --------------------------------------------------------
+
+    def run(self, repo: RepoRef, ctx: RunContext, description: str = "") -> dict[str, Any]:
+        """Clone, run the graph, clean up. Returns `Report.to_dict()` (+ `llm_usage`)."""
+        ctx.emit(f"Cloning {repo.full_name}")
+        cloned, clone_result = clone_repo(repo.html_url, ctx.config)
+        initial: State = {
+            "repo": repo,
+            "description": description,
+            "clone_path": str(cloned.path) if cloned else None,
+            "collector_results": {"repo_clone": clone_result},
+            "investigation_plan": InvestigationPlan.all_shallow("not planned yet"),
+            "category_findings": {},
+            "report": None,
+        }
+        try:
+            final = self.graph.invoke(initial, context=ctx)
+        finally:
+            if cloned:
+                cloned.cleanup()
+        report: dict[str, Any] = final["report"].to_dict()
+        if ctx.llm.budget is not None:
+            report["llm_usage"] = ctx.llm.budget.usage()
+        ctx.emit("Analysis complete")
+        return report
+
+
+def recon_summary(results: Recon) -> dict[str, Any]:
+    """Compact recon signals for the planner prompt (counts, not dumps)."""
+    github = collector_data(results, "github_metadata") or {}
+    layout = collector_data(results, "repo_layout") or {}
+    readme = collector_data(results, "readme") or {}
+    static = collector_data(results, "static_analysis")
+    security = collector_data(results, "security")
+    deps = collector_data(results, "dependency_audit")
+    findings = (security or {}).get("findings", [])
+    return {
+        "language": github.get("language"),
+        "lines_by_language": layout.get("lines_by_language"),
+        "stars": github.get("stars"),
+        "archived": github.get("archived"),
+        "file_structure": layout.get("file_structure") or github.get("file_structure"),
+        "readme_quality_score": readme.get("quality_score"),
+        "readme_missing_sections": readme.get("missing_sections"),
+        "static_analysis_findings": len(static["findings"]) if static else "unavailable",
+        "security_findings": len(findings) if security is not None else "unavailable",
+        "possible_secrets": sum(1 for f in findings if f.get("tool") == "secret_scan"),
+        "high_severity_security_findings": sum(
+            1
+            for f in findings
+            if str(f.get("severity", "")).upper() in ("HIGH", "ERROR", "CRITICAL")
+        ),
+        "dependencies_checked": deps.get("packages_checked") if deps else "unavailable",
+        "dependency_vulnerabilities": len(deps.get("vulnerabilities", []))
+        if deps
+        else "unavailable",
+        "unpinned_dependencies": len(deps.get("unpinned", [])) if deps else "unavailable",
+        "collector_status": {n: r.status.value for n, r in results.items()},
+    }

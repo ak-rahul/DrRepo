@@ -16,9 +16,9 @@ from drrepo.agents.analysts.documentation import DocumentationAnalyst
 from drrepo.agents.analysts.maintainability import MaintainabilityAnalyst, days_since
 from drrepo.agents.analysts.security import SecurityAnalyst, dedupe_cross_tool, security_severity
 from drrepo.agents.llm import LLMRuntime
-from drrepo.core.errors import CircuitOpenError
+from drrepo.errors import CircuitOpenError
 from drrepo.models import Category, Issue, Location, Severity
-from tests.conftest import ok, skipped
+from tests.conftest import failed, ok, skipped
 
 
 def _issue(sev=Severity.LOW, title="t", file=None, occurrences=1):
@@ -254,9 +254,7 @@ class TestDependencies:
         assert result.score == 100 and result.assessed
 
     def test_audit_failure_unassessed(self):
-        result = DependencyAnalyst().assess(
-            {"dependency_audit": {"status": "error", "data": {}, "detail": "OSV down"}}
-        )
+        result = DependencyAnalyst().assess({"dependency_audit": failed("OSV down")})
         assert result.assessed is False and "OSV down" in result.summary
 
 

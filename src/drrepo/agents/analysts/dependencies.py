@@ -12,6 +12,7 @@ from drrepo.agents.analysts.base import (
     Assessment,
     Recon,
     collector_data,
+    collector_detail,
     decay_score,
     issue_penalty,
     sort_issues,
@@ -191,7 +192,7 @@ class DependencyAnalyst(Analyst):
     def assess(self, recon: Recon) -> Assessment:
         deps = collector_data(recon, "dependency_audit")
         if deps is None:
-            detail = (recon.get("dependency_audit") or {}).get("detail") or "the audit did not run"
+            detail = collector_detail(recon, "dependency_audit", "the audit did not run")
             return self.unassessed(f"Dependency health is unknown: {detail}.")
 
         checked = int(deps.get("packages_checked", 0))

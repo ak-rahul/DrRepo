@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from drrepo.core.errors import ConfigurationError
+from drrepo.errors import ConfigurationError
 
 SUPPORTED_PROVIDERS = ("groq", "openai")
 

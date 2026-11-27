@@ -28,23 +28,14 @@ from typing import Any
 from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 
-from drrepo.agents.llm import LLMRuntime
-from drrepo.core.budget import estimate_tokens, extract_actual_tokens
-from drrepo.core.errors import CircuitOpenError, DrRepoError
-from drrepo.core.log import logger
+from drrepo.agents.llm import LLMRuntime, estimate_tokens, extract_actual_tokens
+from drrepo.errors import CircuitOpenError, InvestigationError
+from drrepo.log import logger
 from drrepo.models import Category, Issue, Location, Severity, ToolCallTrace
 
 MAX_LIST_ITEMS_IN_PROMPT = 15
 MAX_TEXT_FIELD_CHARS = 1500
 MAX_OBSERVATION_CHARS = 600
-
-
-class InvestigationError(DrRepoError):
-    """The deep investigation could not produce a result; `reason` is user-presentable."""
-
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
 
 
 # Public names on purpose -- see the naming gotcha in planner.py.

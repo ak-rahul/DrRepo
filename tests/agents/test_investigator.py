@@ -18,9 +18,8 @@ from drrepo.agents.investigator import (
     investigate,
     summarize_recon_data,
 )
-from drrepo.agents.llm import LLMRuntime
-from drrepo.core.budget import LLMBudgetTracker
-from drrepo.core.errors import CircuitOpenError
+from drrepo.agents.llm import LLMRuntime, TokenBudget
+from drrepo.errors import CircuitOpenError
 from drrepo.models import Category, Issue, Severity
 
 
@@ -41,7 +40,7 @@ def _run(agent_result=None, side_effect=None, **kwargs):
         agent.invoke.side_effect = side_effect
     else:
         agent.invoke.return_value = agent_result
-    llm = kwargs.pop("llm", LLMRuntime(client=MagicMock(), budget=LLMBudgetTracker(100_000)))
+    llm = kwargs.pop("llm", LLMRuntime(client=MagicMock(), budget=TokenBudget(100_000)))
     with patch("langchain.agents.create_agent", return_value=agent) as create:
         result = investigate(
             category=Category.SECURITY,

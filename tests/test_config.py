@@ -1,7 +1,7 @@
 import pytest
 
 from drrepo.config import Config
-from drrepo.core.errors import ConfigurationError
+from drrepo.errors import ConfigurationError
 
 _ENV_KEYS = [
     "GROQ_API_KEY",

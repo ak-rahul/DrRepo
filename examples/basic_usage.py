@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 
 from drrepo.config import Config
-from drrepo.core.log import configure_logging
+from drrepo.log import configure_logging
 from drrepo.service import AnalysisService, save_report
 
 

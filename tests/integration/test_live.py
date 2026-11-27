@@ -42,7 +42,7 @@ def test_deterministic_analysis_of_real_repo(live_config):
 
 
 def test_osv_lookup_finds_known_vulnerability(live_config):
-    from drrepo.tools.dependencies import lookup_package
+    from drrepo.agents.tools import lookup_package
 
     out = lookup_package("jinja2", "PyPI", "2.4.1", live_config)
     assert "GHSA-" in out or "PYSEC-" in out
@@ -53,8 +53,8 @@ def test_investigator_really_calls_tools(live_config, tmp_path):
         pytest.skip("no LLM API key configured")
     from drrepo.agents.investigator import investigate
     from drrepo.agents.llm import LLMRuntime, build_chat_model
+    from drrepo.agents.tools import make_file_tools
     from drrepo.models import Category
-    from drrepo.tools.files import make_file_tools
 
     (tmp_path / "app.py").write_text(
         "import os\n\ndef run(cmd):\n    os.system(cmd)\n", encoding="utf-8"

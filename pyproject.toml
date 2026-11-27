@@ -43,7 +43,7 @@ Repository = "https://github.com/ak-rahul/DrRepo"
 Issues = "https://github.com/ak-rahul/DrRepo/issues"
 
 [project.scripts]
-drrepo = "drrepo.cli:main"
+drrepo = "drrepo.interfaces.cli:main"
 
 [dependency-groups]
 dev = [
@@ -98,7 +98,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S108", "B017"]
-"src/drrepo/collectors/security.py" = ["S105"] # "secret_scan" is a tool name, not a secret
+"src/drrepo/recon/scanners.py" = ["S105"] # "secret_scan" is a tool name, not a secret
 
 [tool.ruff.format]
 quote-style = "double"

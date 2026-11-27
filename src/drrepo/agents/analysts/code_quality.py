@@ -11,6 +11,7 @@ from drrepo.agents.analysts.base import (
     Recon,
     aggregate,
     collector_data,
+    collector_detail,
     decay_score,
     issue_penalty,
 )
@@ -66,9 +67,7 @@ class CodeQualityAnalyst(Analyst):
         python_lines = int(layout.get("python_lines") or 0)
 
         if static is None:
-            detail = (recon.get("static_analysis") or {}).get(
-                "detail"
-            ) or "static analysis did not run"
+            detail = collector_detail(recon, "static_analysis", "static analysis did not run")
             return self.unassessed(f"Code quality could not be assessed: {detail}.")
         if layout and python_lines == 0:
             languages = (

@@ -18,7 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from drrepo.agents.llm import LLMRuntime
-from drrepo.core.log import logger
+from drrepo.log import logger
 from drrepo.models import Category, CategoryPlan, InvestigationDepth, InvestigationPlan
 
 SYSTEM_PROMPT = """You are the lead investigator planning a repository audit. From initial recon \

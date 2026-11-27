@@ -3,8 +3,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from drrepo.config import Config
-from drrepo.interfaces import health_api
-from drrepo.interfaces.health_checks import check_all, check_github, check_llm
+from drrepo.interfaces import health as health_api
+from drrepo.interfaces.health import check_all, check_github, check_llm
 from tests.conftest import mock_http
 
 GOOD = {

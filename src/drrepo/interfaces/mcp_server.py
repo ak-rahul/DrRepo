@@ -32,16 +32,15 @@ from typing import Any, Literal
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
 
-from drrepo.collectors.readme import analyze_readme
+from drrepo.agents.tools import lookup_package
 from drrepo.config import Config
-from drrepo.core.github_url import parse_github_url
-from drrepo.core.log import logger
-from drrepo.interfaces.health_checks import check_all
-from drrepo.models import Severity
-from drrepo.report.exporters import to_json, to_markdown, to_sarif
-from drrepo.report.history import load_history
+from drrepo.exporters import to_json, to_markdown, to_sarif
+from drrepo.interfaces.health import check_all
+from drrepo.log import logger
+from drrepo.models import RepoRef, Severity
+from drrepo.recon.readme import analyze_readme
+from drrepo.reporting import load_history
 from drrepo.service import AnalysisService
-from drrepo.tools.dependencies import lookup_package
 
 mcp = FastMCP(
     name="drrepo",
@@ -119,7 +118,7 @@ async def analyze_repository(
     """
     service = get_service()
     try:
-        parse_github_url(repo_url)
+        RepoRef.parse(repo_url)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -224,7 +223,7 @@ def analyze_readme_text(markdown: str) -> dict[str, Any]:
 @mcp.tool()
 def get_score_history(repo: str) -> list[dict[str, Any]]:
     """Recorded overall/category scores from previous analyses of a repository (oldest first)."""
-    ref = parse_github_url(
+    ref = RepoRef.parse(
         repo if "://" in repo or "github.com" in repo else f"https://github.com/{repo}"
     )
     history = load_history(get_service().history_path)

@@ -17,7 +17,7 @@ uv run pytest
 
 1. Create a branch from `main`.
 2. Keep changes focused, and add or update tests next to the code (`tests/` mirrors `src/drrepo/`).
-3. Make sure `make check` passes (or `uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src && uv run pytest`).
+3. Make sure the CI checks pass: `uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src && uv run pytest`.
 4. Unit tests must stay hermetic: no network, no environment variables. Anything live belongs in `tests/integration/` with `@pytest.mark.integration`.
 5. Use [Conventional Commits](https://www.conventionalcommits.org) messages (`feat:`, `fix:`, `docs:`, ...).
 6. Open a pull request that says what changed and why.

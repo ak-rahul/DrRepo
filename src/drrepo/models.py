@@ -1,16 +1,76 @@
-"""Shared data contracts.
+"""Domain types shared by every layer.
 
-Collectors (deterministic, no LLM) only produce `CollectorResult`. Analysts and
-investigators produce `CategoryFinding`s, built from `Issue`s. The synthesizer
-turns those into one `Report`. Every cross-layer boundary goes through one of
-these types (or its `to_dict()` form inside LangGraph state).
+Recon collectors produce `CollectorResult`s; analysts and investigators produce
+`CategoryFinding`s built from `Issue`s; the synthesizer turns those into one
+`Report`. LangGraph state holds these objects directly (nothing is persisted
+mid-run); `to_dict()` exists only for the final report and its exporters.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlparse
+
+# ---------------------------------------------------------- repository ---
+
+_GITHUB_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$")
+
+
+@dataclass(frozen=True)
+class RepoRef:
+    """A validated public GitHub repository reference.
+
+    `parse()` accepts what people paste -- `https://github.com/o/r`, `.../o/r.git`,
+    `.../o/r/tree/main/sub`, `github.com/o/r` -- and rejects everything else. Only
+    the normalized `clone_url` ever reaches `git`.
+    """
+
+    owner: str
+    name: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.name}"
+
+    @property
+    def html_url(self) -> str:
+        return f"https://github.com/{self.full_name}"
+
+    @property
+    def clone_url(self) -> str:
+        return f"https://github.com/{self.full_name}.git"
+
+    @classmethod
+    def parse(cls, url: str) -> RepoRef:
+        """Raises ValueError (user-presentable) for anything but a github.com repo URL."""
+        raw = (url or "").strip()
+        if not raw:
+            raise ValueError("Repository URL cannot be empty")
+        if "://" not in raw:
+            raw = "https://" + raw
+        parsed = urlparse(raw)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in ("https", "http") or host not in ("github.com", "www.github.com"):
+            raise ValueError("Only https://github.com/<owner>/<repo> URLs are supported")
+        if parsed.username or parsed.password:
+            raise ValueError("Repository URLs must not contain credentials")
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) < 2:
+            raise ValueError("Expected a URL of the form https://github.com/<owner>/<repo>")
+        owner, name = parts[0], parts[1].removesuffix(".git")
+        if (
+            not _GITHUB_NAME_RE.match(owner)
+            or not _GITHUB_NAME_RE.match(name)
+            or name in (".", "..")
+        ):
+            raise ValueError(f"'{owner}/{name}' is not a valid GitHub repository name")
+        return cls(owner=owner, name=name)
+
+
+# ------------------------------------------------------------ findings ---
 
 
 class Severity(StrEnum):
@@ -82,6 +142,14 @@ class CollectorResult:
     data: dict[str, Any] = field(default_factory=dict)
     detail: str | None = None
 
+    @property
+    def ok(self) -> bool:
+        return self.status == CollectorStatus.OK
+
+    @classmethod
+    def skipped(cls, name: str, detail: str) -> CollectorResult:
+        return cls(name=name, status=CollectorStatus.SKIPPED, detail=detail)
+
     def to_dict(self) -> dict[str, Any]:
         return {"status": self.status.value, "data": self.data, "detail": self.detail}
 
@@ -136,25 +204,6 @@ class Issue:
             "occurrences": self.occurrences,
         }
 
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Issue:
-        locations = [
-            Location(file=loc["file"], line=loc.get("line")) for loc in d.get("locations") or []
-        ]
-        if not locations and d.get("file"):
-            locations = [Location(file=d["file"], line=d.get("line"))]
-        return cls(
-            severity=Severity.parse(d.get("severity")),
-            category=Category(d["category"]),
-            title=d["title"],
-            description=d.get("description", ""),
-            recommendation=d.get("recommendation", ""),
-            source=d.get("source") or d["category"],
-            rule_id=d.get("rule_id"),
-            locations=locations,
-            occurrences=int(d.get("occurrences") or 1),
-        )
-
 
 @dataclass
 class ToolCallTrace:
@@ -199,24 +248,6 @@ class CategoryFinding:
             "notes": list(self.notes),
         }
 
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> CategoryFinding:
-        return cls(
-            category=Category(d["category"]),
-            score=float(d.get("score", 0.0)),
-            summary=d.get("summary", ""),
-            issues=[Issue.from_dict(i) for i in d.get("issues", [])],
-            assessed=bool(d.get("assessed", True)),
-            investigation_depth=InvestigationDepth(d.get("investigation_depth", "shallow")),
-            investigation_trace=[
-                ToolCallTrace(
-                    tool=t["tool"], tool_input=t["tool_input"], observation=t["observation"]
-                )
-                for t in d.get("investigation_trace", [])
-            ],
-            notes=list(d.get("notes", [])),
-        )
-
 
 @dataclass
 class CategoryPlan:
@@ -239,9 +270,6 @@ class InvestigationPlan:
     def depth_for(self, category: Category) -> InvestigationDepth:
         plan = self.plans.get(category.value)
         return plan.depth if plan else InvestigationDepth.SHALLOW
-
-    def deep_categories(self) -> list[Category]:
-        return [c for c in Category if self.depth_for(c) == InvestigationDepth.DEEP]
 
     def to_dict(self) -> dict[str, Any]:
         return {name: plan.to_dict() for name, plan in self.plans.items()}

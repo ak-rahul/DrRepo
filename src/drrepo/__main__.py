@@ -1,5 +1,5 @@
 """Allow `python -m drrepo ...`."""
 
-from drrepo.cli import main
+from drrepo.interfaces.cli import main
 
 raise SystemExit(main())

@@ -34,7 +34,7 @@ Without an API key DrRepo still runs. The report is then fully deterministic, wi
 
 - **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif] [--fail-under 70]`. The exit code makes it usable as a CI gate.
 - **Web UI**: live progress, issue filters, the investigator's tool-call trace, and report downloads.
-- **MCP server**: 8 tools, 3 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/mcp.md](docs/mcp.md).
+- **MCP server**: 8 tools, 3 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
 - **Health API**: `drrepo health-api` serves liveness, readiness, and dependency checks.
 
@@ -55,14 +55,11 @@ Findings and scores come from deterministic code; the LLM only writes summaries 
 
 | | |
 |---|---|
-| [Usage](docs/usage.md) | CLI, UI, Python API, Docker, CI and SARIF upload |
+| [Usage](docs/usage.md) | CLI, UI, Python API, Docker, CI/SARIF, MCP server, troubleshooting |
 | [Configuration](docs/configuration.md) | every environment variable |
-| [Architecture](docs/architecture.md) | pipeline, agents, resilience, design rules |
+| [Architecture](docs/architecture.md) | design, pipeline, agents, resilience, security model |
 | [Report format](docs/report-format.md) | JSON schema, scoring math, SARIF mapping |
-| [MCP server](docs/mcp.md) | tools, resources, client setup |
-| [Security model](docs/security.md) | sandboxing and what DrRepo never does |
 | [Development](docs/development.md) | setup, tests, extending DrRepo |
-| [Troubleshooting](docs/troubleshooting.md) | common problems and fixes |
 
 ## License
 

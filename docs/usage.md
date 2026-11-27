@@ -37,7 +37,7 @@ Other commands:
 
 ```bash
 uv run drrepo ui [--port 8501] [--headless]         # Streamlit UI
-uv run drrepo mcp [--transport stdio|sse|streamable-http]
+uv run drrepo mcp [--transport stdio|sse|streamable-http]   # see MCP server below
 uv run drrepo health [--json]                       # LLM provider / GitHub / OSV connectivity
 uv run drrepo doctor [--offline]                    # full local diagnostics
 uv run drrepo health-api [--port 8000]              # FastAPI health endpoint
@@ -92,3 +92,93 @@ The image runs as a non-root user, contains `git`, and reads credentials from `.
 ```
 
 DrRepo analyzes the public GitHub copy of the repository, not the CI checkout. Each SARIF result's `uri` is repo-relative, so GitHub annotates the right files.
+
+## MCP server
+
+`drrepo mcp` exposes DrRepo over the [Model Context Protocol](https://modelcontextprotocol.io), so an assistant can audit a repository and work through the findings itself.
+
+### Client setup
+
+**Claude Desktop / any stdio client** (`claude_desktop_config.json`; template in `examples/mcp_client_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "drrepo": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/DrRepo", "run", "drrepo", "mcp"],
+      "env": { "GROQ_API_KEY": "...", "GH_TOKEN": "..." }
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```bash
+claude mcp add drrepo -- uv --directory /absolute/path/to/DrRepo run drrepo mcp
+```
+
+**Remote / HTTP:** `drrepo mcp --transport streamable-http --host 0.0.0.0 --port 8765` serves at `http://host:8765/mcp` (also available through `docker compose --profile mcp up`). Put it behind your own auth before exposing it: the server has no authentication of its own, and every call can trigger a clone and LLM spend.
+
+With stdio transport, stdout belongs to the protocol. All DrRepo logging goes to stderr and the log file.
+
+### Tools
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `analyze_repository` | `repo_url`, `description=""`, `deep=true`, `max_issues=15` | summary: scores, top issues, quick wins, resource URIs. Takes 1–5 min and streams MCP progress notifications |
+| `get_report` | `repo`, `format=summary\|json\|markdown` | latest report from this server session |
+| `list_reports` | — | reports produced in this session |
+| `get_issues` | `repo`, `min_severity=low`, `category=null`, `limit=50` | filtered issue list with evidence and locations |
+| `check_package_vulnerabilities` | `package`, `ecosystem`, `version` | OSV advisories with severity and fixed versions |
+| `analyze_readme_text` | `markdown` | README metrics for any text (no network) |
+| `get_score_history` | `repo` | recorded scores from previous runs |
+| `health_check` | — | provider, GitHub, and OSV connectivity, plus circuit breaker state |
+
+`repo` accepts a URL or `owner/name`. Reports stay in memory for the server's lifetime (the 20 most recent).
+
+### Resources
+
+| URI | MIME type |
+|---|---|
+| `drrepo://reports/{owner}/{name}` | `application/json` |
+| `drrepo://reports/{owner}/{name}/markdown` | `text/markdown` |
+| `drrepo://reports/{owner}/{name}/sarif` | `application/sarif+json` |
+
+### Prompts
+
+`review_repository(repo_url, focus="")` walks the assistant through four steps: analyze, pull high-severity issues, build a prioritized fix plan with file paths, and list quick wins.
+
+### Notes
+
+- One `AnalysisService` lives for the server process, so the LLM circuit breaker and dependency cache carry across tool calls.
+- Progress notifications are best-effort. A client that doesn't support them never causes an analysis to fail.
+
+## Troubleshooting
+
+Start with `uv run drrepo doctor`. It checks Python, git, the scanners, imports, configuration, writable directories, and connectivity, and marks each item OK, WARN, or FAIL. `uv run drrepo health` checks only connectivity. Detailed logs are in `logs/app.log`; set `LOG_LEVEL=DEBUG` or pass `-v` for more.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `configuration error: X=... is not a boolean` | a malformed value in `.env` | use `true`/`false`; numbers must be plain integers |
+| `warning: GROQ_API_KEY not set` | no LLM key | add it to `.env`. Without it, reports are deterministic only |
+| `git clone failed (repository is private or does not exist)` | private repo, typo, or renamed repo | only public repositories are supported; check the URL |
+| `Clone timed out` / `over the ...MB analysis limit` | very large repository | raise `CLONE_TIMEOUT_SECONDS` / `CLONE_MAX_SIZE_MB` |
+| `GitHub API rate limit exceeded` | 60 requests/hour unauthenticated | set `GH_TOKEN` (no scopes needed). DrRepo falls back to the clone for the README and structure |
+| a category shows `n/a` | its inputs were unavailable (see its summary): no Python code for ruff, OSV unreachable, no README source | expected; the category is excluded from the overall score |
+| `semgrep: skipped: semgrep timed out` | slow first run (ruleset download) or huge repo | raise `COLLECTOR_TIMEOUT_SECONDS`, or `ENABLE_SEMGREP=false` |
+| `semgrep not installed` on Windows | semgrep wheels may not support your platform | `ENABLE_SEMGREP=false`; bandit and the secret scanner still run |
+| note: `LLM summary unavailable (CircuitOpenError)` | the provider failed repeatedly (quota or outage) and the breaker opened | wait `LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS`, or check `drrepo health`. The rest of the report is unaffected |
+| note: `Deep investigation reached its N-tool-call budget` | the agent didn't conclude in time | raise `MAX_TOOL_CALLS_PER_INVESTIGATOR` / `INVESTIGATOR_TIMEOUT_SECONDS` |
+| plan rationale says `downgraded ... token budget` | the per-run budget allows fewer deep dives than the planner wanted | raise `LLM_TOKEN_BUDGET_PER_RUN` or lower `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` |
+| Groq `413` / `tokens per day` | daily quota exhausted | wait for the reset, switch `MODEL_NAME`, or run `--shallow` |
+| `attempted to call tool ' _Something'` | a pydantic output class name starts with `_` | rename it (see the planner section in [architecture.md](architecture.md)) |
+| MCP client shows garbled output | something printed to stdout under the stdio transport | don't add `print()` to code paths used by `drrepo mcp`; log instead (logs go to stderr) |
+| Streamlit stuck on "Analyzing…" | the worker thread died | the error is shown on the next rerun and in `logs/app.log` |
+| `uv sync` fails behind a proxy | network | set `HTTPS_PROXY`; uv honors it |
+| Docker: `failed to connect to the docker API` | the Docker daemon isn't running | start Docker Desktop / `dockerd` |
+
+### Reporting a bug
+
+Include the `drrepo doctor` output, the command you ran, and the relevant part of `logs/app.log`. Remove tokens before sharing.
