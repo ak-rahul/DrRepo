@@ -48,7 +48,7 @@ jobs:
           uv venv /tmp/wheel-env
           uv pip install --python /tmp/wheel-env dist/*.whl
           /tmp/wheel-env/bin/drrepo --version
-          /tmp/wheel-env/bin/python -c "import drrepo.interfaces.mcp_server, drrepo.pipeline"
+          /tmp/wheel-env/bin/python -c "import drrepo.agents.tool_server, drrepo.pipeline"
           # Agent instructions are package data; make sure they shipped.
           /tmp/wheel-env/bin/python -c "from drrepo.agents.prompts import validate_all; validate_all()"
           /tmp/wheel-env/bin/python -c "from drrepo.report.schema import load_schema; load_schema()"

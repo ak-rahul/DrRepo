@@ -186,15 +186,6 @@ def test_version(capsys):
     assert capsys.readouterr().out.startswith("drrepo ")
 
 
-def test_mcp_command_forwards_transport(monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
-    monkeypatch.setattr("drrepo.interfaces.mcp_server.run", lambda **kwargs: calls.append(kwargs))
-    argv = ["mcp", "--transport", "streamable-http", "--port", "9001", "--log-file", ""]
-    assert cli.main(argv) == cli.EXIT_OK
-    assert calls == [{"transport": "streamable-http", "host": "127.0.0.1", "port": 9001}]
-
-
 def test_health_api_command_starts_uvicorn(monkeypatch):
     import uvicorn
 
@@ -284,7 +275,7 @@ def test_diff_command_gates_and_writes(fake_service, tmp_path, capsys):
     diff = diff_reports(REPORT, head)
     diff["head_report"] = head
     fake_service.return_value.compare.return_value = diff
-    args = ["diff", "https://github.com/octo/demo", "--base", "main", "--head", "b" * 40]
+    args = ["diff", "https://github.com/octo/demo", "main", "b" * 40]
     code = cli.main(
         [
             *args,
@@ -308,3 +299,19 @@ def test_diff_command_gates_and_writes(fake_service, tmp_path, capsys):
     assert kwargs.args[1:3] == ("main", "b" * 40) and kwargs.kwargs["deep"] is False
     assert cli.main([*args, "--format", "", "--log-file", ""]) == cli.EXIT_OK
     assert cli.main([*args, "--format", "sarif", "--log-file", ""]) == cli.EXIT_USAGE
+
+
+def test_quick_and_audit_are_the_analysis_commands(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "cmd_analyze", lambda args: seen.append(args) or cli.EXIT_OK)
+    for argv in (
+        ["quick", "https://github.com/a/b"],
+        ["audit", "https://github.com/a/b"],
+        ["analyze", "https://github.com/a/b", "--shallow"],
+        ["https://github.com/a/b"],
+    ):
+        assert cli.main([*argv, "--log-file", ""]) == cli.EXIT_OK
+    assert [a.shallow for a in seen] == [True, False, True, False]
+    assert {a.repo_url for a in seen} == {"https://github.com/a/b"}
+    with pytest.raises(SystemExit):
+        cli.main(["quick", "https://github.com/a/b", "--shallow"])  # quick is always shallow

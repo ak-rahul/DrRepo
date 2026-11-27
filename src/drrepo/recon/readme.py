@@ -36,8 +36,8 @@ _BADGE_RE = re.compile(
 _TOC_LINK_RE = re.compile(r"^[ \t]*[-*][ \t]*\[[^\[\]\n]+\]\(#[^()\n]*\)", re.MULTILINE)
 _TOC_HEADING_RE = re.compile(r"^(table of )?contents$|^toc$", re.IGNORECASE)
 
-# Applied here, not only by callers: the GitHub API, the clone, and the MCP
-# `analyze_readme_text` tool all feed this function.
+# Applied here, not only by callers: both the GitHub API and the clone feed
+# this function.
 MAX_README_CHARS = 100_000
 
 _ESSENTIAL_SECTIONS: dict[str, tuple[str, ...]] = {

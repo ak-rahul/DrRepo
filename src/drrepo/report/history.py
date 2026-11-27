@@ -30,9 +30,9 @@ _ESTIMATE_SAMPLES_OVERALL = 30
 _LOCK_TIMEOUT_SECONDS = 10.0
 # record_run() is a read-modify-write, so two runs finishing together would lose
 # an update. Two locks prevent that: a thread lock for runs inside one process
-# (Streamlit sessions, MCP calls), and a lock file next to the history for
-# separate processes (docker compose runs the UI and MCP server against one
-# shared reports/ volume). Writes go to a unique temp file and are renamed into
+# (Streamlit sessions), and a lock file next to the history for separate
+# processes (the UI and a CLI run sharing one reports/ directory or docker
+# volume). Writes go to a unique temp file and are renamed into
 # place atomically, so a crash mid-write can't truncate the history.
 _history_lock = threading.Lock()
 

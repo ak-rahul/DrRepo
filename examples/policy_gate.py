@@ -1,4 +1,4 @@
-"""A CI quality gate with a policy more specific than `drrepo analyze --fail-under`.
+"""A CI quality gate with a policy more specific than `drrepo audit --fail-under`.
 
 Fails (exit 1) when any of these hold, and always writes a SARIF file for
 GitHub code scanning:

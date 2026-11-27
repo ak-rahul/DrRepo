@@ -1,6 +1,6 @@
 # Architecture
 
-DrRepo runs one LangGraph workflow per analysis. Recon collectors gather facts, a planner agent decides where to look harder, five category nodes each run shallow or deep, and a synthesizer builds the report. Every interface (CLI, Streamlit, MCP) goes through one `AnalysisService`.
+DrRepo runs one LangGraph workflow per analysis. Recon collectors gather facts, a planner agent decides where to look harder, five category nodes each run shallow or deep, and a synthesizer builds the report. Every interface (CLI, Streamlit, the Python API) goes through one `AnalysisService`. Investigators reach their tools through an in-memory MCP tool server (`agents/tool_server.py`).
 
 ```
 AnalysisService (one per process)
@@ -40,14 +40,14 @@ src/drrepo/
                     tools (all investigator tools + build_tools), analysts/ (one per category),
                     prompts (loader) + instructions/*.md (every agent's job, as documents)
   report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX), diff (two reports compared)
-  interfaces/       cli, streamlit_app, mcp_server, health (checks + FastAPI app)
+  interfaces/       cli, streamlit_app, ui_data, health (checks + FastAPI app)
 ```
 
 Package `__init__.py` files contain only a docstring (`agents/analysts/__init__.py` also has `default_analysts()`). Import from the submodule you need, so importing `drrepo.models` doesn't load LangChain or Streamlit.
 
 ## Key design decisions
 
-1. **Compiled once, run many times.** `Workflow` holds no per-run state. Everything run-specific travels in a `RunContext` through LangGraph's runtime context (`StateGraph(State, context_schema=RunContext)`; nodes receive `runtime.context`): the config (with per-run overrides), an `LLMRuntime` with a fresh `TokenBudget`, the dependency cache, and the progress callback. One compiled graph therefore serves concurrent Streamlit sessions and MCP calls (see `test_one_compiled_graph_serves_concurrent_runs`).
+1. **Compiled once, run many times.** `Workflow` holds no per-run state. Everything run-specific travels in a `RunContext` through LangGraph's runtime context (`StateGraph(State, context_schema=RunContext)`; nodes receive `runtime.context`): the config (with per-run overrides), an `LLMRuntime` with a fresh `TokenBudget`, the dependency cache, and the progress callback. One compiled graph therefore serves concurrent Streamlit sessions and threads (see `test_one_compiled_graph_serves_concurrent_runs`).
 2. **Declarative recon.** `pipeline.COLLECTORS` is a tuple of `CollectorSpec(name, run, progress, needs_clone, after)`. The graph is generated from it: edges come from `after`, `needs_clone` specs are skipped uniformly when there is no clone, and `defer=True` is derived from the topology (see the fan-in section).
 3. **Typed state.** Nodes exchange `CollectorResult` and `CategoryFinding` objects. Only the final `Report` is converted with `to_dict()`, for exporters and interfaces.
 4. **Deterministic first, bounded judgment second.** Analysts compute issues and scores in code. The LLM narrates, or adds evidence it verified with tools (the analyst contract below). Where a heuristic is weak, an analyst's optional `judge()` may add bounded LLM judgment: today that is only the documentation rubric, at most ±25 points. Judgment adds issues or downgrades a heuristic's false positive; it never removes a deterministic finding.
@@ -111,7 +111,7 @@ The `Analyst` contract (`analysts/base.py`):
 
 ## Stage 4: synthesis (`report/`)
 
-`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records score history: append-only, 20 runs per repository, written to a temp file and renamed into place. A thread lock and a lock file (`history.json.lock`) serialize writers, so the UI, CLI and MCP server can share one `reports/` directory. If history can't be written, the report is still returned and a warning is logged. See [report-format.md](report-format.md) for the scoring math and output schema.
+`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records score history: append-only, 20 runs per repository, written to a temp file and renamed into place. A thread lock and a lock file (`history.json.lock`) serialize writers, so the UI and CLI can share one `reports/` directory. If history can't be written, the report is still returned and a warning is logged. See [report-format.md](report-format.md) for the scoring math and output schema.
 
 ## Resilience (`resilience.py`, `agents/llm.py`)
 
@@ -148,7 +148,7 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 **Data that leaves the machine:** public repository metadata to GitHub, package names and versions to OSV.dev and deps.dev, and trimmed recon data plus tool outputs to the configured LLM provider. Secrets are never reported by value.
 
-**Exposed services:** the web UI, the health API and the MCP HTTP transport have no authentication. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
+**Exposed services:** the web UI and the health API have no authentication. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
 
 **Container:** non-root (uid 1000), with code and tools root-owned and read-only to the app user; only `reports/` and `logs/` are writable. No curl in the image (healthchecks use Python), and the build context is an allow-list (`.dockerignore`), so local `.env` files never reach the build.
 
@@ -156,5 +156,4 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 - **cli**: argparse subcommands. Progress goes to stderr and the report to stdout, so `--json` can be piped.
 - **streamlit_app**: runs the analysis on a worker thread that writes to a plain `AnalysisJob` object. `st.fragment(run_every=1)` shows progress and reruns once when the job finishes. `main()` runs only under `__main__`.
-- **mcp_server**: `MCPServer` (MCP Python SDK 2). The analysis runs in a worker thread and progress becomes MCP progress notifications (best-effort).
 - **health**: token-free connectivity checks plus the FastAPI app (sync endpoints, lazy config).

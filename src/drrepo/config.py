@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, fields
+from pathlib import Path
 
 from drrepo.errors import ConfigurationError
 
@@ -131,6 +132,9 @@ class Config:
     # Second look at high/critical agent findings (agents/critic.py). It can lower
     # or dispute a severity, never raise one or remove a finding.
     enable_agent_critic: bool = True
+    # Investigators call their tools through DrRepo's own MCP tool server
+    # (agents/tool_server.py, in memory). False = call the same tools in-process.
+    enable_mcp_tools: bool = True
 
     # LLM circuit breaker: opens after repeated LLM-call failures so parallel
     # category nodes fail fast instead of each retrying an exhausted quota.
@@ -145,8 +149,8 @@ class Config:
     llm_token_budget_per_run: int = 60000
     estimated_tokens_per_deep_investigation: int = 12000
 
-    # Per-package OSV/deps.dev lookup cache (shared across runs in the
-    # Streamlit app and MCP server -- see service.py).
+    # Per-package OSV/deps.dev lookup cache (shared across runs in one
+    # process, such as the Streamlit app -- see service.py).
     enable_dependency_lookup_cache: bool = True
 
     # Suppressions (report/suppressions.py). A file you pass always applies; the
@@ -197,6 +201,11 @@ class Config:
         from dotenv import load_dotenv
 
         if env_file:
+            # `.env.local` (machine-specific secrets, never committed) wins over `.env`;
+            # real environment variables win over both (load_dotenv never overrides).
+            local = Path(env_file).with_name(Path(env_file).name + ".local")
+            if local.is_file():
+                load_dotenv(local)
             load_dotenv(env_file)
 
         d = cls()  # defaults, so each default lives in exactly one place
@@ -245,6 +254,7 @@ class Config:
             ),
             enable_llm_judgment=_env_bool("ENABLE_LLM_JUDGMENT", d.enable_llm_judgment),
             enable_agent_critic=_env_bool("ENABLE_AGENT_CRITIC", d.enable_agent_critic),
+            enable_mcp_tools=_env_bool("ENABLE_MCP_TOOLS", d.enable_mcp_tools),
             enable_llm_circuit_breaker=_env_bool(
                 "ENABLE_LLM_CIRCUIT_BREAKER", d.enable_llm_circuit_breaker
             ),

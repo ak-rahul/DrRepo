@@ -4,7 +4,7 @@ Families (an analyst lists the ones it may use in `Analyst.tool_families`):
 
     files         read_file, list_directory, find_files, search_code
     scanners      run_scanner_on_path  (same wrappers as recon)
-    dependencies  query_osv            (exact version; shared with the MCP server)
+    dependencies  query_osv            (exact version)
     git_history   get_file_git_history (GitHub API: shallow clones have one commit)
     symbols       find_definition, find_references, outline  (agents/symbols.py)
 
@@ -303,7 +303,7 @@ def lookup_package(
     config: Config,
     cache: DependencyLookupCache | None = None,
 ) -> str:
-    """Human/LLM-readable OSV result for one package version (shared with the MCP server)."""
+    """Human/LLM-readable OSV result for one package version."""
     eco = ECOSYSTEMS.get(ecosystem.strip().lower(), ecosystem.strip())
     name = normalize_pypi_name(package) if eco == "PyPI" else package.strip()
     version = version.strip().lstrip("v=")

@@ -8,6 +8,7 @@ import pytest
 
 from drrepo.agents.investigator import InvestigationResult
 from drrepo.agents.llm import LLMRuntime, TokenBudget
+from drrepo.agents.tool_server import ToolServerError
 from drrepo.config import Config
 from drrepo.errors import InvestigationError
 from drrepo.models import (
@@ -445,3 +446,50 @@ def test_an_empty_deep_allowance_skips_planning(collectors):
     assert report["investigation_plan"]["security"]["rationale"] == (
         "no category changed since the base commit"
     )
+
+
+def test_pipeline_falls_back_to_in_process_tools(collectors):
+
+    (collectors["cloned"].path / "b.py").write_text("x = 1\n" * 20, encoding="utf-8")
+    issue = Issue(
+        Severity.MEDIUM,
+        Category.CODE_QUALITY,
+        "Swallowed exception",
+        "d",
+        "r",
+        "investigator:code_quality",
+        locations=[Location("b.py", 9)],
+    )
+    result = InvestigationResult(
+        summary="s", issues=[issue], trace=[ToolCallTrace("read_file", {"path": "b.py"}, "obs")]
+    )
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", return_value=result) as inv,
+        patch(f"{P}.mcp_tools", side_effect=ToolServerError("MCP tool server unavailable: boom")),
+    ):
+        lead.return_value.plan.return_value = _plan(Category.CODE_QUALITY)
+        report = Workflow().run(REPO, _ctx(budget=TokenBudget(100_000)))
+    cq = report["category_scores"]["code_quality"]
+    assert any("used in-process tools" in n for n in cq["notes"])
+    assert {t.name for t in inv.call_args.kwargs["tools"]} >= {"read_file", "find_definition"}
+    assert cq["investigation_depth"] == "deep"
+
+
+def test_pipeline_uses_mcp_tools_by_default(collectors):
+
+    seen = {}
+
+    def fake_investigate(**kwargs):
+        tool = {t.name: t for t in kwargs["tools"]}["list_directory"]
+        seen["listing"] = tool.invoke({"path": "."})
+        seen["type"] = type(tool).__name__
+        return InvestigationResult(summary="s", issues=[], trace=[])
+
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", side_effect=fake_investigate),
+    ):
+        lead.return_value.plan.return_value = _plan(Category.SECURITY)
+        Workflow().run(REPO, _ctx(budget=TokenBudget(100_000)))
+    assert seen["type"] == "StructuredTool" and "ERROR" not in seen["listing"]

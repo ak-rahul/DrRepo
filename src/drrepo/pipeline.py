@@ -46,6 +46,7 @@ from drrepo.agents.investigator import investigate
 from drrepo.agents.llm import LLMRuntime
 from drrepo.agents.planner import LeadInvestigator, restrict_plan
 from drrepo.agents.symbols import SymbolIndex
+from drrepo.agents.tool_server import ToolServerError, mcp_tools
 from drrepo.agents.tools import build_tools
 from drrepo.config import Config
 from drrepo.errors import InvestigationError
@@ -365,17 +366,20 @@ class Workflow:
         if depth is InvestigationDepth.LITE:
             max_tool_calls = max(1, max_tool_calls // 2)
 
-        tools = build_tools(
-            analyst.tool_families,
-            clone_root=state["clone_path"],
-            config=ctx.config,
-            cache=ctx.cache,
-            repo_full_name=state["repo"].full_name,
-            symbol_index=ctx.symbol_index,
-        )
-        ctx.emit(f"{category.label}: {depth.value} investigation started ({len(tools)} tools)")
-        try:
-            result = investigate(
+        tool_args: dict[str, Any] = {
+            "clone_root": state["clone_path"],
+            "config": ctx.config,
+            "cache": ctx.cache,
+            "repo_full_name": state["repo"].full_name,
+            "symbol_index": ctx.symbol_index,
+        }
+        tool_note = None
+
+        def run_investigation(tools: list[Any], via: str) -> Any:
+            ctx.emit(
+                f"{category.label}: {depth.value} investigation started ({len(tools)} {via} tools)"
+            )
+            return investigate(
                 category=category,
                 system_prompt=analyst.investigation_prompt,
                 tools=tools,
@@ -386,6 +390,23 @@ class Workflow:
                 timeout_seconds=ctx.config.investigator_timeout_seconds,
                 user_context=state["description"],
             )
+
+        try:
+            if ctx.config.enable_mcp_tools:
+                try:
+                    # The investigator calls DrRepo's own MCP tool server (in memory).
+                    with mcp_tools(analyst.tool_families, **tool_args) as tools:
+                        result = run_investigation(tools, "MCP")
+                except ToolServerError as e:
+                    logger.warning(f"{category.value}: {e}; using in-process tools")
+                    tool_note = f"MCP tool server unavailable ({e}); the investigation used in-process tools."
+                    result = run_investigation(
+                        build_tools(analyst.tool_families, **tool_args), "in-process"
+                    )
+            else:
+                result = run_investigation(
+                    build_tools(analyst.tool_families, **tool_args), "in-process"
+                )
         except InvestigationError as e:
             ctx.emit(
                 f"{category.label}: {depth.value} investigation {e.reason}; using automated pass"
@@ -420,6 +441,8 @@ class Workflow:
             notes.append(note)
         if critic_note:
             notes.append(critic_note)
+        if tool_note:
+            notes.append(tool_note)
         return CategoryFinding(
             category=category,
             score=analyst.rescore(recon, assessment, new_issues)

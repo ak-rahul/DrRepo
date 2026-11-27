@@ -115,3 +115,16 @@ def test_config_is_frozen_and_replace_revalidates():
 
 def test_zero_budget_is_allowed():
     assert Config(llm_token_budget_per_run=0).llm_token_budget_per_run == 0
+
+
+def test_env_local_wins_over_env_and_real_variables_win_over_both(tmp_path, monkeypatch):
+    for name in ("MODEL_NAME", "LOG_LEVEL"):
+        monkeypatch.setenv(name, "x")  # remembered, so teardown restores the original state
+        monkeypatch.delenv(name)
+    (tmp_path / ".env").write_text("MODEL_NAME=from-env\nLOG_LEVEL=DEBUG\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("MODEL_NAME=from-local\n", encoding="utf-8")
+    config = Config.from_env(env_file=str(tmp_path / ".env"))
+    assert config.model_name == "from-local" and config.log_level == "DEBUG"
+
+    monkeypatch.setenv("MODEL_NAME", "from-shell")
+    assert Config.from_env(env_file=str(tmp_path / ".env")).model_name == "from-shell"

@@ -1,4 +1,4 @@
-"""`AnalysisService`: the single façade every interface (CLI, Streamlit, MCP) uses.
+"""`AnalysisService`: the single façade every interface (CLI, Streamlit, Python) uses.
 
 One service per process owns everything that should outlive a run:
 
@@ -6,10 +6,10 @@ One service per process owns everything that should outlive a run:
 - one chat-model client;
 - the LLM `CircuitBreaker`, so "the provider is down" carries across runs;
 - the `DependencyLookupCache`, so a package looked up once is free afterwards;
-- the latest report per repository (read by the MCP tools/resources).
+- the latest report per repository (the web UI's recent analyses).
 
 Each `analyze()` call gets its own `RunContext` with a fresh `TokenBudget`, so
-concurrent runs (Streamlit sessions, MCP calls) never share per-run state.
+concurrent runs (Streamlit sessions, threads) never share per-run state.
 """
 
 from __future__ import annotations

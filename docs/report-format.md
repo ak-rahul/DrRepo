@@ -1,6 +1,6 @@
 # Report format
 
-Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its contract is the JSON Schema [`src/drrepo/report/report.schema.json`](../src/drrepo/report/report.schema.json) (draft 2020-12). It ships in the package, so you can load it with `drrepo.report.schema.load_schema()`, and the MCP server serves it as `drrepo://schema/report`. The test suite validates every report shape the code can produce against it, and the schema rejects unknown fields, so the documentation can't drift from the output.
+Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its contract is the JSON Schema [`src/drrepo/report/report.schema.json`](../src/drrepo/report/report.schema.json) (draft 2020-12). It ships in the package, so you can load it with `drrepo.report.schema.load_schema()`. The test suite validates every report shape the code can produce against it, and the schema rejects unknown fields, so the documentation can't drift from the output.
 
 **Versioning.** `schema_version` is `MAJOR.MINOR`. A new optional field is a minor bump. A removed, renamed or retyped field is a major bump, and gets a changelog entry. Consumers should check the major version and ignore unknown optional fields.
 
@@ -91,7 +91,7 @@ After a deep investigation, the investigator's *new* issues are applied on top o
 
 ## Diff document
 
-`drrepo diff` (and the MCP `compare_commits` tool) produce a separate document with its own contract, [`src/drrepo/report/diff.schema.json`](../src/drrepo/report/diff.schema.json), versioned by `diff_schema_version`. Its issues use the report's issue shape.
+`drrepo diff` (and `AnalysisService.compare()`) produce a separate document with its own contract, [`src/drrepo/report/diff.schema.json`](../src/drrepo/report/diff.schema.json), versioned by `diff_schema_version`. Its issues use the report's issue shape.
 
 ```jsonc
 {

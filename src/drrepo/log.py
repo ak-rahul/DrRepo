@@ -39,7 +39,7 @@ def configure_logging(
     the CLI keep the terminal quiet while still logging everything to disk.
     Safe to call repeatedly (e.g. on every Streamlit rerun): handlers are
     replaced, never duplicated. Console output goes to stderr, which keeps
-    stdout clean for `--json` output and the MCP stdio protocol.
+    stdout clean for `--json` output.
     """
     numeric_level = _level(level)
     numeric_console = _level(console_level, numeric_level) if console_level else numeric_level

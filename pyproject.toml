@@ -75,6 +75,7 @@ dev = [
     "jsonschema>=4.23",
     "cyclonedx-python-lib[json-validation]>=11.13.0",
     "pyyaml>=6.0",
+    "poethepoet>=0.49.0",
 ]
 
 [build-system]
@@ -107,6 +108,17 @@ exclude = ["__pycache__"]
 default-groups = ["dev"]
 
 # ---------------------------------------------------------------- ruff ----
+
+# Short commands: `uv run poe <task> [args]` (`uv run poe` lists them). Extra args pass through.
+[tool.poe.tasks]
+test = { cmd = "pytest", help = "unit tests (hermetic)" }
+integration = { cmd = "pytest -m integration", help = "live tests (network, API keys)" }
+cov = { cmd = "pytest --cov", help = "unit tests with coverage" }
+lint = { cmd = "ruff check src tests examples", help = "lint" }
+fmt = { cmd = "ruff format src tests examples", help = "format" }
+types = { cmd = "mypy src examples", help = "type-check (strict)" }
+fix = { sequence = ["fmt", { cmd = "ruff check --fix src tests examples" }], help = "format and auto-fix" }
+check = { cmd = "pre-commit run --all-files", help = "everything CI's lint job runs" }
 
 [tool.ruff]
 line-length = 100

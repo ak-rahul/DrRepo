@@ -27,23 +27,27 @@ Requires [uv](https://docs.astral.sh/uv/) and `git`.
 
 ```bash
 git clone https://github.com/ak-rahul/DrRepo && cd DrRepo
-uv sync
-uv tool install semgrep     # optional extra scanner (Linux/macOS; included in the Docker image)
-cp .env.example .env        # add GROQ_API_KEY (optional: GH_TOKEN)
-
-uv run drrepo https://github.com/pallets/itsdangerous     # CLI
-uv run drrepo ui                                          # web UI on :8501
-uv run drrepo mcp                                         # MCP server (stdio)
+uv tool install --editable .   # puts `drrepo` on your PATH (tracks this checkout)
+cp .env.example .env           # optional: GROQ_API_KEY, GH_TOKEN (a .env.local next to it wins)
 ```
+
+| Command | Does |
+|---|---|
+| `drrepo audit <url>` | audit a repository (`--ref R` for a branch, tag or SHA) |
+| `drrepo quick <url>` | fast, deterministic audit (no LLM) |
+| `drrepo diff <url> <base> [head]` | what a change made better or worse |
+| `drrepo ui` | web UI on http://localhost:8501 |
+| `drrepo doctor` | check the setup |
+
+`drrepo <url>` is short for `drrepo audit <url>`, and `drrepo --help` lists every command. Without the tool install, prefix commands with `uv run` inside the checkout. semgrep is optional: `uv tool install semgrep` (the Docker image includes it).
 
 Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or local models through Ollama (`uv sync --extra ollama`), with an optional model per role. Without an API key DrRepo still runs. The report is then fully deterministic, with no LLM summaries and no deep investigation.
 
 ## Interfaces
 
-- **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif,cdx,summary] [--fail-under 70]`. The exit code makes it usable as a CI gate. `drrepo diff <url> --base main --head <sha>` reports what a change made better or worse.
+- **CLI**: `drrepo audit <url> [--format json,md,sarif,cdx,summary] [--fail-under 70]`, or `drrepo quick <url>` without LLM investigations. The exit code makes it usable as a CI gate. `drrepo diff <url> main <sha>` reports what a change made better or worse.
 - **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score or, on pull requests, on what the change made worse; uploads SARIF to code scanning; and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
 - **Web UI**: audit a commit or compare two, with live progress, issue search and filters, dependencies, suppressions, the investigator's tool-call trace and token use, a score trend, and every export.
-- **MCP server**: 9 tools, 5 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
 - **Health API**: `drrepo health-api` serves liveness, readiness, and dependency checks.
 
@@ -64,7 +68,7 @@ Findings and scores come from deterministic code; the LLM only writes summaries 
 
 | | |
 |---|---|
-| [Usage](docs/usage.md) | CLI, UI, Python API, Docker, CI/SARIF, MCP server, troubleshooting |
+| [Usage](docs/usage.md) | CLI, UI, Python API, Docker, CI/SARIF, troubleshooting |
 | [Configuration](docs/configuration.md) | every environment variable |
 | [Architecture](docs/architecture.md) | design, pipeline, resilience, security model |
 | [Agents](docs/agents.md) | every agent's job, tools, bounds, and how to edit its instructions |

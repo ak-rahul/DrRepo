@@ -3,11 +3,13 @@
 ## Install
 
 ```bash
-uv sync                  # creates .venv with locked dependencies (incl. ruff, bandit)
-uv tool install semgrep  # optional: the semgrep scanner, in its own isolated environment
-cp .env.example .env     # set GROQ_API_KEY; GH_TOKEN recommended
-uv run drrepo doctor     # verifies git, scanners, config, connectivity
+uv tool install --editable .   # `drrepo` on PATH, running this checkout (incl. ruff, bandit)
+uv tool install semgrep        # optional: the semgrep scanner, in its own isolated environment
+cp .env.example .env           # set GROQ_API_KEY; GH_TOKEN recommended
+drrepo doctor                  # verifies git, scanners, config, connectivity
 ```
+
+For development, `uv sync` creates `.venv` with the dev tools too; there, `uv run drrepo ...` runs the same commands.
 
 `git` must be on `PATH`. Everything else is installed by uv.
 
@@ -16,8 +18,9 @@ semgrep is installed as a separate uv tool rather than a project dependency beca
 ## CLI
 
 ```bash
-uv run drrepo https://github.com/owner/repo           # shorthand for `analyze`
-uv run drrepo analyze https://github.com/owner/repo \
+drrepo quick https://github.com/owner/repo            # fast, deterministic: no LLM investigations
+drrepo https://github.com/owner/repo                  # shorthand for `audit`
+drrepo audit https://github.com/owner/repo \
     --description "We're adopting this; focus on auth" \
     --format json,md,sarif -o reports/ --top 15
 ```
@@ -26,7 +29,7 @@ uv run drrepo analyze https://github.com/owner/repo \
 |---|---|
 | `-d, --description` | context passed to the planner and investigators |
 | `--ref REF` | analyze a branch, tag, or full 40-character commit SHA instead of the default branch |
-| `--shallow` | no deep investigations for this run |
+| `--shallow` | no deep investigations for this run (`drrepo quick` is `audit --shallow`; `analyze` is an alias of `audit`) |
 | `--format` | any of `json,md,sarif,cdx,summary`: `cdx` is a CycloneDX 1.6 SBOM (`.cdx.json`), `summary` a short Markdown summary for PR comments (`.summary.md`); `''` writes nothing |
 | `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<UTC timestamp>.<ext>`, e.g. `psf__requests_20261127-091500Z.json` |
 | `--json` | print the full JSON report to stdout (progress stays on stderr) |
@@ -40,7 +43,7 @@ Exit codes: `0` ok, `1` runtime error, `2` usage or configuration error, `3` a f
 ### Comparing two commits
 
 ```bash
-uv run drrepo diff https://github.com/owner/repo --base main --head <sha> \
+drrepo diff https://github.com/owner/repo main <sha> \
     [--deep] [--fail-on-new high] [--max-score-drop 5] [--report-formats sarif,summary]
 ```
 
@@ -52,7 +55,6 @@ Other commands:
 
 ```bash
 uv run drrepo ui [--port 8501] [--headless]         # Streamlit UI
-uv run drrepo mcp [--transport stdio|sse|streamable-http]   # see MCP server below
 uv run drrepo health [--json]                       # LLM provider / GitHub / OSV connectivity
 uv run drrepo doctor [--offline]                    # full local diagnostics
 uv run drrepo health-api [--port 8000]              # FastAPI health endpoint
@@ -99,8 +101,8 @@ Reuse one `AnalysisService` for many analyses. The circuit breaker and dependenc
 
 ```bash
 docker compose up                                   # UI on :8501
-docker compose --profile api --profile mcp up       # + health API :8000, MCP :8765/mcp
-docker compose run --rm ui drrepo analyze https://github.com/psf/requests --format md
+docker compose --profile api up                     # + health API :8000
+docker compose run --rm ui drrepo audit https://github.com/psf/requests --format md
 ```
 
 The image runs as a non-root user, contains `git` and semgrep, and reads credentials from `.env` at runtime. None are baked in. `reports/` and `logs/` are mounted volumes. On Linux, make them writable by uid 1000 (`sudo chown 1000:1000 reports logs`); if history can't be written, analyses still complete.
@@ -122,7 +124,7 @@ expires = 2027-06-30                    # optional: the finding counts again aft
 
 ```bash
 uv run drrepo baseline https://github.com/owner/repo -o .drrepo.toml    # accept every current finding (expires in 90 days)
-uv run drrepo analyze https://github.com/owner/repo --suppressions .drrepo.toml
+drrepo audit https://github.com/owner/repo --suppressions .drrepo.toml
 ```
 
 Suppressed issues are excluded from scores, issue counts and quick wins. They are still listed under `suppressed` in the report, in a Markdown section, and in SARIF as native `suppressions`, which GitHub code scanning hides from its default view. An expired suppression stops applying, and the category notes say so.
@@ -174,78 +176,15 @@ Text in the summary comes from the analyzed repository, so the summary format ne
 **Without the action.** Any CI system can run the CLI:
 
 ```bash
-uvx --from git+https://github.com/ak-rahul/DrRepo drrepo analyze "https://github.com/owner/repo" \
+uvx --from git+https://github.com/ak-rahul/DrRepo drrepo audit "https://github.com/owner/repo" \
     --ref "$COMMIT_SHA" --shallow --format sarif,summary -o drrepo --fail-under 60
 ```
 
 DrRepo analyzes the public GitHub copy of the repository, not the CI checkout. Each SARIF result's `uri` is repo-relative, so GitHub annotates the right files.
 
-## MCP server
+## How investigators use MCP
 
-`drrepo mcp` exposes DrRepo over the [Model Context Protocol](https://modelcontextprotocol.io), so an assistant can audit a repository and work through the findings itself.
-
-### Client setup
-
-**Claude Desktop / any stdio client** (`claude_desktop_config.json`; template in `examples/mcp_client_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "drrepo": {
-      "command": "uv",
-      "args": ["--directory", "/absolute/path/to/DrRepo", "run", "drrepo", "mcp"],
-      "env": { "GROQ_API_KEY": "...", "GH_TOKEN": "..." }
-    }
-  }
-}
-```
-
-**From Python:** [examples/mcp_client.py](../examples/mcp_client.py) starts the server over stdio, calls `analyze_repository` with progress notifications, and reads a report resource.
-
-**Claude Code:**
-
-```bash
-claude mcp add drrepo -- uv --directory /absolute/path/to/DrRepo run drrepo mcp
-```
-
-**Remote / HTTP:** `drrepo mcp --transport streamable-http --host 0.0.0.0 --port 8765` serves at `http://host:8765/mcp` (also available through `docker compose --profile mcp up`). Put it behind your own auth before exposing it: the server has no authentication of its own, and every call can trigger a clone and LLM spend.
-
-With stdio transport, stdout belongs to the protocol. All DrRepo logging goes to stderr and the log file.
-
-### Tools
-
-| Tool | Arguments | Returns |
-|---|---|---|
-| `analyze_repository` | `repo_url`, `description=""`, `deep=true`, `max_issues=15`, `ref=null` | summary: scores, top issues, quick wins, resource URIs. Takes 1–5 min and streams MCP progress notifications |
-| `compare_commits` | `repo_url`, `base`, `head=null`, `deep=false`, `max_issues=15` | the `drrepo diff` document: new, worse and fixed issues and score deltas |
-| `get_report` | `repo`, `format=summary\|json\|markdown` | latest report from this server session |
-| `list_reports` | — | reports produced in this session |
-| `get_issues` | `repo`, `min_severity=low`, `category=null`, `limit=50` | filtered issue list with evidence and locations |
-| `check_package_vulnerabilities` | `package`, `ecosystem`, `version` | OSV advisories with severity and fixed versions |
-| `analyze_readme_text` | `markdown` | README metrics for any text (no network) |
-| `get_score_history` | `repo` | recorded scores from previous runs |
-| `health_check` | — | provider, GitHub, and OSV connectivity, plus circuit breaker state |
-
-`repo` accepts a URL or `owner/name`. Reports stay in memory for the server's lifetime (the 20 most recent).
-
-### Resources
-
-| URI | MIME type |
-|---|---|
-| `drrepo://reports/{owner}/{name}` | `application/json` |
-| `drrepo://reports/{owner}/{name}/markdown` | `text/markdown` |
-| `drrepo://reports/{owner}/{name}/sarif` | `application/sarif+json` |
-| `drrepo://reports/{owner}/{name}/sbom` | `application/vnd.cyclonedx+json` (CycloneDX 1.6) |
-| `drrepo://schema/report` | `application/schema+json` (the report JSON Schema) |
-
-### Prompts
-
-`review_repository(repo_url, focus="")` walks the assistant through four steps: analyze, pull high-severity issues, build a prioritized fix plan with file paths, and list quick wins.
-
-### Notes
-
-- One `AnalysisService` lives for the server process, so the LLM circuit breaker and dependency cache carry across tool calls.
-- Progress notifications are best-effort. A client that doesn't support them never causes an analysis to fail.
+DrRepo's investigators don't call their tools directly: each investigation starts DrRepo's own MCP tool server (`agents/tool_server.py`) for the clone, connects to it in memory, and the agent picks among the server's tools by their descriptions. The server exposes only the tool families of that category (a documentation investigator never sees scanner or symbol tools), every tool is annotated read-only, and paths stay sandboxed to the clone. A failed tool call comes back to the agent as an `ERROR:` result. If the server can't start, the investigation uses the same tools in-process and the category notes say so; `ENABLE_MCP_TOOLS=false` does that always. The server exists only for DrRepo's agents: nothing outside an investigation connects to it, and there is nothing to configure.
 
 ## Troubleshooting
 
@@ -266,7 +205,6 @@ Start with `uv run drrepo doctor`. It checks Python, git, the scanners, imports,
 | plan rationale says `downgraded ... token budget` | the per-run budget allows fewer deep dives than the planner wanted | raise `LLM_TOKEN_BUDGET_PER_RUN` or lower `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` |
 | Groq `413` / `tokens per day` | daily quota exhausted | wait for the reset, switch `MODEL_NAME`, or run `--shallow` |
 | `attempted to call tool ' _Something'` | a pydantic output class name starts with `_` | rename it (see the planner section in [architecture.md](architecture.md)) |
-| MCP client shows garbled output | something printed to stdout under the stdio transport | don't add `print()` to code paths used by `drrepo mcp`; log instead (logs go to stderr) |
 | Streamlit stuck on "Analyzing…" | the worker thread died | the error is shown on the next rerun and in `logs/app.log` |
 | `uv sync` fails behind a proxy | network | set `HTTPS_PROXY`; uv honors it |
 | Docker: `failed to connect to the docker API` | the Docker daemon isn't running | start Docker Desktop / `dockerd` |

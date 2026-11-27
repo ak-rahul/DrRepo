@@ -1,18 +1,19 @@
 """`drrepo` command-line interface.
 
-    drrepo analyze <url> [--shallow] [--format json,md,sarif] [--fail-under N] ...
+    drrepo audit <url> [--ref R] [--format json,md,sarif] [--fail-under N] ...
+    drrepo quick <url>                        fast deterministic audit (no LLM)
+    drrepo diff  <url> <base> [head]          new, worse and fixed issues between commits
     drrepo ui          [--port 8501]          Streamlit web UI
-    drrepo mcp         [--transport stdio]    Model Context Protocol server
     drrepo health      [--json]               connectivity of LLM provider, GitHub, OSV.dev
     drrepo doctor                             full local diagnostics
     drrepo eval        [--deep] [--update-baseline]   run the evaluation set vs. its baseline
     drrepo baseline    <url> [-o .drrepo.toml]         accept current findings as suppressions
     drrepo health-api  [--port 8000]          FastAPI health endpoint
 
-`drrepo <url>` is shorthand for `drrepo analyze <url>`.
+`drrepo <url>` is shorthand for `drrepo audit <url>`; `analyze` is an alias of `audit`.
 
 Exit codes: 0 success, 1 runtime error, 2 usage/config error, 3 score below
---fail-under (analyze) or a regression against the baseline (eval).
+--fail-under (audit, quick) or a regression against the baseline (eval).
 """
 
 from __future__ import annotations
@@ -37,10 +38,11 @@ from drrepo.report.suppressions import SuppressionError
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_FAIL_UNDER = 0, 1, 2, 3
 SUBCOMMANDS = {
+    "audit",
     "analyze",
+    "quick",
     "diff",
     "ui",
-    "mcp",
     "health",
     "doctor",
     "health-api",
@@ -121,7 +123,7 @@ def print_summary(report: dict[str, Any], top: int = 10) -> None:
 
 
 def _run_config(args: argparse.Namespace) -> Config:
-    """Config for `analyze` and `diff`: the environment plus per-run flags; also
+    """Config for `audit`, `quick` and `diff`: the environment plus per-run flags; also
     configures logging and warns when there is no LLM."""
     config = _load_config(args.env_file)
     if getattr(args, "shallow", False):
@@ -288,16 +290,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
         cmd.append("--server.headless=true")
     cmd += ["--browser.gatherUsageStats=false", *args.streamlit_args]
     return subprocess.call(cmd)
-
-
-def cmd_mcp(args: argparse.Namespace) -> int:
-    config = _load_config(args.env_file)
-    # stdio transport owns stdout for the protocol: logs must go to stderr/file only.
-    configure_logging(config.log_level, log_file=args.log_file)
-    from drrepo.interfaces.mcp_server import run
-
-    run(transport=args.transport, host=args.host, port=args.port)
-    return EXIT_OK
 
 
 def cmd_health(args: argparse.Namespace) -> int:
@@ -517,52 +509,70 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"drrepo {__version__}")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--env-file", default=".env", help="dotenv file to load (default: .env)")
+    common.add_argument(
+        "--env-file",
+        default=".env",
+        help="dotenv file to load (default: .env); a sibling .env.local is loaded first and wins",
+    )
     common.add_argument("--log-file", default="logs/app.log", help="log file path ('' to disable)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("analyze", parents=[common], help="analyze a repository")
-    p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
-    p.add_argument("-d", "--description", default="", help="context/focus for the investigators")
+    def audit_arguments(p: argparse.ArgumentParser) -> None:
+        p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
+        p.add_argument(
+            "-d", "--description", default="", help="context/focus for the investigators"
+        )
+        p.add_argument(
+            "--ref", help="branch, tag, or full commit SHA to analyze (default: the default branch)"
+        )
+        p.add_argument("--suppressions", help="suppression file (.drrepo.toml format) to apply")
+        p.add_argument(
+            "--trust-repo-suppressions",
+            action="store_true",
+            help="also honor the analyzed repository's own .drrepo.toml (use for your own repo)",
+        )
+        p.add_argument(
+            "--format",
+            default="json,md,sarif",
+            help=f"comma-separated report formats ({', '.join(FORMATS)}); '' for none",
+        )
+        p.add_argument(
+            "-o",
+            "--output-dir",
+            default="reports",
+            help="where to write reports (default: reports/)",
+        )
+        p.add_argument("--json", action="store_true", help="print the full JSON report to stdout")
+        p.add_argument("--top", type=int, default=10, help="issues to list in the summary")
+        p.add_argument(
+            "--fail-under", type=float, help="exit 3 if the overall score is below this (for CI)"
+        )
+        p.add_argument(
+            "--no-history", action="store_true", help="don't record or compare score history"
+        )
+        p.add_argument("-q", "--quiet", action="store_true", help="no progress or summary output")
+        p.add_argument("-v", "--verbose", action="store_true", help="print debug logs to stderr")
+
+    p = sub.add_parser("audit", aliases=["analyze"], parents=[common], help="audit a repository")
+    audit_arguments(p)
     p.add_argument(
-        "--ref", help="branch, tag, or full commit SHA to analyze (default: the default branch)"
+        "--shallow", action="store_true", help="skip deep investigations (same as `quick`)"
     )
-    p.add_argument("--suppressions", help="suppression file (.drrepo.toml format) to apply")
-    p.add_argument(
-        "--trust-repo-suppressions",
-        action="store_true",
-        help="also honor the analyzed repository's own .drrepo.toml (use for your own repo)",
-    )
-    p.add_argument(
-        "--shallow", action="store_true", help="skip deep investigations (fast, deterministic)"
-    )
-    p.add_argument(
-        "--format",
-        default="json,md,sarif",
-        help=f"comma-separated report formats ({', '.join(FORMATS)}); '' for none",
-    )
-    p.add_argument(
-        "-o", "--output-dir", default="reports", help="where to write reports (default: reports/)"
-    )
-    p.add_argument("--json", action="store_true", help="print the full JSON report to stdout")
-    p.add_argument("--top", type=int, default=10, help="issues to list in the summary")
-    p.add_argument(
-        "--fail-under", type=float, help="exit 3 if the overall score is below this (for CI)"
-    )
-    p.add_argument(
-        "--no-history", action="store_true", help="don't record or compare score history"
-    )
-    p.add_argument("-q", "--quiet", action="store_true", help="no progress or summary output")
-    p.add_argument("-v", "--verbose", action="store_true", help="print debug logs to stderr")
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser(
+        "quick", parents=[common], help="fast deterministic audit: no LLM investigations"
+    )
+    audit_arguments(p)
+    p.set_defaults(func=cmd_analyze, shallow=True)
 
     p = sub.add_parser(
         "diff", parents=[common], help="what changed between two commits (new, worse, fixed)"
     )
     p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
-    p.add_argument("--base", required=True, help="branch, tag, or full SHA to compare against")
+    p.add_argument("base", help="branch, tag, or full SHA to compare against, e.g. main")
     p.add_argument(
-        "--head", help="branch, tag, or full SHA with the change (default: default branch)"
+        "head", nargs="?", help="branch, tag, or full SHA with the change (default: default branch)"
     )
     p.add_argument("-d", "--description", default="", help="context/focus for the investigators")
     p.add_argument(
@@ -606,12 +616,6 @@ def build_parser() -> argparse.ArgumentParser:
         "streamlit_args", nargs=argparse.REMAINDER, help="extra args passed to streamlit"
     )
     p.set_defaults(func=cmd_ui)
-
-    p = sub.add_parser("mcp", parents=[common], help="run the MCP server")
-    p.add_argument("--transport", choices=["stdio", "sse", "streamable-http"], default="stdio")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
-    p.set_defaults(func=cmd_mcp)
 
     p = sub.add_parser("health", parents=[common], help="check external connectivity")
     p.add_argument("--json", action="store_true")
@@ -663,7 +667,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] not in SUBCOMMANDS and not argv[0].startswith("-"):
-        argv.insert(0, "analyze")  # `drrepo <url>` shorthand
+        argv.insert(0, "audit")  # `drrepo <url>` shorthand
     args = build_parser().parse_args(argv)
     if getattr(args, "log_file", None) == "":
         args.log_file = None

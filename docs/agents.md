@@ -58,7 +58,7 @@ Each analyst lives in `agents/analysts/<category>.py` and has three parts:
 
 ### Tools
 
-All tools are read-only and treat every argument as hostile; see [architecture.md](architecture.md#security-model).
+All tools are read-only and treat every argument as hostile; see [architecture.md](architecture.md#security-model). Investigators reach them through DrRepo's own MCP tool server (`agents/tool_server.py`), connected in memory for each investigation and limited to the category's families. See [usage.md](usage.md#how-investigators-use-mcp).
 
 | Family | Tools | Notes |
 |---|---|---|

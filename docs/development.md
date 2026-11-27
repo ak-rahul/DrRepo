@@ -10,12 +10,13 @@ uv run pre-commit install
 
 uv is the only supported package manager. Change dependencies with `uv add <pkg>` or `uv add --dev <pkg>` and commit `uv.lock`; CI runs `uv sync --locked`.
 
-Never add semgrep back as a project dependency. It hard-pins `mcp`, `opentelemetry` and `wcmatch` to versions with known CVEs, and those pins hold DrRepo's own MCP server back. It is installed as an isolated uv tool instead (locally, in CI's integration job, and in the Docker image), and `recon/scanners.find_executable` finds it on `PATH`.
+Never add semgrep back as a project dependency. It hard-pins `mcp`, `opentelemetry` and `wcmatch` to versions with known CVEs, and those pins would hold back the MCP SDK that DrRepo's investigator tool server uses. It is installed as an isolated uv tool instead (locally, in CI's integration job, and in the Docker image), and `recon/scanners.find_executable` finds it on `PATH`.
 
 ## Commands
 
 ```bash
-uv run pytest                                   # unit tests: hermetic, ~10 s
+uv run poe test / lint / fmt / types / fix / check   # short forms of the commands below (`uv run poe` lists them)
+uv run pytest                                   # unit tests: hermetic, ~30 s
 uv run pytest tests/test_pipeline.py            # one file
 uv run pytest tests/test_pipeline.py::test_every_node_runs_exactly_once
 uv run pytest -k dependencies                   # by keyword

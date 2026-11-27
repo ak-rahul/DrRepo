@@ -1,6 +1,6 @@
 # Configuration
 
-All settings come from environment variables, optionally loaded from a `.env` file (`--env-file` changes which file is read). `Config.from_env()` is the only code that reads the environment. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`. Values are also range-checked however `Config` is built (from the environment or in code): timeouts, limits and the breaker threshold must be at least 1, the token budget and breaker timeout must not be negative, `TEMPERATURE` must be 0–2, and `LOG_LEVEL` must be a standard level name. `Config` is immutable; derive variants with `dataclasses.replace`.
+All settings come from environment variables, optionally loaded from `.env.local` (machine-specific, never committed) and `.env`; the first that sets a variable wins, and real environment variables beat both. `--env-file` names another file, and its `.local` sibling is read too. `Config.from_env()` is the only code that reads the environment. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`. Values are also range-checked however `Config` is built (from the environment or in code): timeouts, limits and the breaker threshold must be at least 1, the token budget and breaker timeout must not be negative, `TEMPERATURE` must be 0–2, and `LOG_LEVEL` must be a standard level name. `Config` is immutable; derive variants with `dataclasses.replace`.
 
 ## LLM provider
 
@@ -55,6 +55,7 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 |---|---|---|
 | `ENABLE_DEEP_INVESTIGATION` | `true` | `false` = every category shallow (the CLI equivalent is `--shallow`) |
 | `ENABLE_LLM_JUDGMENT` | `true` | bounded LLM judgment that can adjust a score: the documentation rubric, at most ±25 points. `false` = README metrics only |
+| `ENABLE_MCP_TOOLS` | `true` | investigators call their tools through DrRepo's in-memory MCP tool server; `false` calls the same tools in-process |
 | `ENABLE_AGENT_CRITIC` | `true` | re-check grounded high/critical agent findings; the critic can lower a severity or mark a finding disputed, never raise or remove one |
 | `MAX_TOOL_CALLS_PER_INVESTIGATOR` | `8` | step budget per investigation |
 | `INVESTIGATOR_TIMEOUT_SECONDS` | `90` | wall-clock budget per investigation |

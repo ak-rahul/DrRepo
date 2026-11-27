@@ -114,7 +114,7 @@ runs:
         common=(-o "${OUTPUT_DIR}" --json --env-file "" --log-file "")
         case "${MODE}" in
           full)
-            args=(analyze "${url}" --format "${formats}" --no-history "${common[@]}")
+            args=(audit "${url}" --format "${formats}" --no-history "${common[@]}")
             if [ -n "${REF}" ]; then args+=(--ref "${REF}"); fi
             if [ "${DEEP}" != "true" ]; then args+=(--shallow); fi
             ;;
@@ -124,8 +124,9 @@ runs:
               echo "status=2" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
-            args=(diff "${url}" --base "${BASE}" --format "json,md" --report-formats "${formats}" "${common[@]}")
-            if [ -n "${REF}" ]; then args+=(--head "${REF}"); fi
+            args=(diff "${url}" "${BASE}")
+            if [ -n "${REF}" ]; then args+=("${REF}"); fi
+            args+=(--format "json,md" --report-formats "${formats}" "${common[@]}")
             if [ "${DEEP}" = "true" ]; then args+=(--deep); fi
             if [ -n "${FAIL_ON_NEW}" ]; then args+=(--fail-on-new "${FAIL_ON_NEW}"); fi
             ;;

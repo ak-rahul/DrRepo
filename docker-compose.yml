@@ -1,8 +1,7 @@
 # docker compose up            -> Streamlit UI on http://localhost:8501
 # docker compose --profile api up    -> also the health API on :8000
-# docker compose --profile mcp up    -> also the MCP server (streamable HTTP) on :8765/mcp
 # One-off CLI run:
-#   docker compose run --rm ui drrepo analyze https://github.com/psf/requests
+#   docker compose run --rm ui drrepo audit https://github.com/psf/requests
 #
 # Ports are published on 127.0.0.1 only: none of these services has
 # authentication. Put a reverse proxy with auth in front before exposing them.
@@ -34,20 +33,6 @@ services:
       - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=5)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  mcp:
-    <<: *drrepo
-    profiles: [mcp]
-    container_name: drrepo-mcp
-    command: ["drrepo", "mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8765"]
-    ports:
-      - "127.0.0.1:8765:8765"
-    healthcheck:
-      # The MCP endpoint needs a protocol handshake, so check that the port accepts connections.
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8765), timeout=5).close()"]
       interval: 30s
       timeout: 5s
       retries: 3
