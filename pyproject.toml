@@ -27,14 +27,15 @@ dependencies = [
     "pydantic>=2.13,<3",
     "python-dotenv>=1.2.2,<2",
     "streamlit>=1.58,<2",
-    "fastapi>=0.139,<1",
+    "fastapi>=0.165,<1",
     "uvicorn[standard]>=0.49,<1",
+    "mcp>=2.3,<3",
     # Scanners invoked as subprocesses by the collectors. Shipped as wheels with
     # bundled binaries, so `uv sync` is all a host needs (plus `git`).
+    # semgrep is deliberately NOT listed: it hard-pins mcp/opentelemetry/wcmatch
+    # to vulnerable versions. Install it as an isolated tool: `uv tool install semgrep`.
     "ruff>=0.15.20",
     "bandit>=1.9.4",
-    "semgrep>=1.168.0",
-    "mcp>=1.10",
 ]
 
 [project.urls]
@@ -60,8 +61,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# Every module imports via `src.xxx` (see "Import hygiene" in CLAUDE.md), so
-# the package that gets installed is literally named `src`.
+# src layout: the importable package is `drrepo`.
 packages = ["src/drrepo"]
 
 [tool.uv]
@@ -128,7 +128,9 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
+# By path, not package: AppTest runs streamlit_app.py as __main__, which a
+# package-based source (--cov=drrepo) never matches.
+source = ["src/drrepo"]
 
 [tool.coverage.report]
 show_missing = true

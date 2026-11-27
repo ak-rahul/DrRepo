@@ -1,0 +1,9 @@
+# The Dockerfile copies only pyproject.toml, uv.lock, README.md, LICENSE.md and
+# src/. Everything else stays out of the build context, above all secrets.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE.md
+!src/
+src/**/__pycache__/

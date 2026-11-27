@@ -26,4 +26,4 @@ uv run pytest
 
 ## Reporting bugs and requesting features
 
-Open a GitHub issue. For bugs, include the `uv run drrepo doctor` output, the command you ran, and the relevant part of `logs/app.log` with tokens removed. Report security problems privately to the maintainer, not in a public issue.
+Open a GitHub issue. For bugs, include the `uv run drrepo doctor` output, the command you ran, and the relevant part of `logs/app.log` with tokens removed. Report security problems privately as described in [SECURITY.md](SECURITY.md), not in a public issue.

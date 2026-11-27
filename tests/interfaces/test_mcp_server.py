@@ -1,10 +1,11 @@
-"""MCP server: tool/resource registration and behavior through FastMCP's own call path."""
+"""MCP server: tool/resource registration and behavior through MCPServer's own call path (MCP 2)."""
 
 import asyncio
 import json
 from unittest.mock import MagicMock
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from drrepo.interfaces import mcp_server
 
@@ -64,19 +65,31 @@ def service(monkeypatch):
     return svc
 
 
+def _result(tool, args):
+    return asyncio.run(mcp_server.mcp.call_tool(tool, args))
+
+
 def _call(tool, args):
-    content, structured = asyncio.run(mcp_server.mcp.call_tool(tool, args))
-    return (
-        structured.get("result", structured)
-        if isinstance(structured, dict)
-        else json.loads(content[0].text)
-    )
+    result = _result(tool, args)
+    assert not result.is_error, result.content
+    structured = result.structured_content
+    if isinstance(structured, dict):
+        return structured.get("result", structured)
+    text = result.content[0].text
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:  # a plain string result, e.g. Markdown
+        return text
+
+
+def _read(uri):
+    return next(iter(asyncio.run(mcp_server.mcp.read_resource(uri)))).content
 
 
 def test_registered_surface():
     async def surface():
         tools = {t.name for t in await mcp_server.mcp.list_tools()}
-        templates = {r.uriTemplate for r in await mcp_server.mcp.list_resource_templates()}
+        templates = {r.uri_template for r in await mcp_server.mcp.list_resource_templates()}
         prompts = {p.name for p in await mcp_server.mcp.list_prompts()}
         return tools, templates, prompts
 
@@ -119,9 +132,49 @@ def test_get_issues_filters(service):
     ] == ["Docs"]
 
 
-def test_get_report_unknown_repo_errors(service):
-    with pytest.raises(Exception, match="analyze_repository first"):
-        asyncio.run(mcp_server.mcp.call_tool("get_report", {"repo": "octo/other"}))
+def test_get_report_unknown_repo_is_a_tool_error(service):
+    # Called directly, MCPServer raises ToolError; the protocol layer turns it
+    # into an `is_error` result the model can read.
+    with pytest.raises(ToolError, match="analyze_repository first"):
+        _result("get_report", {"repo": "octo/other"})
+
+
+def test_get_report_formats(service):
+    assert _call("get_report", {"repo": "octo/demo"})["overall_score"] == 77.0
+    assert _call("get_report", {"repo": "octo/demo", "format": "json"}) == REPORT
+    assert _call("get_report", {"repo": "octo/demo", "format": "markdown"}).startswith("# DrRepo")
+
+
+def test_list_reports_and_health(service, monkeypatch):
+    assert _call("list_reports", {}) == [{"repository": "octo/demo"}]
+    monkeypatch.setattr(mcp_server, "check_all", lambda _config: {"healthy": True})
+    service.breaker_state.return_value = {"state": "closed"}
+    assert _call("health_check", {}) == {
+        "healthy": True,
+        "llm_circuit_breaker": {"state": "closed"},
+    }
+
+
+def test_package_lookup_uses_shared_cache(service, monkeypatch):
+    seen = {}
+
+    def lookup(package, ecosystem, version, config, cache):
+        seen.update(package=package, cache=cache)
+        return "no known vulnerabilities"
+
+    monkeypatch.setattr(mcp_server, "lookup_package", lookup)
+    args = {"package": "django", "ecosystem": "PyPI", "version": "3.2.0"}
+    assert _call("check_package_vulnerabilities", args) == "no known vulnerabilities"
+    assert seen == {"package": "django", "cache": service.cache}
+
+
+def test_score_history_filters_by_repo(service, monkeypatch):
+    history = [
+        {"repo_key": "https://github.com/octo/demo", "overall_score": 70},
+        {"repo_key": "https://github.com/octo/other", "overall_score": 10},
+    ]
+    monkeypatch.setattr(mcp_server, "load_history", lambda _path: history)
+    assert _call("get_score_history", {"repo": "octo/demo"}) == history[:1]
 
 
 def test_readme_tool_is_pure():
@@ -129,9 +182,16 @@ def test_readme_tool_is_pure():
     assert data["code_block_count"] == 1 and "Usage" not in data["missing_sections"]
 
 
-def test_sarif_resource(service):
-    contents = asyncio.run(mcp_server.mcp.read_resource("drrepo://reports/octo/demo/sarif"))
-    assert json.loads(next(iter(contents)).content)["version"] == "2.1.0"
+def test_report_resources(service):
+    assert json.loads(_read("drrepo://reports/octo/demo/sarif"))["version"] == "2.1.0"
+    assert json.loads(_read("drrepo://reports/octo/demo"))["overall_score"] == 77.0
+    assert _read("drrepo://reports/octo/demo/markdown").startswith("# DrRepo")
+
+
+@pytest.mark.parametrize("uri", ["drrepo://reports/octo/other", "drrepo://reports//demo/sarif"])
+def test_missing_resource_is_not_found(service, uri):
+    with pytest.raises(Exception, match=r"analyze_repository first|required"):
+        _read(uri)
 
 
 def test_prompt_mentions_focus():
@@ -151,9 +211,6 @@ def test_progress_reaches_client_from_foreign_threads(service):
     received: list[str] = []
 
     class FakeContext:
-        async def info(self, _message):
-            return None
-
         async def report_progress(self, _progress, _total, message):
             received.append(message)
 
@@ -167,3 +224,18 @@ def test_progress_reaches_client_from_foreign_threads(service):
     service.analyze.side_effect = analyze
     asyncio.run(mcp_server.analyze_repository("https://github.com/octo/demo", FakeContext()))
     assert received == ["from the worker thread", "from a foreign thread"]
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected"),
+    [
+        ("stdio", (("stdio",), {})),
+        ("sse", (("sse",), {"host": "10.0.0.5", "port": 9000})),
+        ("streamable-http", (("streamable-http",), {"host": "10.0.0.5", "port": 9000})),
+    ],
+)
+def test_run_passes_host_and_port_to_http_transports(monkeypatch, transport, expected):
+    calls = []
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda *a, **k: calls.append((a, k)))
+    mcp_server.run(transport, host="10.0.0.5", port=9000)
+    assert calls == [expected]

@@ -31,8 +31,10 @@ from typing import Any, Literal
 
 import anyio
 import anyio.lowlevel
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 
+from drrepo import __version__
 from drrepo.agents.tools import lookup_package
 from drrepo.config import Config
 from drrepo.exporters import to_json, to_markdown, to_sarif
@@ -43,8 +45,9 @@ from drrepo.recon.readme import analyze_readme
 from drrepo.reporting import load_history
 from drrepo.service import AnalysisService
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="drrepo",
+    version=__version__,
     instructions=(
         "DrRepo audits public GitHub repositories: static analysis, security and secret "
         "scanning, dependency vulnerabilities and licenses, documentation, and maintainability, "
@@ -137,20 +140,40 @@ async def analyze_repository(
         except Exception as e:
             logger.debug(f"MCP progress notification failed: {e}")
 
-    try:
-        await ctx.info(f"Starting DrRepo analysis of {repo_url}")
-    except Exception as e:
-        logger.debug(f"MCP log notification failed: {e}")
+    # ctx.info() is deprecated in MCP 2 (SEP-2577); logs go to stderr instead.
+    logger.info(f"MCP: starting analysis of {repo_url}")
     report = await anyio.to_thread.run_sync(
         lambda: service.analyze(repo_url, description, deep=deep, progress=progress)
     )
     return _summary(report, max(0, min(max_issues, 100)))
 
 
+def _find_report(repo: str) -> dict[str, Any] | None:
+    try:
+        return get_service().latest_report(repo)
+    except ValueError:  # not a GitHub repository reference
+        return None
+
+
+def _missing(repo: str) -> str:
+    return f"No report for {repo!r} in this session; call analyze_repository first"
+
+
 def _require_report(repo: str) -> dict[str, Any]:
-    report = get_service().latest_report(repo)
+    """For tools: a ToolError becomes an `is_error` result the model can read."""
+    report = _find_report(repo)
     if report is None:
-        raise ValueError(f"No report for {repo} in this session; call analyze_repository first")
+        raise ToolError(_missing(repo))
+    return report
+
+
+def _resource_report(owner: str, name: str) -> dict[str, Any]:
+    """For resources: MCP 2 maps ResourceNotFoundError to JSON-RPC -32602."""
+    if not owner or not name:  # MCP 2 lets `{var}` match an empty segment
+        raise ResourceNotFoundError("owner and name are required")
+    report = _find_report(f"{owner}/{name}")
+    if report is None:
+        raise ResourceNotFoundError(_missing(f"{owner}/{name}"))
     return report
 
 
@@ -245,19 +268,19 @@ def health_check() -> dict[str, Any]:
 @mcp.resource("drrepo://reports/{owner}/{name}", mime_type="application/json")
 def report_json(owner: str, name: str) -> str:
     """Full JSON report for a repository analyzed in this session."""
-    return to_json(_require_report(f"{owner}/{name}"))
+    return to_json(_resource_report(owner, name))
 
 
 @mcp.resource("drrepo://reports/{owner}/{name}/markdown", mime_type="text/markdown")
 def report_markdown(owner: str, name: str) -> str:
     """Markdown report for a repository analyzed in this session."""
-    return to_markdown(_require_report(f"{owner}/{name}"))
+    return to_markdown(_resource_report(owner, name))
 
 
 @mcp.resource("drrepo://reports/{owner}/{name}/sarif", mime_type="application/sarif+json")
 def report_sarif(owner: str, name: str) -> str:
     """SARIF 2.1.0 log (GitHub code scanning format) for a repository analyzed in this session."""
-    return to_sarif(_require_report(f"{owner}/{name}"))
+    return to_sarif(_resource_report(owner, name))
 
 
 @mcp.prompt()
@@ -279,7 +302,9 @@ def run(
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> None:
-    if transport != "stdio":
-        mcp.settings.host = host
-        mcp.settings.port = port
-    mcp.run(transport=transport)
+    if transport == "stdio":
+        mcp.run("stdio")
+    elif transport == "sse":
+        mcp.run("sse", host=host, port=port)
+    else:
+        mcp.run("streamable-http", host=host, port=port)

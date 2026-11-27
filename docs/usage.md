@@ -3,12 +3,15 @@
 ## Install
 
 ```bash
-uv sync                  # creates .venv with locked dependencies (incl. ruff, bandit, semgrep)
+uv sync                  # creates .venv with locked dependencies (incl. ruff, bandit)
+uv tool install semgrep  # optional: the semgrep scanner, in its own isolated environment
 cp .env.example .env     # set GROQ_API_KEY; GH_TOKEN recommended
 uv run drrepo doctor     # verifies git, scanners, config, connectivity
 ```
 
 `git` must be on `PATH`. Everything else is installed by uv.
+
+semgrep is installed as a separate uv tool rather than a project dependency because it hard-pins old versions of `mcp`, `opentelemetry` and `wcmatch` (with known CVEs) that would otherwise be forced onto DrRepo. If it isn't installed, the security category runs bandit and the secret scanner and notes that semgrep was skipped. semgrep has no native Windows support; use WSL or the Docker image there. The Docker image includes it.
 
 ## CLI
 

@@ -145,5 +145,5 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 - **cli**: argparse subcommands. Progress goes to stderr and the report to stdout, so `--json` can be piped.
 - **streamlit_app**: runs the analysis on a worker thread that writes to a plain `AnalysisJob` object. `st.fragment(run_every=1)` shows progress and reruns once when the job finishes. `main()` runs only under `__main__`.
-- **mcp_server**: FastMCP. The analysis runs in a worker thread and progress becomes MCP progress notifications (best-effort).
+- **mcp_server**: `MCPServer` (MCP Python SDK 2). The analysis runs in a worker thread and progress becomes MCP progress notifications (best-effort).
 - **health**: token-free connectivity checks plus the FastAPI app (sync endpoints, lazy config).

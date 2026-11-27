@@ -217,9 +217,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     )
     from drrepo.recon.scanners import find_executable
 
+    install_hint = {"semgrep": "; install with `uv tool install semgrep` (Linux/macOS)"}
     for tool in ("ruff", "bandit", "semgrep"):
         path = find_executable(tool)
-        line(True if path else None, tool, path or "not found (that signal will be skipped)")
+        not_found = "not found (that signal will be skipped)" + install_hint.get(tool, "")
+        line(True if path else None, tool, path or not_found)
 
     for module in (
         "langgraph",

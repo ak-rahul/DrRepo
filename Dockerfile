@@ -22,6 +22,14 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+# semgrep lives in its own tool environment: as a project dependency it would
+# pin mcp/opentelemetry/wcmatch to vulnerable versions. Bump it deliberately.
+ARG SEMGREP_VERSION=1.187.0
+ENV UV_TOOL_DIR=/opt/uv-tools \
+    UV_TOOL_BIN_DIR=/opt/uv-tools/bin
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv tool install "semgrep==${SEMGREP_VERSION}"
+
 # ---- runtime stage ------------------------------------------------------------
 FROM python:3.12-slim-trixie
 
@@ -34,9 +42,10 @@ RUN apt-get update \
 RUN useradd --create-home --uid 1000 drrepo
 WORKDIR /app
 COPY --from=builder --chown=drrepo:drrepo /app/.venv /app/.venv
+COPY --from=builder /opt/uv-tools /opt/uv-tools
 RUN mkdir -p /app/reports /app/logs && chown -R drrepo:drrepo /app
 
-ENV PATH="/app/.venv/bin:$PATH" \
+ENV PATH="/app/.venv/bin:/opt/uv-tools/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

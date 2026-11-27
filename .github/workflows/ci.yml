@@ -44,14 +44,14 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked
       # Hermetic: no secrets, no network (an autouse fixture blocks real HTTP).
-      - run: uv run pytest --cov=drrepo --cov-report=term --cov-report=xml
+      - run: uv run pytest --cov --cov-report=term --cov-report=xml
 
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.audit.txt
+      - run: uv export --frozen --no-dev --no-emit-project -o requirements.audit.txt
       - run: uvx pip-audit -r requirements.audit.txt --disable-pip
 
   integration:
@@ -64,6 +64,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
+      # Isolated tool env: as a project dependency semgrep pins vulnerable mcp/otel.
+      - run: uv tool install semgrep
       - run: uv run pytest -m integration -v
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -78,6 +80,13 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: drrepo:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Smoke-test the image
+        run: |
+          docker run --rm drrepo:ci drrepo --version
+          docker run --rm drrepo:ci semgrep --version
+          docker run --rm drrepo:ci git --version
+          docker run --rm drrepo:ci sh -c 'test "$(id -u)" != 0'

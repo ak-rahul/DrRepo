@@ -4,10 +4,13 @@
 
 ```bash
 uv sync                          # runtime + dev group (pytest, mypy, pre-commit, pip-audit)
+uv tool install semgrep          # optional; only the live integration tests run it
 uv run pre-commit install
 ```
 
 uv is the only supported package manager. Change dependencies with `uv add <pkg>` or `uv add --dev <pkg>` and commit `uv.lock`; CI runs `uv sync --locked`.
+
+Never add semgrep back as a project dependency. It hard-pins `mcp`, `opentelemetry` and `wcmatch` to versions with known CVEs, and those pins hold DrRepo's own MCP server back. It is installed as an isolated uv tool instead (locally, in CI's integration job, and in the Docker image), and `recon/scanners.find_executable` finds it on `PATH`.
 
 ## Commands
 
@@ -17,7 +20,7 @@ uv run pytest tests/test_pipeline.py            # one file
 uv run pytest tests/test_pipeline.py::test_every_node_runs_exactly_once
 uv run pytest -k dependencies                   # by keyword
 uv run pytest -m integration -v                 # live: network, git, API keys (skip themselves if missing)
-uv run pytest --cov=drrepo                      # coverage
+uv run pytest --cov                             # coverage (path-based; see pyproject)
 uv run ruff check src tests examples            # lint
 uv run ruff format src tests examples           # format
 uv run mypy src examples                        # types
@@ -48,4 +51,4 @@ Before pushing, run the same checks as CI: `uv run ruff check src tests examples
 
 ## Releasing
 
-Bump `version` in `pyproject.toml` (`drrepo.__version__` reads the installed metadata). Then run `uv lock`, run the checks above, and tag `vX.Y.Z`.
+Bump `version` in `pyproject.toml` (`drrepo.__version__` reads the installed metadata) and move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version. Then run `uv lock`, run the checks above, and tag `vX.Y.Z`.

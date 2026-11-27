@@ -17,7 +17,6 @@ import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, ReadResourceResult, TextContent, TextResourceContents
-from pydantic import AnyUrl
 
 from drrepo.models import RepoRef
 
@@ -41,7 +40,7 @@ async def run(repo_url: str) -> None:
         tools = await session.list_tools()
         print("Tools:", ", ".join(t.name for t in tools.tools))
         templates = await session.list_resource_templates()
-        print("Resources:", ", ".join(t.uriTemplate for t in templates.resourceTemplates))
+        print("Resources:", ", ".join(t.uri_template for t in templates.resource_templates))
         prompts = await session.list_prompts()
         print("Prompts:", ", ".join(p.name for p in prompts.prompts))
 
@@ -51,14 +50,14 @@ async def run(repo_url: str) -> None:
             {"repo_url": repo_url, "deep": False, "max_issues": 5},
             progress_callback=on_progress,
         )
-        summary = result.structuredContent or json.loads(text_of(result))
+        summary = result.structured_content or json.loads(text_of(result))
         if "error" in summary:
             raise SystemExit(f"Server refused the URL: {summary['error']}")
         print(json.dumps(summary, indent=2)[:1500])
 
         repo = RepoRef.parse(repo_url)
         markdown = await session.read_resource(
-            AnyUrl(f"drrepo://reports/{repo.owner}/{repo.name}/markdown")
+            f"drrepo://reports/{repo.owner}/{repo.name}/markdown"
         )
         print("\nFirst lines of the Markdown report resource:")
         print("\n".join(text_of(markdown).splitlines()[:15]))

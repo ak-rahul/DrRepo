@@ -29,7 +29,7 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 | `CLONE_TIMEOUT_SECONDS` | `60` | |
 | `CLONE_MAX_SIZE_MB` | `300` | larger clones are deleted and clone-based collectors are skipped |
 | `COLLECTOR_TIMEOUT_SECONDS` | `120` | per scanner subprocess and HTTP client |
-| `ENABLE_SEMGREP` | `true` | semgrep is the slowest scanner and downloads its ruleset |
+| `ENABLE_SEMGREP` | `true` | semgrep is the slowest scanner and downloads its ruleset. It runs only if installed (`uv tool install semgrep`) |
 | `ENABLE_BANDIT` | `true` | |
 | `ENABLE_DEPENDENCY_AUDIT` | `true` | OSV.dev lookups |
 | `ENABLE_LICENSE_AUDIT` | `true` | deps.dev license lookups (runtime dependencies only, max 30) |

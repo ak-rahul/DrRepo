@@ -21,6 +21,7 @@ Requires [uv](https://docs.astral.sh/uv/) and `git`.
 ```bash
 git clone https://github.com/ak-rahul/DrRepo && cd DrRepo
 uv sync
+uv tool install semgrep     # optional extra scanner (Linux/macOS; included in the Docker image)
 cp .env.example .env        # add GROQ_API_KEY (optional: GH_TOKEN)
 
 uv run drrepo https://github.com/pallets/itsdangerous     # CLI
@@ -60,6 +61,7 @@ Findings and scores come from deterministic code; the LLM only writes summaries 
 | [Architecture](docs/architecture.md) | design, pipeline, agents, resilience, security model |
 | [Report format](docs/report-format.md) | JSON schema, scoring math, SARIF mapping |
 | [Development](docs/development.md) | setup, tests, extending DrRepo |
+| [Changelog](CHANGELOG.md) · [Security](SECURITY.md) | release notes · reporting vulnerabilities |
 
 ## License
 

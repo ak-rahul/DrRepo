@@ -179,3 +179,50 @@ def test_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     assert capsys.readouterr().out.startswith("drrepo ")
+
+
+def test_mcp_command_forwards_transport(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    monkeypatch.setattr("drrepo.interfaces.mcp_server.run", lambda **kwargs: calls.append(kwargs))
+    argv = ["mcp", "--transport", "streamable-http", "--port", "9001", "--log-file", ""]
+    assert cli.main(argv) == cli.EXIT_OK
+    assert calls == [{"transport": "streamable-http", "host": "127.0.0.1", "port": 9001}]
+
+
+def test_health_api_command_starts_uvicorn(monkeypatch):
+    import uvicorn
+
+    calls = []
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: calls.append((app, kwargs)))
+    assert cli.main(["health-api", "--port", "8001", "--log-file", ""]) == cli.EXIT_OK
+    app, kwargs = calls[0]
+    assert app == "drrepo.interfaces.health:app" and kwargs["port"] == 8001
+
+
+def test_doctor_reports_missing_semgrep_with_install_hint(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    monkeypatch.setattr(
+        "drrepo.recon.scanners.find_executable",
+        lambda name: None if name == "semgrep" else f"/bin/{name}",
+    )
+    cli.main(["doctor", "--offline"])
+    out = capsys.readouterr().out
+    assert "[WARN] semgrep" in out and "uv tool install semgrep" in out
+
+
+def test_unexpected_error_and_interrupt_exit_codes(monkeypatch, capsys):
+    def boom(_e):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cli, "_load_config", boom)
+    assert cli.main(["health"]) == cli.EXIT_ERROR
+    assert "RuntimeError: kaboom" in capsys.readouterr().err
+
+    def interrupt(_e):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_load_config", interrupt)
+    assert cli.main(["health"]) == 130
