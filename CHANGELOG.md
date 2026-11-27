@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
+- The web UI rendered text from the analyzed repository (issue titles and descriptions, summaries, notes, file names) as Markdown, so a planted `![](https://...)` could load a remote image (a tracking pixel) and `$...$` rendered as LaTeX. All such text is now escaped (`interfaces/ui_data.escape_markdown`); tables and code blocks show it as plain text.
 - `search_code` (an investigator tool whose regex the LLM chooses) could be stalled forever by a catastrophic-backtracking pattern, for example one planted by prompt injection in an analyzed repository. Matching now uses `regex` with a per-line timeout and a total time budget.
 - Four README patterns were quadratic in attacker-controlled input (7 s for 30k newlines). They are now linear, and README text is capped at 100k characters everywhere, including the GitHub API path and the MCP `analyze_readme_text` tool.
 - `docker-compose.yml` publishes ports on `127.0.0.1` only. Previously the unauthenticated UI, health API and MCP server were reachable from the network.
@@ -31,6 +32,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Coverage now includes the Streamlit app. It used to report 0% because the app runs as `__main__`.
 
 ### Added
+- Web UI: compare mode (base vs. head, with new, worse and fixed issues and the head report), recent analyses that survive a page refresh, a score-over-time chart, Dependencies, Suppressed and Details (models, scanner versions, instruction hashes) tabs, token usage per step, distinct deep and lite markers, issue search and source/origin filters with paging, and the summary download. View logic lives in `interfaces/ui_data.py` and is unit-tested.
 - Code-symbol index for investigators: a `symbols` tool family (`find_definition`, `find_references`, `outline`) for the security and code-quality agents, backed by a per-run, in-memory index shared across categories. Python uses `ast` (exact); JS/TS, Go, Java/Kotlin/C#, Ruby, Rust and PHP use conservative line patterns. No new dependency.
 - Documentation checks (`doc_checks` collector): broken internal links and anchors in the README and `docs/`, documented `npm`/`yarn`/`pnpm`/`make` commands and project commands that don't exist, and docstring coverage of public Python APIs. They count against the documentation score by at most 15 points.
 - Pull-request diff mode: `drrepo diff <url> --base <ref> [--head <ref>]` analyzes both commits and reports new, worsened and fixed issues with per-category score deltas, ignoring line moves. `--deep` investigates the head with tools only in categories that got worse. Gates: `--fail-on-new SEVERITY`, `--max-score-drop N`, `--fail-under`. Also `AnalysisService.compare()`, the MCP tool `compare_commits`, the action's `mode: diff` (with `base` and `fail-on-new`), and a versioned contract, `diff.schema.json`.

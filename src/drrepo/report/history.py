@@ -53,12 +53,17 @@ def load_history(history_path: Path = DEFAULT_HISTORY_PATH) -> list[dict[str, An
         return []
 
 
+def runs_for(repository: dict[str, Any], history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every recorded run of this repository, oldest first."""
+    key = _repo_key(repository)
+    return [r for r in history if r.get("repo_key") == key]
+
+
 def previous_run_for(
     repository: dict[str, Any], history: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
     """Return the most recent prior run recorded for this repository, or None."""
-    key = _repo_key(repository)
-    matches = [r for r in history if r.get("repo_key") == key]
+    matches = runs_for(repository, history)
     return matches[-1] if matches else None
 
 

@@ -179,3 +179,102 @@ def test_start_job_records_result_and_errors():
     )
     failed = wait(module.start_job(Service(True), "https://github.com/a/b", "", deep=False))
     assert (failed.status, failed.error) == ("error", "RuntimeError: boom")
+
+
+def test_report_tabs_and_untrusted_text(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    report = dict(REPORT)
+    report["issues"] = [
+        dict(REPORT["issues"][0], title="Pixel ![x](https://evil.example/p.png)", description="$x$")
+    ]
+    report["dependencies"] = [
+        {
+            "ecosystem": "PyPI",
+            "name": "jinja2",
+            "version": "3.1.2",
+            "scope": "runtime",
+            "license": "MIT",
+            "vulnerabilities": ["GHSA-1"],
+        }
+    ]
+    report["suppressed"] = [
+        {
+            "issue": REPORT["issues"][1],
+            "suppression": {
+                "rule": "layout",
+                "path": None,
+                "reason": "ok",
+                "expires": None,
+                "origin": "local",
+            },
+        }
+    ]
+    report["category_scores"] = dict(
+        REPORT["category_scores"],
+        security=dict(REPORT["category_scores"]["security"], investigation_depth="lite"),
+    )
+    at = _run_with_job(_job("done", report))
+    labels = [e.label for e in at.expander]
+    assert any(r"\!\[x\]\(https://evil.example/p.png\)" in label for label in labels)
+    assert not any("![x](" in label for label in labels)  # never an image
+    assert r"\$x\$" in " ".join(m.value for m in at.markdown)
+    assert {t.label for t in at.tabs} >= {"Dependencies", "Suppressed (1)", "Details"}
+    assert "🔎 Security" in {m.label for m in at.metric}  # lite has its own marker
+    assert {b.label for b in at.get("download_button")} >= {"SBOM", "Summary"}
+
+
+def test_compare_mode_needs_a_base(app):
+    app.radio[0].set_value("Compare two commits").run()
+    app.text_input[0].input("https://github.com/octo/demo")
+    app.button[0].click().run()
+    assert any("needs a base" in e.value for e in app.error)
+
+
+def test_finished_diff_renders(monkeypatch, tmp_path):
+    from drrepo.report.diff import diff_reports
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    head = dict(REPORT, overall_score=60.0)
+    head["issues"] = [dict(REPORT["issues"][0], title="New one", rule_id="B9")]
+    diff = {**diff_reports(REPORT, head), "head_report": head}
+    at = _run_with_job(_job("done", diff))
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["New issues"] == "1" and metrics["Fixed"] == "2"
+    assert any("New one" in e.label for e in at.expander)
+    assert "Head commit report" in " ".join(m.value for m in at.markdown)
+
+
+def test_recent_analyses_open_from_the_service(monkeypatch, tmp_path):
+    from drrepo.service import AnalysisService
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setattr(AnalysisService, "list_reports", lambda self: [{"repository": "octo/demo"}])
+    monkeypatch.setattr(AnalysisService, "latest_report", lambda self, repo: REPORT)
+    at = AppTest.from_file(str(APP), default_timeout=30)
+    at.run()
+    at.sidebar.selectbox[0].set_value("octo/demo").run()
+    assert not at.exception
+    assert {m.label: m.value for m in at.metric}["Overall score"] == "72/100 (C)"
+
+
+def test_start_compare_job_calls_the_service():
+    import drrepo.interfaces.streamlit_app as module
+
+    class Service:
+        def compare(self, repo_url, base, head, description, *, deep, progress):
+            progress("comparing")
+            return {"base": base, "head": head, "deep": deep}
+
+    job = module.start_compare_job(Service(), "https://github.com/a/b", "main", None, "", True)
+    for _ in range(200):
+        if job.status != "running":
+            break
+        time.sleep(0.01)
+    assert (job.kind, job.status, job.result) == (
+        "compare",
+        "done",
+        {"base": "main", "head": None, "deep": True},
+    )

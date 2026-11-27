@@ -60,12 +60,24 @@ uv run drrepo health-api [--port 8000]              # FastAPI health endpoint
 
 ## Web UI
 
-`uv run drrepo ui` opens http://localhost:8501. Enter a URL and optional context, and toggle deep investigation in the sidebar. While the analysis runs you see live progress. The results page has:
+`uv run drrepo ui` opens http://localhost:8501. Choose **Audit a commit** (a URL and an optional branch, tag or SHA) or **Compare two commits** (a base and a head, like `drrepo diff`). Add optional context, and toggle tool-calling investigations in the sidebar. While the analysis runs you see live progress. **Recent analyses** in the sidebar reopens any report this server produced, including after a page refresh.
 
-- the overall score and grade, with deltas against the previous analysis of the same repository
-- per-category scores (🕵️ marks deep-investigated categories; `n/a` marks unassessable ones)
-- tabs: **Summary** (narratives, notes, quick wins), **Issues** (filter by severity and category), **How it investigated** (the planner's rationale and every tool call with its output), **Raw data** (collector status and full JSON)
-- JSON, Markdown, SARIF and CycloneDX SBOM downloads
+An audit's results page has:
+
+- the overall score and grade, with deltas against the previous analysis of the same repository, and a score-over-time chart once there are two or more recorded runs
+- per-category scores (🕵️ deep and 🔎 lite investigations; `n/a` marks unassessable categories)
+- tabs:
+  - **Summary**: narratives, notes, quick wins;
+  - **Issues**: filter by severity, category and source, search title, file or rule, show only scanner or agent findings, hide `[unverified]`/`[disputed]` ones; 50 per page;
+  - **Suppressed**, when a suppression file applied: each finding with its rule, reason, origin and expiry;
+  - **Dependencies**: every package with scope, license and advisories, plus runtime license counts;
+  - **How it investigated**: the planner's plan, every tool call with its input and output, and token usage per step with the budget estimate;
+  - **Details**: the model per role, scanner versions, collector status, instruction hashes and the raw JSON;
+- JSON, Markdown, SARIF, CycloneDX SBOM and summary downloads.
+
+A comparison shows the head score and its change, new, worse and fixed issue counts, per-category deltas, the issues in each group, diff JSON and Markdown downloads, and the full head-commit report below.
+
+Everything a report contains that came from the analyzed repository (titles, descriptions, file names, agent output) is escaped before display, so it can't render images, links, HTML or LaTeX.
 
 ## Python
 
