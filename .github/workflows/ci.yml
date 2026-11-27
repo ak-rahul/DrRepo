@@ -52,6 +52,7 @@ jobs:
           # Agent instructions are package data; make sure they shipped.
           /tmp/wheel-env/bin/python -c "from drrepo.agents.prompts import validate_all; validate_all()"
           /tmp/wheel-env/bin/python -c "from drrepo.report.schema import load_schema; load_schema()"
+          /tmp/wheel-env/bin/python -c "from drrepo.report.diff import load_diff_schema; load_diff_schema()"
 
   test:
     runs-on: ${{ matrix.os }}
@@ -147,6 +148,24 @@ jobs:
           test -n "${SCORE}" && test -n "${GRADE}" && test -s "${REPORT}"
           ls drrepo-report/*.cdx.json drrepo-report/*.summary.md
           echo "score ${SCORE} (${GRADE})"
+      - name: Run the action in diff mode
+        id: diff
+        # Deliberately the checkout, not `$/`: this job tests the action as changed by the push or PR.
+        uses: ./ # zizmor: ignore[self-repository]
+        with:
+          repository: pallets/itsdangerous
+          mode: diff
+          base: 49d263f60b6f78df8924be51262eeb5216ab1468 # 2.1.2
+          ref: 096c8d42545d3b68ea21a4f890fb2b2d8979c0bd # 2.2.0
+          output-dir: drrepo-diff
+          upload-sarif: "false"
+          github-token: ${{ secrets.GH_TOKEN || github.token }}
+      - name: Check the diff outputs
+        env:
+          REPORT: ${{ steps.diff.outputs.report }}
+        run: |
+          test -s "${REPORT}"
+          ls drrepo-diff/*_diff_*.json drrepo-diff/*_diff_*.md
 
   docker:
     runs-on: ubuntu-latest

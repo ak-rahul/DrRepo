@@ -36,7 +36,17 @@ from drrepo.report.exporters import FORMATS
 from drrepo.report.suppressions import SuppressionError
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_FAIL_UNDER = 0, 1, 2, 3
-SUBCOMMANDS = {"analyze", "ui", "mcp", "health", "doctor", "health-api", "eval", "baseline"}
+SUBCOMMANDS = {
+    "analyze",
+    "diff",
+    "ui",
+    "mcp",
+    "health",
+    "doctor",
+    "health-api",
+    "eval",
+    "baseline",
+}
 
 
 def _load_config(env_file: str | None) -> Config:
@@ -73,7 +83,8 @@ def print_summary(report: dict[str, Any], top: int = 10) -> None:
     print("\n Categories")
     for name, cs in report.get("category_scores", {}).items():
         shown = f"{cs['score']:5.1f}" if cs.get("assessed", True) else "  n/a"
-        depth = " [deep]" if cs.get("investigation_depth") == "deep" else ""
+        level = cs.get("investigation_depth", "shallow")
+        depth = f" [{level}]" if level != "shallow" else ""
         print(f"   {name.replace('_', ' ').title():<18}{shown}{depth}")
         for note in cs.get("notes", []):
             print(f"      note: {note}")
@@ -109,13 +120,13 @@ def print_summary(report: dict[str, Any], top: int = 10) -> None:
 # -------------------------------------------------------------- commands ---
 
 
-def cmd_analyze(args: argparse.Namespace) -> int:
-    from drrepo.service import AnalysisService, save_report
-
+def _run_config(args: argparse.Namespace) -> Config:
+    """Config for `analyze` and `diff`: the environment plus per-run flags; also
+    configures logging and warns when there is no LLM."""
     config = _load_config(args.env_file)
-    if args.shallow:
+    if getattr(args, "shallow", False):
         config = dataclasses.replace(config, enable_deep_investigation=False)
-    if args.no_history:
+    if getattr(args, "no_history", False):
         config = dataclasses.replace(config, enable_score_history=False)
     if args.suppressions:
         config = dataclasses.replace(config, suppressions_file=args.suppressions)
@@ -126,7 +137,6 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         log_file=args.log_file,
         console_level="DEBUG" if args.verbose else "WARNING" if not args.quiet else "ERROR",
     )
-
     missing = config.validate_for_llm()
     if missing:
         print(
@@ -134,19 +144,38 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             "(deterministic findings only; no narratives or deep investigation).",
             file=sys.stderr,
         )
+    return config
 
-    formats = tuple(f.strip() for f in args.format.split(",") if f.strip())
-    unknown = set(formats) - set(FORMATS)
+
+def _parse_formats(raw: str, allowed: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Comma-separated formats, or None (after printing an error) if any is unknown."""
+    formats = tuple(f.strip() for f in raw.split(",") if f.strip())
+    unknown = set(formats) - set(allowed)
     if unknown:
         print(
-            f"error: unknown format(s) {sorted(unknown)}; choose from {', '.join(FORMATS)}",
+            f"error: unknown format(s) {sorted(unknown)}; choose from {', '.join(allowed)}",
             file=sys.stderr,
         )
-        return EXIT_USAGE
+        return None
+    return formats
 
+
+def _progress(args: argparse.Namespace) -> Any:
     def progress(message: str) -> None:
         if not args.quiet:
             print(f"  · {message}", file=sys.stderr)
+
+    return progress
+
+
+def cmd_analyze(args: argparse.Namespace) -> int:
+    from drrepo.service import AnalysisService, save_report
+
+    config = _run_config(args)
+    formats = _parse_formats(args.format, FORMATS)
+    if formats is None:
+        return EXIT_USAGE
+    progress = _progress(args)
 
     try:
         report = AnalysisService(config).analyze(
@@ -172,6 +201,76 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         )
         return EXIT_FAIL_UNDER
     return EXIT_OK
+
+
+def print_diff(diff: dict[str, Any], top: int = 10) -> None:
+    base, head = diff["base"], diff["head"]
+
+    def sha(side: dict[str, Any]) -> str:
+        return (side.get("commit_sha") or "?")[:12]
+
+    delta = diff.get("overall_delta")
+    print(
+        f"\n DrRepo diff: {diff['repository'].get('full_name')}  {sha(base)} -> {sha(head)}"
+        f"  overall {base.get('overall_score')} -> {head.get('overall_score')}"
+        + (f" ({delta:+.1f})" if delta else "")
+    )
+    for name, c in diff["category_deltas"].items():
+        if c["delta"]:
+            print(
+                f"   {name.replace('_', ' ').title():<18}{c['base']} -> {c['head']} ({c['delta']:+.1f})"
+            )
+    for label, issues in (
+        ("new", diff["new_issues"]),
+        ("worse", [w["issue"] for w in diff["worsened_issues"]]),
+        ("fixed", diff["fixed_issues"]),
+    ):
+        print(f"\n {label.capitalize()}: {len(issues)}")
+        for issue in issues[:top]:
+            where = f" ({issue['file']})" if issue.get("file") else ""
+            print(f"   [{issue['severity']}] {issue['title']}{where}")
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    from drrepo.report.diff import gate
+    from drrepo.service import DIFF_FORMATS, AnalysisService, save_diff, save_report
+
+    config = _run_config(args)
+    formats = _parse_formats(args.format, DIFF_FORMATS)
+    report_formats = _parse_formats(args.report_formats, FORMATS)
+    if formats is None or report_formats is None:
+        return EXIT_USAGE
+    try:
+        diff = AnalysisService(config).compare(
+            args.repo_url,
+            args.base,
+            args.head,
+            args.description,
+            deep=args.deep,
+            progress=_progress(args),
+        )
+    except (ValueError, SuppressionError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+
+    head_report = diff["head_report"]
+    diff = {k: v for k, v in diff.items() if k != "head_report"}
+    if args.json:
+        print(json.dumps(diff, indent=2))
+    elif not args.quiet:
+        print_diff(diff, top=args.top)
+    paths = save_diff(diff, Path(args.output_dir), formats) if formats else []
+    if report_formats:
+        paths += save_report(head_report, Path(args.output_dir), report_formats)
+    if paths:
+        print("Written: " + ", ".join(str(p) for p in paths), file=sys.stderr)
+
+    reasons = gate(diff, args.fail_on_new, args.max_score_drop)
+    if args.fail_under is not None and head_report.get("overall_score", 0) < args.fail_under:
+        reasons.append(f"head score {head_report.get('overall_score')} is below {args.fail_under}")
+    for reason in reasons:
+        print(f"Gate: {reason}", file=sys.stderr)
+    return EXIT_FAIL_UNDER if reasons else EXIT_OK
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
@@ -456,6 +555,48 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-q", "--quiet", action="store_true", help="no progress or summary output")
     p.add_argument("-v", "--verbose", action="store_true", help="print debug logs to stderr")
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser(
+        "diff", parents=[common], help="what changed between two commits (new, worse, fixed)"
+    )
+    p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
+    p.add_argument("--base", required=True, help="branch, tag, or full SHA to compare against")
+    p.add_argument(
+        "--head", help="branch, tag, or full SHA with the change (default: default branch)"
+    )
+    p.add_argument("-d", "--description", default="", help="context/focus for the investigators")
+    p.add_argument(
+        "--deep",
+        action="store_true",
+        help="re-analyze the head with tool-calling investigations, only in categories that got worse",
+    )
+    p.add_argument("--suppressions", help="suppression file (.drrepo.toml format) to apply")
+    p.add_argument(
+        "--trust-repo-suppressions",
+        action="store_true",
+        help="also honor each commit's own .drrepo.toml (use for your own repo)",
+    )
+    p.add_argument("--format", default="json,md", help="diff formats (json, md); '' for none")
+    p.add_argument(
+        "--report-formats",
+        default="",
+        help=f"also write the head commit's report ({', '.join(FORMATS)})",
+    )
+    p.add_argument("-o", "--output-dir", default="reports", help="where to write files")
+    p.add_argument("--json", action="store_true", help="print the diff JSON to stdout")
+    p.add_argument("--top", type=int, default=10, help="issues to list per section")
+    p.add_argument(
+        "--fail-on-new",
+        choices=("critical", "high", "medium", "low"),
+        help="exit 3 if a new or worsened issue is at this severity or above",
+    )
+    p.add_argument(
+        "--max-score-drop", type=float, help="exit 3 if the overall score falls by more than this"
+    )
+    p.add_argument("--fail-under", type=float, help="exit 3 if the head score is below this")
+    p.add_argument("-q", "--quiet", action="store_true", help="no progress or summary output")
+    p.add_argument("-v", "--verbose", action="store_true", help="print debug logs to stderr")
+    p.set_defaults(func=cmd_diff)
 
     p = sub.add_parser("ui", help="launch the Streamlit web UI")
     p.add_argument("--port", type=int, default=8501)

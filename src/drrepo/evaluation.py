@@ -12,7 +12,9 @@ A drift beyond the tolerance, or a finding that appears or disappears, is what
 a reviewer needs to look at.
 
 Precision of agent findings is computed from human labels in
-`evals/labels.toml`; unlabeled findings are counted, never guessed.
+`evals/labels.toml`; unlabeled findings are counted, never guessed. The same
+labels measure the critic: how many of the findings it disputed were labeled
+false positives, and how many labeled false positives it caught.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from drrepo.agents.critic import DISPUTED_MARK
 from drrepo.agents.grounding import UNVERIFIED_MARK
 from drrepo.log import logger
 from drrepo.models import Category
@@ -70,7 +73,7 @@ def load_labels(path: Path) -> dict[str, str]:
 
 def finding_key(case: str, issue: dict[str, Any]) -> str:
     """Stable identity for a finding across runs (independent of wording changes)."""
-    title = issue["title"].removeprefix(f"{UNVERIFIED_MARK} ")
+    title = issue["title"].removeprefix(f"{DISPUTED_MARK} ").removeprefix(f"{UNVERIFIED_MARK} ")
     what = issue.get("rule_id") or title
     return f"{case}|{issue['category']}|{issue['source']}|{what}|{issue.get('file') or ''}"
 
@@ -91,8 +94,13 @@ def summarize(case: EvalCase, report: dict[str, Any], elapsed_seconds: float) ->
         "findings": sorted({finding_key(case.name, i) for i in issues}),
         "agent_findings": sorted({finding_key(case.name, i) for i in agent}),
         "unverified_agent_findings": sum(i["title"].startswith(UNVERIFIED_MARK) for i in agent),
+        "disputed_agent_findings": sorted(
+            {finding_key(case.name, i) for i in agent if i["title"].startswith(DISPUTED_MARK)}
+        ),
         "deep_categories": sorted(
-            n for n, cs in categories.items() if cs.get("investigation_depth") == "deep"
+            n if cs.get("investigation_depth") == "deep" else f"{n} (lite)"
+            for n, cs in categories.items()
+            if cs.get("investigation_depth") in ("deep", "lite")
         ),
         "tool_calls": sum(len(cs.get("investigation_trace", [])) for cs in categories.values()),
         "tokens": (report.get("llm_usage") or {}).get("used_tokens"),
@@ -147,6 +155,11 @@ class Comparison:
     agent_precision: float | None
     labeled_agent_findings: int
     unlabeled_agent_findings: int
+    # Critic vs. labels: disputed findings labeled false/true positive, and all
+    # labeled false positives (so "caught" = disputed_false_positives / that).
+    disputed_false_positives: int = 0
+    disputed_true_positives: int = 0
+    labeled_false_positives: int = 0
 
     @property
     def regressed(self) -> bool:
@@ -234,11 +247,20 @@ def compare(
     agent = [k for r in current.values() for k in r.get("agent_findings", [])]
     labeled = [labels[k] for k in agent if k in labels]
     precision = round(labeled.count("true_positive") / len(labeled), 3) if labeled else None
+    disputed = [
+        labels[k]
+        for r in current.values()
+        for k in r.get("disputed_agent_findings", [])
+        if k in labels
+    ]
     return Comparison(
         cases=diffs,
         agent_precision=precision,
         labeled_agent_findings=len(labeled),
         unlabeled_agent_findings=len(agent) - len(labeled),
+        disputed_false_positives=disputed.count("false_positive"),
+        disputed_true_positives=disputed.count("true_positive"),
+        labeled_false_positives=labeled.count("false_positive"),
     )
 
 
@@ -288,6 +310,14 @@ def render_markdown(
         lines.append(
             f"{comparison.unlabeled_agent_findings} agent finding(s), none labeled yet: "
             "add verdicts to evals/labels.toml to measure precision."
+        )
+    disputed_labeled = comparison.disputed_false_positives + comparison.disputed_true_positives
+    if disputed_labeled or comparison.labeled_false_positives:
+        lines.append(
+            f"Critic: {comparison.disputed_false_positives} of {disputed_labeled} labeled "
+            f"disputed finding(s) are false positives; it caught "
+            f"{comparison.disputed_false_positives} of {comparison.labeled_false_positives} "
+            "labeled false positive(s)."
         )
     for diff in comparison.cases:
         details = [f"- regression: {r}" for r in diff.regressions]

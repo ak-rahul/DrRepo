@@ -28,6 +28,9 @@ jobs:
         # Pin a release commit SHA when you copy this; `main` keeps the example current.
         uses: ak-rahul/DrRepo@main # zizmor: ignore[unpinned-uses]
         with:
+          # On pull requests, report what the change made better or worse.
+          mode: ${{ github.event_name == 'pull_request' && 'diff' || 'full' }}
+          fail-on-new: high # diff mode: fail on a new or worsened high/critical issue
           fail-under: "60"
           formats: md,cdx # Markdown report and CycloneDX SBOM; SARIF is added for upload
           comment: ${{ github.event_name == 'pull_request' }}

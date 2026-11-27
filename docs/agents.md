@@ -1,32 +1,42 @@
 # Agents
 
-DrRepo has seven LLM-backed roles: one **Lead Investigator** that plans the audit, and five **category analysts**, each of which can act on two paths. Every role's job description is a markdown file in [`src/drrepo/agents/instructions/`](../src/drrepo/agents/instructions/). These files are the prompts the models receive, so to change how an agent behaves, edit its document. You rarely need to touch Python.
+DrRepo's LLM-backed roles are one **Lead Investigator** that plans the audit, five **category analysts**, each of which can act on two paths, and a **critic** that re-checks severe agent findings. Every role's job description is a markdown file in [`src/drrepo/agents/instructions/`](../src/drrepo/agents/instructions/). These files are the prompts the models receive, so to change how an agent behaves, edit its document. You rarely need to touch Python.
 
-What no agent does: decide scores. Scores and the file, line, rule and severity of every scanner finding come from deterministic code (`Analyst.assess()`). Agents write summaries, and on the deep path they add issues they verified with tools. The one exception is bounded: the [documentation rubric](#documentation-rubric) can move the documentation score by at most ±25 points. Without an API key, DrRepo runs with no agents at all and still produces a complete, deterministic report.
+What no agent does: decide scores. Scores and the file, line, rule and severity of every scanner finding come from deterministic code (`Analyst.assess()`). Agents write summaries, and on the deep path they add issues they verified with tools. Two exceptions are bounded: the [documentation rubric](#documentation-rubric) can move the documentation score by at most ±25 points, and the [critic](#critic) can lower (never raise) the severity of an agent's own severe findings. Without an API key, DrRepo runs with no agents at all and still produces a complete, deterministic report.
 
 ## How a run uses the agents
 
 ```
 recon (no LLM) ─► Lead Investigator ─► for each of the 5 categories, in parallel:
                   (1 structured call)     assess() in code ─► Narrative (1 call)
-                                          └─ if planned deep: Investigation (ReAct loop with tools)
+                                          └─ if planned deep or lite: Investigation (ReAct loop with tools)
+                                               ─► grounding (code) ─► critic (1 call, severe findings only)
 ```
 
-Each role can use its own model (`MODEL_NAME_PLANNER`, `MODEL_NAME_NARRATIVE`, `MODEL_NAME_INVESTIGATION`; see [configuration.md](configuration.md)). For example, use a small, fast model for summaries and your most reliable tool-user for deep investigations. The planner's model also runs the documentation rubric. All roles share the run's circuit breaker and token budget, and the report's `provenance.llm.roles` records which model did what.
+Each role can use its own model (`MODEL_NAME_PLANNER`, `MODEL_NAME_NARRATIVE`, `MODEL_NAME_INVESTIGATION`, `MODEL_NAME_CRITIC`; see [configuration.md](configuration.md)). For example, use a small, fast model for summaries, your most reliable tool-user for investigations, and a different model family for the critic, so its second look is independent. The planner's model also runs the documentation rubric. All roles share the run's circuit breaker and token budget. The report's `provenance.llm.roles` records which model did what, and `llm_usage.by_label` how many tokens each step used.
 
 | Role | Instructions | Calls per run | Output |
 |---|---|---|---|
 | Lead Investigator | `planner.md` → `## System` | 1 (skipped if deep investigation is off, there's no clone, or the budget is spent) | `InvestigationPlanOutput`: depth and rationale per category |
 | Analyst, narrative path | `<category>.md` → `## Narrative`, plus `shared.md` → `## Narrative rules` | at most 1 per category, and only when there is something to narrate | a 3-5 sentence summary |
-| Analyst, investigation path | `<category>.md` → `## Investigation`, plus `shared.md` → `## Investigation rules` | one bounded loop per category planned deep | `InvestigationOutput`: summary and verified issues |
+| Analyst, investigation path | `<category>.md` → `## Investigation`, plus `shared.md` → `## Investigation rules` | one bounded loop per category planned deep or lite | `InvestigationOutput`: summary and verified issues |
+| Critic | `critic.md` → `## System` | at most 1 per investigated category, only if it reported a grounded high or critical finding | `CriticReviewOutput`: a verdict and reason per finding |
 
 ## Lead Investigator
 
-**Job.** Decide which categories deserve a deep, tool-calling investigation. The point is cost: deep loops are slow and token-hungry, so they go only where the recon signals show risk or ambiguity.
+**Job.** Decide which categories deserve a tool-calling investigation, and how much of one. The point is cost: investigations are slow and token-hungry, so they go only where the recon signals show risk or ambiguity. There are three depths:
 
-**Input (user message).** A compact recon summary from `pipeline.recon_summary`: finding counts by severity per scanner, vulnerable and unpinned dependency counts, README metrics, collector failures, the user's description if given, and the maximum number of deep categories this run can afford.
+| Depth | What runs | Budget units |
+|---|---|---|
+| `deep` | a full investigation (`MAX_TOOL_CALLS_PER_INVESTIGATOR` tool calls) | 2 |
+| `lite` | the same investigation with half the tool calls, for borderline categories | 1 |
+| `shallow` | the deterministic findings plus a narrative | 0 |
 
-**How the cap is enforced.** Before the parallel fan-out, the planner node computes `affordable_count` from the run's token budget (`LLM_TOKEN_BUDGET_PER_RUN ÷ ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION`). Whatever the model returns, `enforce_deep_cap` keeps at most that many deep categories, in the priority order security > dependencies > code quality > maintainability > documentation.
+**Input (user message).** A compact recon summary from `pipeline.recon_summary`: finding counts by severity per scanner, vulnerable and unpinned dependency counts, README metrics, collector failures, the user's description if given, and the number of budget units this run can afford.
+
+**How the budget is enforced.** Before the parallel fan-out, the planner node prices a unit at half of what one deep investigation is expected to cost, and computes how many units the run's remaining token budget covers. Whatever the model returns, `enforce_budget` keeps the plan within that, in the priority order security > dependencies > code quality > maintainability > documentation. A deep pick that doesn't fit becomes lite if one unit is left, otherwise shallow.
+
+**Adaptive estimate.** The expected cost of a deep investigation comes from measurements when there are any. Each run records in the score history how many tokens its investigations really used (a lite one counts double), and the next run uses the mean of this repository's recent measurements, or of any repository's when this one has none. The estimate stays within a quarter and four times `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION`, which is also the value used when nothing has been measured or history is off. `llm_usage.deep_estimate` in the report shows the value used and its source.
 
 **Failure behaviour.** Any error (provider down, circuit open, malformed output) produces an all-shallow plan with the reason recorded. Planning never blocks an analysis.
 
@@ -81,6 +91,19 @@ Before an investigator's issues are merged, `agents/grounding.py` verifies each 
 
 The category's notes record how many findings were dropped or downgraded, so the effect is visible in every report. Agents are told these rules in `shared.md`.
 
+### Critic
+
+A high or critical agent finding moves scores, so it gets a second, independent look before it is merged (`agents/critic.py`, instructions in `critic.md`). After grounding, the grounded high and critical findings of one investigation (at most 6) go to the critic in one structured call, with no tools. It sees each claim and the cited code with line numbers, fenced as data, and answers per finding:
+
+| Verdict | Applied in code |
+|---|---|
+| `confirmed` | unchanged |
+| `downgrade` | one severity level lower, with the reason appended |
+| `reject` | `low`, title prefixed `[disputed]`, reason appended; the finding stays in the report |
+| no answer | unchanged |
+
+The critic can never raise a severity, remove a finding, or touch a scanner finding, and a failed call changes nothing, so the worst a prompt injection in the analyzed code can achieve is a visible "disputed" agent finding. The category's notes record the verdict counts. `drrepo eval` measures the critic against human labels: how many disputed findings were labeled false positives, and how many labeled false positives it caught. Turn it off with `ENABLE_AGENT_CRITIC=false`.
+
 Any failure raises `InvestigationError` inside the loop. The category then falls back to its shallow result, and the report notes why. The trace of every tool call (tool, input, truncated output) is kept in the report, so a reader can check that each claim came from real evidence.
 
 ## Documentation rubric
@@ -105,6 +128,7 @@ The category's notes show the verdict counts and the score change, for example "
 ```
 src/drrepo/agents/instructions/
   planner.md          ## System
+  critic.md           ## System
   shared.md           ## Narrative rules, ## Investigation rules
   security.md         ## Narrative, ## Investigation
   code_quality.md     ...

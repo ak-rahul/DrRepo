@@ -11,6 +11,7 @@ All settings come from environment variables, optionally loaded from a `.env` fi
 | `MODEL_NAME_PLANNER` | `MODEL_NAME` | model for the Lead Investigator and the documentation rubric (structured output) |
 | `MODEL_NAME_NARRATIVE` | `MODEL_NAME` | model for the short category summaries (a small, cheap model is fine) |
 | `MODEL_NAME_INVESTIGATION` | `MODEL_NAME` | model for deep tool-calling investigations (pick your most reliable tool-user) |
+| `MODEL_NAME_CRITIC` | `MODEL_NAME` | model for the critic's second look at severe agent findings (a different model family makes it more independent) |
 | `GROQ_API_KEY` | — | required when the provider is `groq` |
 | `OPENAI_API_KEY` | — | required when the provider is `openai` |
 | `ANTHROPIC_API_KEY` | — | required when the provider is `anthropic` |
@@ -54,6 +55,7 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 |---|---|---|
 | `ENABLE_DEEP_INVESTIGATION` | `true` | `false` = every category shallow (the CLI equivalent is `--shallow`) |
 | `ENABLE_LLM_JUDGMENT` | `true` | bounded LLM judgment that can adjust a score: the documentation rubric, at most ±25 points. `false` = README metrics only |
+| `ENABLE_AGENT_CRITIC` | `true` | re-check grounded high/critical agent findings; the critic can lower a severity or mark a finding disputed, never raise or remove one |
 | `MAX_TOOL_CALLS_PER_INVESTIGATOR` | `8` | step budget per investigation |
 | `INVESTIGATOR_TIMEOUT_SECONDS` | `90` | wall-clock budget per investigation |
 
@@ -66,7 +68,7 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 | `LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS` | `300` | open time before one probe call is allowed |
 | `ENABLE_LLM_BUDGET_TRACKING` | `true` | |
 | `LLM_TOKEN_BUDGET_PER_RUN` | `60000` | reset at the start of every run |
-| `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` | `12000` | the planner may choose at most `budget // estimate` deep categories |
+| `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` | `12000` | expected cost of one deep investigation (a lite one costs half) until score history has measurements; measured estimates stay within ¼× and 4× of this |
 | `ENABLE_DEPENDENCY_LOOKUP_CACHE` | `true` | in-memory, per process |
 | `ENABLE_SCORE_HISTORY` | `true` | appends to `reports/history.json` (20 runs per repository) |
 | `SUPPRESSIONS_FILE` | empty | suppression file (`.drrepo.toml` format) applied to every analysis |

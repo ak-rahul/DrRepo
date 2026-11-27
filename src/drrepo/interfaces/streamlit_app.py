@@ -157,9 +157,9 @@ def render_report(result: dict[str, Any]) -> None:
     cols = st.columns(max(len(categories), 1))
     deltas = (history or {}).get("category_score_deltas", {})
     for col, (name, cs) in zip(cols, categories.items(), strict=False):
-        label = ("🕵️ " if cs.get("investigation_depth") == "deep" else "") + name.replace(
-            "_", " "
-        ).title()
+        label = (
+            "🕵️ " if cs.get("investigation_depth", "shallow") != "shallow" else ""
+        ) + name.replace("_", " ").title()
         if cs.get("assessed", True):
             col.metric(
                 label,

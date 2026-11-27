@@ -27,6 +27,7 @@ You are one step in an automated audit. Deterministic scanners have already run,
 Every finding is checked mechanically after you finish:
 - A finding is discarded if it cites a file that doesn't exist or a line past the end of the file.
 - A finding is reduced to `low` and marked unverified if it cites a file you never opened, searched or scanned, if its `evidence` doesn't match the file, or if it cites no file at all.
+- A `high` or `critical` finding is then shown, with the cited code, to an independent reviewer that can lower its severity or dispute it.
 
 **No repeats.** Do not re-report issues already listed as found by automated tools. If you confirm that one of them is a false positive, say so in the summary.
 

@@ -6,6 +6,7 @@ Each agent's job is written as a document, not as string constants in code:
     instructions/<category>.md       ## Narrative              shallow-path summary prompt
                                      ## Investigation          deep-path ReAct system prompt
     instructions/documentation.md    ## Rubric                 the bounded README rubric (agents/rubric.py)
+    instructions/critic.md           ## System                 the critic for severe agent findings (agents/critic.py)
     instructions/shared.md           ## Narrative rules        appended to every Narrative
                                      ## Investigation rules    appended to every Investigation
 
@@ -95,6 +96,7 @@ def validate_all() -> None:
     """Load every prompt the pipeline can request. Raises `InstructionsError`."""
     planner_prompt()
     section("documentation", "Rubric")
+    section("critic", "System")
     for category in Category:
         narrative_prompt(category)
         investigation_prompt(category)

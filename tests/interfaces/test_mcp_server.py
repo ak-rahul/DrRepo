@@ -96,6 +96,7 @@ def test_registered_surface():
     tools, templates, prompts = asyncio.run(surface())
     assert tools == {
         "analyze_repository",
+        "compare_commits",
         "get_report",
         "list_reports",
         "get_issues",
@@ -247,3 +248,23 @@ def test_schema_resource_serves_the_report_contract():
     schema = json.loads(_read("drrepo://schema/report"))
     assert schema["title"] == "DrRepo report"
     assert "schema_version" in schema["required"]
+
+
+def test_compare_commits_returns_a_trimmed_diff(service):
+    from drrepo.report.diff import diff_reports
+
+    head = dict(REPORT, overall_score=60.0)
+    head["issues"] = [
+        dict(REPORT["issues"][0], title=f"New {n}", rule_id=f"N{n}") for n in range(3)
+    ]
+    diff = diff_reports(REPORT, head)
+    service.compare.return_value = {**diff, "head_report": head}
+    result = _call(
+        "compare_commits",
+        {"repo_url": "https://github.com/octo/demo", "base": "main", "max_issues": 2},
+    )
+    assert "head_report" not in result and len(result["new_issues"]) == 2
+    assert result["overall_delta"] == diff["overall_delta"]
+    assert service.compare.call_args.args[1:3] == ("main", None)
+    bad = _call("compare_commits", {"repo_url": "https://github.com/octo/demo", "base": "-x"})
+    assert "error" in bad

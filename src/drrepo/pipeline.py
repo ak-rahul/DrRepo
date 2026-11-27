@@ -40,10 +40,11 @@ from langgraph.runtime import Runtime
 from drrepo import __version__
 from drrepo.agents.analysts import default_analysts
 from drrepo.agents.analysts.base import Analyst, Recon, collector_data, merge_issues
+from drrepo.agents.critic import review as critic_review
 from drrepo.agents.grounding import ground_issues
 from drrepo.agents.investigator import investigate
 from drrepo.agents.llm import LLMRuntime
-from drrepo.agents.planner import LeadInvestigator
+from drrepo.agents.planner import LeadInvestigator, restrict_plan
 from drrepo.agents.tools import build_tools
 from drrepo.config import Config
 from drrepo.errors import InvestigationError
@@ -97,6 +98,18 @@ class RunContext:
     progress: ProgressCallback = field(default=_no_progress)
     # Suppressions you passed (always applied); the repo's own are added in `Workflow.run`.
     suppressions: list[Suppression] = field(default_factory=list)
+    # Measured cost of one deep investigation (from score history); None means
+    # use `config.estimated_tokens_per_deep_investigation`.
+    deep_investigation_tokens: int | None = None
+    # Categories the plan may investigate with tools; None means all (diff mode
+    # passes only the categories that got worse).
+    deep_allowed: frozenset[str] | None = None
+
+    def deep_estimate(self) -> tuple[int, str]:
+        """Tokens one deep investigation is expected to cost, and where that came from."""
+        if self.deep_investigation_tokens:
+            return self.deep_investigation_tokens, "history"
+        return self.config.estimated_tokens_per_deep_investigation, "config"
 
     def emit(self, message: str) -> None:
         logger.info(message)
@@ -267,23 +280,27 @@ class Workflow:
             reason = "no clone available to investigate"
         elif not ctx.llm.available:
             reason = "no LLM provider configured"
+        elif ctx.deep_allowed is not None and not ctx.deep_allowed:
+            reason = "no category changed since the base commit"
         if reason:
             return {"investigation_plan": InvestigationPlan.all_shallow(reason)}
 
         # Reserve budget before the parallel fan-out: checking it inside each
         # category node would let all five see a full budget at the same
-        # instant and all go deep.
-        max_deep = len(Category)
+        # instant and all go deep. One unit is half a deep investigation
+        # (a lite one), priced from measured history where available.
+        max_units = len(Category) * InvestigationDepth.DEEP.budget_units
         if ctx.llm.budget is not None:
-            max_deep = min(
-                max_deep,
-                ctx.llm.budget.affordable_count(ctx.config.estimated_tokens_per_deep_investigation),
-            )
+            estimate, _source = ctx.deep_estimate()
+            unit_cost = max(1, estimate // InvestigationDepth.DEEP.budget_units)
+            max_units = min(max_units, ctx.llm.budget.affordable_count(unit_cost))
 
         ctx.emit("Lead Investigator is planning the investigation")
         plan = LeadInvestigator(ctx.llm.for_role("planner")).plan(
-            recon_summary(state["collector_results"]), max_deep, state["description"]
+            recon_summary(state["collector_results"]), max_units, state["description"]
         )
+        if ctx.deep_allowed is not None:
+            plan = restrict_plan(plan, ctx.deep_allowed)
         for name, p in plan.plans.items():
             logger.info(f"Plan for {name}: {p.depth.value} ({p.rationale})")
         return {"investigation_plan": plan}
@@ -308,7 +325,10 @@ class Workflow:
         if ctx.config.enable_llm_judgment and ctx.llm.available:
             # Structured judgment shares the planner's model (both are structured outputs).
             assessment = analyst.judge(
-                recon, assessment, ctx.llm.for_role("planner"), state["clone_path"]
+                recon,
+                assessment,
+                ctx.llm.for_role("planner", label="judgment"),
+                state["clone_path"],
             )
         recon_supp = apply_suppressions(assessment.issues, state["suppressions"], today)
         if recon_supp.suppressed or recon_supp.expired:
@@ -326,12 +346,13 @@ class Workflow:
         shallow = analyst.narrate(assessment, ctx.llm.for_role("narrative"))
         shallow.suppressed = _suppressed_entries(recon_supp)
 
-        if (
-            state["investigation_plan"].depth_for(category) != InvestigationDepth.DEEP
-            or not state["clone_path"]
-        ):
+        depth = state["investigation_plan"].depth_for(category)
+        if not depth.investigates or not state["clone_path"]:
             ctx.emit(f"{category.label}: automated pass complete")
             return shallow
+        max_tool_calls = ctx.config.max_tool_calls_per_investigator
+        if depth is InvestigationDepth.LITE:
+            max_tool_calls = max(1, max_tool_calls // 2)
 
         tools = build_tools(
             analyst.tool_families,
@@ -340,23 +361,25 @@ class Workflow:
             cache=ctx.cache,
             repo_full_name=state["repo"].full_name,
         )
-        ctx.emit(f"{category.label}: deep investigation started ({len(tools)} tools)")
+        ctx.emit(f"{category.label}: {depth.value} investigation started ({len(tools)} tools)")
         try:
             result = investigate(
                 category=category,
                 system_prompt=analyst.investigation_prompt,
                 tools=tools,
-                llm=ctx.llm.for_role("investigation"),
+                llm=ctx.llm.for_role("investigation", label=f"investigation:{category.value}"),
                 recon_data={name: r.data for name, r in recon.items()},
                 known_issues=shallow.issues,
-                max_tool_calls=ctx.config.max_tool_calls_per_investigator,
+                max_tool_calls=max_tool_calls,
                 timeout_seconds=ctx.config.investigator_timeout_seconds,
                 user_context=state["description"],
             )
         except InvestigationError as e:
-            ctx.emit(f"{category.label}: deep investigation {e.reason}; using automated pass")
+            ctx.emit(
+                f"{category.label}: {depth.value} investigation {e.reason}; using automated pass"
+            )
             shallow.notes.append(
-                f"Deep investigation {e.reason}; showing the automated pass instead."
+                f"{depth.value.capitalize()} investigation {e.reason}; showing the automated pass instead."
             )
             return shallow
 
@@ -368,16 +391,23 @@ class Workflow:
         )
         for issue, reason in grounding.dropped:
             logger.info(f"{category.value}: dropped agent finding {issue.title!r}: {reason}")
-        agent_supp = apply_suppressions(grounding.kept, state["suppressions"], today)
+        agent_issues = grounding.kept
+        critic_note = None
+        if ctx.config.enable_agent_critic:
+            critique = critic_review(ctx.llm.for_role("critic"), agent_issues, state["clone_path"])
+            agent_issues, critic_note = critique.issues, critique.note()
+        agent_supp = apply_suppressions(agent_issues, state["suppressions"], today)
         known = {i.dedupe_key() for i in shallow.issues}
         new_issues = [i for i in agent_supp.kept if i.dedupe_key() not in known]
         ctx.emit(
-            f"{category.label}: deep investigation finished "
+            f"{category.label}: {depth.value} investigation finished "
             f"({len(result.trace)} tool calls, {len(new_issues)} new issues)"
         )
         notes = list(shallow.notes)
         if note := grounding.note():
             notes.append(note)
+        if critic_note:
+            notes.append(critic_note)
         return CategoryFinding(
             category=category,
             score=analyst.rescore(recon, assessment, new_issues)
@@ -386,7 +416,7 @@ class Workflow:
             summary=result.summary or shallow.summary,
             issues=merge_issues(shallow.issues, new_issues),
             assessed=shallow.assessed,
-            investigation_depth=InvestigationDepth.DEEP,
+            investigation_depth=depth,
             investigation_trace=result.trace,
             notes=notes,
             suppressed=shallow.suppressed + _suppressed_entries(agent_supp),
@@ -524,7 +554,11 @@ class Workflow:
         report: dict[str, Any] = final["report"].to_dict()
         report["provenance"] = build_provenance(ctx.config, llm_used=ctx.llm.available)
         if ctx.llm.budget is not None:
-            report["llm_usage"] = ctx.llm.budget.usage()
+            estimate, source = ctx.deep_estimate()
+            report["llm_usage"] = {
+                **ctx.llm.budget.usage(),
+                "deep_estimate": {"tokens": estimate, "source": source},
+            }
         ctx.emit("Analysis complete")
         return report
 

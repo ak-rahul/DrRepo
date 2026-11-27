@@ -205,3 +205,28 @@ def test_collector_failures_are_environment_problems_not_drift(tmp_path):
     assert diff.category_deltas == {}  # no misleading score deltas
     with pytest.raises(ValueError, match="degraded run"):
         write_baseline(tmp_path / "b.json", current)
+
+
+def test_critic_agreement_with_labels():
+    disputed = dict(AGENT, title="[disputed] Weak hash", file="c.py")
+    missed = dict(AGENT, title="Open redirect", file="d.py")
+    current = {"demo": summarize(CASE, _report(extra_issues=[disputed, missed]), 1)}
+    assert current["demo"]["disputed_agent_findings"] == [
+        "demo|security|investigator:security|agent-finding|c.py"
+    ]
+    labels = {
+        "demo|security|investigator:security|agent-finding|c.py": "false_positive",
+        "demo|security|investigator:security|agent-finding|d.py": "false_positive",
+    }
+    comparison = compare(current, {"demo": summarize(CASE, _report(), 1)}, labels=labels)
+    assert (comparison.disputed_false_positives, comparison.disputed_true_positives) == (1, 0)
+    assert comparison.labeled_false_positives == 2
+    table = render_markdown(comparison, current, 5)
+    assert "Critic: 1 of 1 labeled disputed finding(s) are false positives" in table
+    assert "caught 1 of 2 labeled false positive(s)" in table
+
+
+def test_lite_categories_are_listed():
+    report = _report()
+    report["category_scores"]["documentation"]["investigation_depth"] = "lite"
+    assert summarize(CASE, report, 1)["deep_categories"] == ["documentation (lite)", "security"]

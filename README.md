@@ -40,10 +40,10 @@ Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or l
 
 ## Interfaces
 
-- **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif,cdx,summary] [--fail-under 70]`. The exit code makes it usable as a CI gate.
-- **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score, uploads SARIF to code scanning, and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
+- **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif,cdx,summary] [--fail-under 70]`. The exit code makes it usable as a CI gate. `drrepo diff <url> --base main --head <sha>` reports what a change made better or worse.
+- **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score or, on pull requests, on what the change made worse; uploads SARIF to code scanning; and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
 - **Web UI**: live progress, issue filters, the investigator's tool-call trace, and report downloads.
-- **MCP server**: 8 tools, 5 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
+- **MCP server**: 9 tools, 5 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
 - **Health API**: `drrepo health-api` serves liveness, readiness, and dependency checks.
 

@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableLambda
 
+from drrepo.agents.critic import CriticReviewOutput, CriticVerdictOutput
 from drrepo.agents.investigator import InvestigationOutput, investigate
 from drrepo.agents.llm import LLMRuntime, TokenBudget
 from drrepo.agents.planner import CategoryPlanOutput, InvestigationPlanOutput
@@ -48,11 +49,16 @@ class ScriptedChatModel(BaseChatModel):
     - without tools bound: answers with a short narrative (shallow summaries);
     - with tools bound (the investigator): first calls `read_file`, then, once
       it has seen the tool result, submits `InvestigationOutput`;
-    - `with_structured_output`: returns `plan` (planner) or `rubric` (documentation).
+    - `with_structured_output`: returns `plan` (planner), `rubric` (documentation)
+      or `critique` (critic).
+
+    `finding` replaces the investigator's submission (default: `FINDING`).
     """
 
     plan: Any = None
     rubric: Any = None
+    critique: Any = None
+    finding: Any = None
     tools_bound: bool = False
 
     @property
@@ -63,7 +69,8 @@ class ScriptedChatModel(BaseChatModel):
         return self.model_copy(update={"tools_bound": True})
 
     def with_structured_output(self, schema: Any, **_kwargs: Any) -> Any:
-        answer = self.rubric if schema is DocumentationRubricOutput else self.plan
+        answers = {DocumentationRubricOutput: self.rubric, CriticReviewOutput: self.critique}
+        answer = answers.get(schema, self.plan)
         return RunnableLambda(lambda _messages: answer)
 
     def _generate(
@@ -80,7 +87,11 @@ class ScriptedChatModel(BaseChatModel):
             message = AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": InvestigationOutput.__name__, "args": FINDING, "id": "call-2"}
+                    {
+                        "name": InvestigationOutput.__name__,
+                        "args": self.finding or FINDING,
+                        "id": "call-2",
+                    }
                 ],
             )
         message.usage_metadata = {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50}
@@ -119,8 +130,7 @@ def test_real_react_loop_calls_tools_and_parses_findings(tmp_path):
     assert budget.usage()["used_tokens"] > 0
 
 
-def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch):
-    """Planner picks security as deep; that node runs the real agent loop on the clone."""
+def _patch_pipeline(tmp_path, monkeypatch) -> None:
     root = _clone(tmp_path)
 
     class Cloned:
@@ -140,16 +150,24 @@ def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch
     ):
         monkeypatch.setattr(f"drrepo.pipeline.{name}", lambda *_a, **_k: ok({}))
 
-    plan = InvestigationPlanOutput(
+
+def _plan(security_depth: str) -> InvestigationPlanOutput:
+    return InvestigationPlanOutput(
         plans=[
             CategoryPlanOutput(
                 category=c.value,
-                depth="deep" if c is Category.SECURITY else "shallow",
+                depth=security_depth if c is Category.SECURITY else "shallow",
                 rationale="scripted",
             )
             for c in Category
         ]
     )
+
+
+def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch):
+    """Planner picks security as deep; that node runs the real agent loop on the clone."""
+    _patch_pipeline(tmp_path, monkeypatch)
+    plan = _plan("deep")
     rubric = DocumentationRubricOutput(
         items=[RubricItem(criterion="purpose", verdict="met", reason="states its purpose")]
     )
@@ -173,3 +191,45 @@ def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch
     # The documentation rubric ran through the real structured-output path.
     doc_notes = report["category_scores"]["documentation"]["notes"]
     assert any(n.startswith("Documentation rubric (1 met)") for n in doc_notes)
+
+
+def test_lite_investigation_and_critic_through_the_pipeline(tmp_path, monkeypatch):
+    """A lite investigation reports a high finding; the critic disputes it. The finding
+    stays visible at low severity, and each LLM step has its own budget line."""
+    _patch_pipeline(tmp_path, monkeypatch)
+    severe = {
+        **FINDING,
+        "issues": [
+            {**FINDING["issues"][0], "severity": "high", "title": "Debug flag exposes data"}
+        ],
+    }
+    critique = CriticReviewOutput(
+        verdicts=[
+            CriticVerdictOutput(
+                finding=1, verdict="reject", reason="line 1 is a constant in a demo script"
+            )
+        ]
+    )
+    ctx = RunContext(
+        config=Config(groq_api_key="k", max_tool_calls_per_investigator=8),
+        llm=LLMRuntime(
+            client=ScriptedChatModel(plan=_plan("lite"), critique=critique, finding=severe),
+            budget=TokenBudget(1_000_000),
+        ),
+    )
+    report = Workflow().run(RepoRef("octo", "demo"), ctx)
+    validate(report)
+
+    security = report["category_scores"]["security"]
+    assert security["investigation_depth"] == "lite"
+    [disputed] = [i for i in security["issues"] if "Debug flag" in i["title"]]
+    assert disputed["title"].startswith("[disputed] ")
+    assert disputed["severity"] == "low"
+    assert "Critic: line 1 is a constant" in disputed["description"]
+    assert any(
+        n.startswith("Critic reviewed 1 severe agent finding(s): 0 confirmed, 1 disputed")
+        for n in security["notes"]
+    )
+    labels = report["llm_usage"]["by_label"]
+    assert {"planner", "narrative", "investigation:security", "critic"} <= set(labels)
+    assert report["llm_usage"]["deep_estimate"]["source"] == "config"

@@ -28,7 +28,7 @@ DEFAULT_MODELS = {
 # Roles a model can be chosen for. "planner" also serves the documentation rubric
 # (both are structured-output calls); "narrative" writes summaries; "investigation"
 # runs the tool-calling deep investigations.
-LLM_ROLES = ("planner", "narrative", "investigation")
+LLM_ROLES = ("planner", "narrative", "investigation", "critic")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -92,6 +92,7 @@ class Config:
     model_name_planner: str = ""
     model_name_narrative: str = ""
     model_name_investigation: str = ""
+    model_name_critic: str = ""
     ollama_base_url: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 2000
@@ -127,6 +128,9 @@ class Config:
     enable_deep_investigation: bool = True
     # Bounded LLM judgment that can adjust a score (today: the documentation rubric).
     enable_llm_judgment: bool = True
+    # Second look at high/critical agent findings (agents/critic.py). It can lower
+    # or dispute a severity, never raise one or remove a finding.
+    enable_agent_critic: bool = True
 
     # LLM circuit breaker: opens after repeated LLM-call failures so parallel
     # category nodes fail fast instead of each retrying an exhausted quota.
@@ -208,6 +212,7 @@ class Config:
             model_name_investigation=_env_str(
                 "MODEL_NAME_INVESTIGATION", d.model_name_investigation
             ),
+            model_name_critic=_env_str("MODEL_NAME_CRITIC", d.model_name_critic),
             ollama_base_url=_env_str("OLLAMA_BASE_URL", d.ollama_base_url),
             temperature=_env_float("TEMPERATURE", d.temperature),
             max_tokens=_env_int("MAX_TOKENS", d.max_tokens),
@@ -239,6 +244,7 @@ class Config:
                 "ENABLE_DEEP_INVESTIGATION", d.enable_deep_investigation
             ),
             enable_llm_judgment=_env_bool("ENABLE_LLM_JUDGMENT", d.enable_llm_judgment),
+            enable_agent_critic=_env_bool("ENABLE_AGENT_CRITIC", d.enable_agent_critic),
             enable_llm_circuit_breaker=_env_bool(
                 "ENABLE_LLM_CIRCUIT_BREAKER", d.enable_llm_circuit_breaker
             ),
@@ -272,6 +278,7 @@ class Config:
             "planner": self.model_name_planner,
             "narrative": self.model_name_narrative,
             "investigation": self.model_name_investigation,
+            "critic": self.model_name_critic,
         }
         return by_role.get(role or "") or self.model_name or DEFAULT_MODELS[self.model_provider]
 

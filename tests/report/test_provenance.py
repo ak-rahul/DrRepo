@@ -53,7 +53,12 @@ def test_llm_is_null_without_a_model_and_tools_are_listed():
     assert build_provenance(routed, llm_used=True)["llm"] == {
         "provider": "groq",
         "model": "base",
-        "roles": {"planner": "base", "narrative": "base", "investigation": "big"},
+        "roles": {
+            "planner": "base",
+            "narrative": "base",
+            "investigation": "big",
+            "critic": "base",
+        },
     }
 
 

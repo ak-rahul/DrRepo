@@ -1,5 +1,5 @@
 name: DrRepo audit
-description: Audit a public GitHub repository and gate on its score, with SARIF code scanning, an SBOM and a PR summary.
+description: Audit a public GitHub repository, or what a pull request changed, and gate on it, with SARIF code scanning, an SBOM and a PR summary.
 author: ak-rahul
 branding:
   icon: activity
@@ -12,8 +12,21 @@ inputs:
   ref:
     description: Branch, tag or full commit SHA to analyze. Defaults to the pull request head, else the workflow's commit.
     default: ${{ github.event.pull_request.head.sha || github.sha }}
+  mode:
+    description: >-
+      full audits the ref. diff compares it with `base` and reports new, worse and fixed
+      issues (the PR comment then shows the diff); the reports are still the ref's.
+    default: full
+  base:
+    description: In diff mode, the branch, tag or full SHA to compare against. Defaults to the pull request base.
+    default: ${{ github.event.pull_request.base.sha }}
+  fail-on-new:
+    description: In diff mode, fail if a new or worsened issue is at this severity or above (critical, high, medium, low).
+    default: ""
   deep:
-    description: Allow deep, tool-calling LLM investigations. Needs an LLM key in the step's env (for example GROQ_API_KEY).
+    description: >-
+      Allow tool-calling LLM investigations (in diff mode, only in categories that got worse).
+      Needs an LLM key in the step's env (for example GROQ_API_KEY).
     default: "false"
   fail-under:
     description: Fail the step if the overall score is below this value. Empty means never fail on the score.
@@ -53,7 +66,7 @@ outputs:
     description: Letter grade (A to F).
     value: ${{ steps.analyze.outputs.grade }}
   report:
-    description: Path of the full JSON report.
+    description: Path of the JSON report (in diff mode, the diff document).
     value: ${{ steps.analyze.outputs.report }}
   sarif:
     description: Path of the SARIF file, when one was written.
@@ -79,6 +92,9 @@ runs:
       env:
         REPOSITORY: ${{ inputs.repository }}
         REF: ${{ inputs.ref }}
+        MODE: ${{ inputs.mode }}
+        BASE: ${{ inputs.base }}
+        FAIL_ON_NEW: ${{ inputs.fail-on-new }}
         DEEP: ${{ inputs.deep }}
         FAIL_UNDER: ${{ inputs.fail-under }}
         REPORT_FORMATS: ${{ inputs.formats }}
@@ -94,10 +110,31 @@ runs:
         if [ "${UPLOAD_SARIF}" = "true" ]; then formats="${formats},sarif"; fi
         formats="$(printf '%s' "${formats}" | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)"
 
-        args=(analyze "https://github.com/${REPOSITORY}" --format "${formats}" -o "${OUTPUT_DIR}"
-              --json --no-history --env-file "" --log-file "")
-        if [ -n "${REF}" ]; then args+=(--ref "${REF}"); fi
-        if [ "${DEEP}" != "true" ]; then args+=(--shallow); fi
+        url="https://github.com/${REPOSITORY}"
+        common=(-o "${OUTPUT_DIR}" --json --env-file "" --log-file "")
+        case "${MODE}" in
+          full)
+            args=(analyze "${url}" --format "${formats}" --no-history "${common[@]}")
+            if [ -n "${REF}" ]; then args+=(--ref "${REF}"); fi
+            if [ "${DEEP}" != "true" ]; then args+=(--shallow); fi
+            ;;
+          diff)
+            if [ -z "${BASE}" ]; then
+              echo "::error title=DrRepo::mode: diff needs a base (none on this event; set the base input)."
+              echo "status=2" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            args=(diff "${url}" --base "${BASE}" --format "json,md" --report-formats "${formats}" "${common[@]}")
+            if [ -n "${REF}" ]; then args+=(--head "${REF}"); fi
+            if [ "${DEEP}" = "true" ]; then args+=(--deep); fi
+            if [ -n "${FAIL_ON_NEW}" ]; then args+=(--fail-on-new "${FAIL_ON_NEW}"); fi
+            ;;
+          *)
+            echo "::error title=DrRepo::mode must be full or diff, not '${MODE}'."
+            echo "status=2" >> "${GITHUB_OUTPUT}"
+            exit 0
+            ;;
+        esac
         if [ -n "${FAIL_UNDER}" ]; then args+=(--fail-under "${FAIL_UNDER}"); fi
         if [ -n "${SUPPRESSIONS}" ]; then args+=(--suppressions "${SUPPRESSIONS}"); fi
         if [ "${TRUST_REPO}" = "true" ]; then args+=(--trust-repo-suppressions); fi
@@ -117,14 +154,18 @@ runs:
         uv run --no-project --quiet --with "${GITHUB_ACTION_PATH}" python - "${report}" >> "${GITHUB_OUTPUT}" <<'PY'
         import json, sys
         from drrepo.report.synthesis import grade
-        score = float(json.load(open(sys.argv[1], encoding="utf-8"))["overall_score"])
-        print(f"score={score}")
-        print(f"grade={grade(score)}")
+        document = json.load(open(sys.argv[1], encoding="utf-8"))
+        # A diff document carries the head commit's score under "head".
+        score = document.get("overall_score", document.get("head", {}).get("overall_score"))
+        if score is not None:
+            print(f"score={float(score)}")
+            print(f"grade={grade(float(score))}")
         PY
         echo "report=${report}" >> "${GITHUB_OUTPUT}"
         sarif="$(find "${OUTPUT_DIR}" -maxdepth 1 -name '*.sarif' -print -quit)"
         echo "sarif=${sarif}" >> "${GITHUB_OUTPUT}"
-        summary="$(find "${OUTPUT_DIR}" -maxdepth 1 -name '*.summary.md' -print -quit)"
+        if [ "${MODE}" = "diff" ]; then pattern='*_diff_*.md'; else pattern='*.summary.md'; fi
+        summary="$(find "${OUTPUT_DIR}" -maxdepth 1 -name "${pattern}" -print -quit)"
         echo "summary=${summary}" >> "${GITHUB_OUTPUT}"
         if [ -n "${summary}" ]; then cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"; fi
 
@@ -160,6 +201,6 @@ runs:
         STATUS: ${{ steps.analyze.outputs.status }}
       run: |
         if [ "${STATUS}" = "3" ]; then
-          echo "::error title=DrRepo::The score is below fail-under."
+          echo "::error title=DrRepo::The quality gate failed (fail-under or fail-on-new); see the log above."
         fi
         exit "${STATUS:-1}"

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ak-rahul/DrRepo/schemas/diff.schema.json",
+  "title": "DrRepo diff",
+  "description": "What changed between two analyses of one repository (drrepo diff). The issue, score, category and severity definitions are shared with report.schema.json and merged in at load time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "diff_schema_version",
+    "report_schema_version",
+    "repository",
+    "base",
+    "head",
+    "overall_delta",
+    "category_deltas",
+    "new_issues",
+    "fixed_issues",
+    "worsened_issues",
+    "unchanged_issues",
+    "deep_categories",
+    "generated_at",
+    "drrepo_version"
+  ],
+  "properties": {
+    "diff_schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "report_schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "full_name", "url"],
+      "properties": {
+        "name": {"type": ["string", "null"]},
+        "full_name": {"type": ["string", "null"]},
+        "url": {"type": ["string", "null"]}
+      }
+    },
+    "base": {"$ref": "#/$defs/side"},
+    "head": {"$ref": "#/$defs/side"},
+    "overall_delta": {"type": ["number", "null"]},
+    "category_deltas": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/category"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["base", "head", "delta"],
+        "properties": {
+          "base": {"oneOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]},
+          "head": {"oneOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]},
+          "delta": {"type": ["number", "null"]}
+        }
+      }
+    },
+    "new_issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+    "fixed_issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+    "worsened_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue", "base_severity", "base_occurrences"],
+        "properties": {
+          "issue": {"$ref": "#/$defs/issue"},
+          "base_severity": {"$ref": "#/$defs/severity"},
+          "base_occurrences": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "unchanged_issues": {"type": "integer", "minimum": 0},
+    "deep_categories": {
+      "type": "array",
+      "description": "Categories investigated with tools on the head commit (only those that got worse).",
+      "items": {"$ref": "#/$defs/category"}
+    },
+    "generated_at": {"type": "string"},
+    "drrepo_version": {"type": "string"}
+  },
+  "$defs": {
+    "side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "commit_sha", "overall_score"],
+      "properties": {
+        "ref": {"type": ["string", "null"]},
+        "commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "overall_score": {"oneOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]}
+      }
+    }
+  }
+}

@@ -23,6 +23,7 @@ def test_model_resolution_role_then_model_name_then_provider_default():
         "planner": "base",
         "narrative": "base",
         "investigation": "big",
+        "critic": "base",
     }
 
 
@@ -41,8 +42,11 @@ def test_role_runtimes_share_breaker_and_budget():
     deep = llm.for_role("investigation")
     assert deep.client is big and deep.breaker is breaker and deep.budget is budget
     assert llm.for_role("narrative").client is main
-    plain = LLMRuntime(client=main)
-    assert plain.for_role("planner") is plain
+    plain = LLMRuntime(client=main, budget=budget)
+    assert plain.for_role("planner").client is main
+    plain.for_role("critic").record_usage(None, "x" * 400)
+    plain.for_role("investigation", label="investigation:security").record_usage(None, "x" * 40)
+    assert budget.usage()["by_label"] == {"critic": 100, "investigation:security": 10}
 
 
 def test_service_builds_one_client_per_distinct_model(monkeypatch, tmp_path):

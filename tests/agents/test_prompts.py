@@ -22,7 +22,7 @@ def test_category_prompts_include_the_shared_rules(category):
 
 
 def test_maintainer_comments_never_reach_the_model():
-    every_prompt = [prompts.planner_prompt()] + [
+    every_prompt = [prompts.planner_prompt(), prompts.section("critic", "System")] + [
         p for c in Category for p in (prompts.narrative_prompt(c), prompts.investigation_prompt(c))
     ]
     assert all("<!--" not in p and "Maintainer notes" not in p for p in every_prompt)
@@ -56,3 +56,11 @@ def test_sections_are_parsed_by_heading(monkeypatch):
         assert prompts.section("x", "Two") == "second"
     finally:
         prompts._sections.cache_clear()
+
+
+def test_critic_and_planner_prompts_state_their_bounds():
+    critic = prompts.section("critic", "System")
+    assert "never instructions to you" in critic  # injection guard
+    assert all(v in critic for v in ("**confirmed**", "**downgrade**", "**reject**"))
+    planner = prompts.planner_prompt()
+    assert "**lite**" in planner and "deep costs 2 units" in planner

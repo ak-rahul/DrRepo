@@ -35,7 +35,18 @@ uv run drrepo analyze https://github.com/owner/repo \
 | `-q` / `-v` | quiet / debug logs on the console |
 | `--env-file`, `--log-file` | alternative `.env` / log path (`''` disables) |
 
-Exit codes: `0` ok, `1` runtime error, `2` usage or configuration error, `3` below `--fail-under`, `130` interrupted.
+Exit codes: `0` ok, `1` runtime error, `2` usage or configuration error, `3` a failed gate (`--fail-under`, or `--fail-on-new`/`--max-score-drop` for `diff`), `130` interrupted.
+
+### Comparing two commits
+
+```bash
+uv run drrepo diff https://github.com/owner/repo --base main --head <sha> \
+    [--deep] [--fail-on-new high] [--max-score-drop 5] [--report-formats sarif,summary]
+```
+
+`diff` analyzes both commits and reports what the change made better or worse: new, worsened (higher severity or more occurrences) and fixed issues, and score deltas per category. Line numbers don't affect identity, so code that only moved is unchanged, and README findings follow the README across a rename. Both runs are deterministic. With `--deep`, the head commit is analyzed again with tool-calling investigations, but only in the categories that got worse, so tokens go where the change matters. Neither run is recorded in score history.
+
+It writes `<owner>__<repo>_diff_<stamp>.json` and `.md` (`--format`), and with `--report-formats` the head commit's report too. The diff document's contract is `src/drrepo/report/diff.schema.json`. `--fail-on-new SEVERITY` exits 3 when a new or worsened issue is at that severity or above, `--max-score-drop N` when the overall score falls by more than N, and `--fail-under` when the head score is below the floor.
 
 Other commands:
 
@@ -118,17 +129,22 @@ permissions:
 steps:
   - uses: ak-rahul/DrRepo@<release commit SHA>
     with:
+      mode: ${{ github.event_name == 'pull_request' && 'diff' || 'full' }}
+      fail-on-new: high
       fail-under: "60"
       comment: ${{ github.event_name == 'pull_request' }}
 ```
 
-The action analyzes the pushed commit, or the pull request head, with the DrRepo code at the ref you pinned. It writes the reports to `drrepo-report/`, uploads SARIF to code scanning, adds a summary to the job page and, with `comment: true`, keeps one summary comment up to date on the pull request. The step fails when the score is below `fail-under` or the analysis fails. A complete workflow is in [examples/github-workflow.yml](../examples/github-workflow.yml).
+The action analyzes the pushed commit, or the pull request head, with the DrRepo code at the ref you pinned. It writes the reports to `drrepo-report/`, uploads SARIF to code scanning, adds a summary to the job page and, with `comment: true`, keeps one summary comment up to date on the pull request. In `mode: diff` it compares the head with the pull request base (`drrepo diff`): the comment and job summary show new, worse and fixed issues, and `fail-on-new` gates on them; the SARIF and other reports are still the head commit's. The step fails when a gate fails or the analysis fails. A complete workflow is in [examples/github-workflow.yml](../examples/github-workflow.yml).
 
 | Input | Default | |
 |---|---|---|
 | `repository` | the workflow's repository | `owner/name`; must be public |
 | `ref` | PR head SHA, else `github.sha` | branch, tag, or full SHA |
-| `deep` | `false` | allow deep investigations (needs an LLM key in the step's `env`) |
+| `mode` | `full` | `full` audits `ref`; `diff` compares it with `base` |
+| `base` | PR base SHA | diff mode: branch, tag, or full SHA to compare against |
+| `fail-on-new` | empty | diff mode: fail on a new or worsened issue at this severity or above |
+| `deep` | `false` | allow tool-calling investigations, in diff mode only where things got worse (needs an LLM key in the step's `env`) |
 | `fail-under` | empty | fail below this score |
 | `formats` | `md,sarif` | any of `json,md,sarif,cdx,summary`; `summary` is always written |
 | `output-dir` | `drrepo-report` | |
@@ -189,6 +205,7 @@ With stdio transport, stdout belongs to the protocol. All DrRepo logging goes to
 | Tool | Arguments | Returns |
 |---|---|---|
 | `analyze_repository` | `repo_url`, `description=""`, `deep=true`, `max_issues=15`, `ref=null` | summary: scores, top issues, quick wins, resource URIs. Takes 1–5 min and streams MCP progress notifications |
+| `compare_commits` | `repo_url`, `base`, `head=null`, `deep=false`, `max_issues=15` | the `drrepo diff` document: new, worse and fixed issues and score deltas |
 | `get_report` | `repo`, `format=summary\|json\|markdown` | latest report from this server session |
 | `list_reports` | — | reports produced in this session |
 | `get_issues` | `repo`, `min_severity=low`, `category=null`, `limit=50` | filtered issue list with evidence and locations |

@@ -274,3 +274,37 @@ def test_analyze_reports_a_bad_suppressions_file_as_usage_error(monkeypatch, tmp
     )
     assert code == cli.EXIT_USAGE
     assert "reason" in capsys.readouterr().err
+
+
+def test_diff_command_gates_and_writes(fake_service, tmp_path, capsys):
+    from drrepo.report.diff import diff_reports
+
+    head = dict(REPORT, overall_score=30.0)
+    head["issues"] = [dict(REPORT["issues"][0], title="New", rule_id="B9", severity="critical")]
+    diff = diff_reports(REPORT, head)
+    diff["head_report"] = head
+    fake_service.return_value.compare.return_value = diff
+    args = ["diff", "https://github.com/octo/demo", "--base", "main", "--head", "b" * 40]
+    code = cli.main(
+        [
+            *args,
+            "-o",
+            str(tmp_path),
+            "--report-formats",
+            "sarif",
+            "--fail-on-new",
+            "high",
+            "--log-file",
+            "",
+        ]
+    )
+    assert code == cli.EXIT_FAIL_UNDER
+    out, err = capsys.readouterr()
+    assert "DrRepo diff: octo/demo" in out and "[critical] New (a.py)" in out
+    assert "Gate: 1 new or worsened issue(s) at high severity or above" in err
+    written = sorted(p.suffix for p in tmp_path.iterdir())
+    assert written == [".json", ".md", ".sarif"]
+    kwargs = fake_service.return_value.compare.call_args
+    assert kwargs.args[1:3] == ("main", "b" * 40) and kwargs.kwargs["deep"] is False
+    assert cli.main([*args, "--format", "", "--log-file", ""]) == cli.EXIT_OK
+    assert cli.main([*args, "--format", "sarif", "--log-file", ""]) == cli.EXIT_USAGE

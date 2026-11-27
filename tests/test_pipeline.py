@@ -256,7 +256,18 @@ def test_budget_caps_deep_count(collectors):
     with patch(f"{P}.LeadInvestigator") as lead:
         lead.return_value.plan.return_value = InvestigationPlan.all_shallow("x")
         Workflow().run(REPO, _ctx(config, budget=TokenBudget(25_000)))
-    assert lead.return_value.plan.call_args.args[1] == 2  # 25k // 12k
+    assert lead.return_value.plan.call_args.args[1] == 4  # units of half a deep run: 25k // 6k
+
+
+def test_measured_cost_sizes_the_budget(collectors):
+    config = Config(groq_api_key="k", estimated_tokens_per_deep_investigation=12_000)
+    ctx = _ctx(config, budget=TokenBudget(25_000))
+    ctx.deep_investigation_tokens = 5_000  # history says deep runs are cheap here
+    with patch(f"{P}.LeadInvestigator") as lead:
+        lead.return_value.plan.return_value = InvestigationPlan.all_shallow("x")
+        report = Workflow().run(REPO, ctx)
+    assert lead.return_value.plan.call_args.args[1] == 10  # 25k // 2.5k, capped at 5 deep
+    assert report["llm_usage"]["deep_estimate"] == {"tokens": 5_000, "source": "history"}
 
 
 def test_open_breaker_short_circuits_later_runs(collectors):
@@ -380,3 +391,57 @@ def test_a_crashing_collector_degrades_instead_of_failing_the_run(collectors):
     assert status["status"] == "error" and "KeyError" in status["detail"]
     assert report["category_scores"]["security"]["assessed"] is False
     assert report["category_scores"]["code_quality"]["assessed"] is True  # the rest carried on
+
+
+def test_lite_investigation_gets_half_the_tool_calls(collectors):
+    plan = _plan()
+    plan.plans["security"] = CategoryPlan(Category.SECURITY, InvestigationDepth.LITE, "borderline")
+    result = InvestigationResult(summary="lite summary", issues=[], trace=[])
+    config = Config(groq_api_key="k", max_tool_calls_per_investigator=8)
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", return_value=result) as inv,
+    ):
+        lead.return_value.plan.return_value = plan
+        report = Workflow().run(REPO, _ctx(config, budget=TokenBudget(100_000)))
+    assert inv.call_args.kwargs["max_tool_calls"] == 4
+    assert inv.call_args.kwargs["llm"].label == "investigation:security"
+    assert report["category_scores"]["security"]["investigation_depth"] == "lite"
+
+
+def test_critic_can_be_turned_off(collectors):
+    (collectors["cloned"].path / "b.py").write_text("x = 1\n" * 20, encoding="utf-8")
+    severe = Issue(
+        Severity.CRITICAL,
+        Category.SECURITY,
+        "Remote code execution",
+        "d",
+        "r",
+        "investigator:security",
+        locations=[Location("b.py", 3)],
+    )
+    result = InvestigationResult(
+        summary="s", issues=[severe], trace=[ToolCallTrace("read_file", {"path": "b.py"}, "obs")]
+    )
+    config = Config(groq_api_key="k", enable_agent_critic=False)
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", return_value=result),
+        patch(f"{P}.critic_review") as critic,
+    ):
+        lead.return_value.plan.return_value = _plan(Category.SECURITY)
+        report = Workflow().run(REPO, _ctx(config, budget=TokenBudget(100_000)))
+    critic.assert_not_called()
+    titles = {i["title"]: i["severity"] for i in report["category_scores"]["security"]["issues"]}
+    assert titles["Remote code execution"] == "critical"
+
+
+def test_an_empty_deep_allowance_skips_planning(collectors):
+    ctx = _ctx(budget=TokenBudget(100_000))
+    ctx.deep_allowed = frozenset()
+    with patch(f"{P}.LeadInvestigator") as lead:
+        report = Workflow().run(REPO, ctx)
+    lead.assert_not_called()
+    assert report["investigation_plan"]["security"]["rationale"] == (
+        "no category changed since the base commit"
+    )

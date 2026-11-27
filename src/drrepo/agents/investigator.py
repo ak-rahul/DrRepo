@@ -155,7 +155,7 @@ def investigate(
 
     messages = result.get("messages", [])
     if llm.budget is not None:
-        llm.budget.record(estimate_run_tokens(prompt, messages))
+        llm.budget.record(estimate_run_tokens(prompt, messages), llm.label)
 
     structured = result.get("structured_response")
     if not isinstance(structured, InvestigationOutput):

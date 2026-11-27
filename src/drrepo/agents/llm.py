@@ -60,11 +60,17 @@ def extract_actual_tokens(response: Any) -> int | None:
 
 
 class TokenBudget:
-    """Accumulates token usage for one workflow run. Safe to share across threads."""
+    """Accumulates token usage for one workflow run. Safe to share across threads.
+
+    Usage is also kept per label ("planner", "critic", "investigation:security",
+    ...), so a report shows where the tokens went and the next run can size its
+    deep investigations from what they really cost (see `report.history`).
+    """
 
     def __init__(self, max_tokens: int):
         self.max_tokens = max_tokens
         self._used = 0
+        self._by_label: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def remaining(self) -> int:
@@ -77,25 +83,32 @@ class TokenBudget:
             return 0
         return self.remaining() // cost_each
 
-    def record(self, tokens: int) -> None:
-        """Add to the running total. Zero/negative values are ignored."""
+    def record(self, tokens: int, label: str = "other") -> None:
+        """Add to the running total and to `label`'s line. Zero/negative values are ignored."""
         if tokens <= 0:
             return
         with self._lock:
             self._used += tokens
+            self._by_label[label] = self._by_label.get(label, 0) + tokens
+
+    def used_by(self, label: str) -> int:
+        with self._lock:
+            return self._by_label.get(label, 0)
 
     def reset(self) -> None:
         """Zero the running total. Runs never share a budget (`AnalysisService`
         builds a fresh one per run), so this is only for reusing an instance."""
         with self._lock:
             self._used = 0
+            self._by_label.clear()
 
-    def usage(self) -> dict[str, int]:
+    def usage(self) -> dict[str, Any]:
         with self._lock:
             return {
                 "used_tokens": self._used,
                 "max_tokens": self.max_tokens,
                 "remaining_tokens": max(0, self.max_tokens - self._used),
+                "by_label": dict(sorted(self._by_label.items())),
             }
 
 
@@ -184,18 +197,25 @@ class LLMRuntime:
     budget: TokenBudget | None = None
     # Optional per-role clients (config.LLM_ROLES); roles without one use `client`.
     role_clients: dict[str, Any] = field(default_factory=dict)
+    # The budget line this runtime's usage is recorded under.
+    label: str = "other"
 
     @property
     def available(self) -> bool:
         return self.client is not None
 
-    def for_role(self, role: str) -> LLMRuntime:
-        """The runtime for one role. It shares this run's breaker and budget, so
-        routing roles to different models can't hide an outage or double the spend."""
-        client = self.role_clients.get(role, self.client)
-        if client is self.client and not self.role_clients:
-            return self
-        return LLMRuntime(client=client, breaker=self.breaker, budget=self.budget)
+    def for_role(self, role: str, label: str | None = None) -> LLMRuntime:
+        """The runtime for one role, recording usage under `label` (default: the role).
+
+        It shares this run's breaker and budget, so routing roles to different
+        models can't hide an outage or double the spend.
+        """
+        return LLMRuntime(
+            client=self.role_clients.get(role, self.client),
+            breaker=self.breaker,
+            budget=self.budget,
+            label=label or role,
+        )
 
     def guarded(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Run `func` under the circuit breaker (if any)."""
@@ -232,4 +252,6 @@ class LLMRuntime:
         if self.budget is None:
             return
         tokens = extract_actual_tokens(response) if response is not None else None
-        self.budget.record(tokens if tokens is not None else estimate_tokens(fallback_text))
+        self.budget.record(
+            tokens if tokens is not None else estimate_tokens(fallback_text), self.label
+        )

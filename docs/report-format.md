@@ -21,7 +21,7 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
       "assessed": true,                  // false => excluded from overall_score, shown as n/a
       "summary": "…",                    // LLM narrative, or the deterministic summary
       "issues": [Issue, …],
-      "investigation_depth": "deep",     // "shallow" | "deep"
+      "investigation_depth": "deep",     // "shallow" | "lite" (half the tool calls) | "deep"
       "investigation_trace": [{"tool", "tool_input", "observation"}],
       "notes": ["Deep investigation reached its 8-tool-call budget…"],
       "suppressed": [{"issue": Issue, "suppression": {…}}]   // excluded from this score
@@ -41,7 +41,9 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
     "llm": {"provider": "groq", "model": "…"},                        // null when no LLM was used
     "tools": {"git": "2.47.0", "ruff": "0.17.6", "semgrep": null, …}  // null = not installed
   },
-  "llm_usage": {"used_tokens", "max_tokens", "remaining_tokens"},      // when budget tracking is on
+  "llm_usage": {"used_tokens", "max_tokens", "remaining_tokens",       // when budget tracking is on
+                "by_label": {"planner": 900, "critic": 1200, "investigation:security": 9800, …},
+                "deep_estimate": {"tokens": 11000, "source": "history"}},  // or "config"
   "score_history": {"previous_timestamp", "previous_commit_sha", "overall_score_delta",
                     "category_score_deltas"}  // when a previous run exists
 }
@@ -56,7 +58,8 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
   "description": "…", "recommendation": "…",
   "source": "bandit",          // collector/tool: ruff, bandit, semgrep, secret_scan, osv.dev,
                                // license-audit, license-policy, dependency_audit, readme_analyzer, repo_hygiene,
-                               // investigator:<category>
+                               // investigator:<category>. Agent titles may start with
+                               // "[unverified]" (grounding) or "[disputed]" (critic)
   "rule_id": "B602",           // tool-specific check id (null for some deterministic checks)
   "file": "app/run.py", "line": 12,       // first location (repo-relative)
   "locations": [{"file", "line"}],        // up to 20 samples
@@ -85,6 +88,29 @@ After a deep investigation, the investigator's *new* issues are applied on top o
 - One `run` with driver `DrRepo`. Each distinct `source/rule_id` becomes a rule (e.g. `bandit/B602`, `osv.dev/GHSA-…`, `readme_analyzer`).
 - Each issue produces one result per sampled location, with `uriBaseId: %SRCROOT%`. Issues without a location produce one result with no location.
 - `level`: critical/high → `error`, medium → `warning`, low → `note`. Rules carry `security-severity` (9.5/7.5/5.0/2.0) so GitHub can rank security alerts.
+
+## Diff document
+
+`drrepo diff` (and the MCP `compare_commits` tool) produce a separate document with its own contract, [`src/drrepo/report/diff.schema.json`](../src/drrepo/report/diff.schema.json), versioned by `diff_schema_version`. Its issues use the report's issue shape.
+
+```jsonc
+{
+  "diff_schema_version": "1.0", "report_schema_version": "1.0",
+  "repository": {"name", "full_name", "url"},
+  "base": {"ref": "main", "commit_sha": "…", "overall_score": 81.0},
+  "head": {"ref": "…", "commit_sha": "…", "overall_score": 76.5},
+  "overall_delta": -4.5,
+  "category_deltas": {"security": {"base": 86.0, "head": 73.6, "delta": -12.4}},  // null if unassessed
+  "new_issues": [Issue, …],              // in head only, most severe first
+  "fixed_issues": [Issue, …],            // in base only
+  "worsened_issues": [{"issue": Issue, "base_severity": "medium", "base_occurrences": 1}],
+  "unchanged_issues": 10,
+  "deep_categories": ["security"],       // investigated with tools on the head (--deep)
+  "generated_at": "…", "drrepo_version": "…"
+}
+```
+
+**Identity.** Two issues are the same when category, source, rule id (the title for checks without a stable rule id, with `[unverified]`/`[disputed]` marks and occurrence counts removed) and file match; line numbers are ignored. README findings ignore the file, so renaming the README is not a fix.
 
 ## CycloneDX 1.6 SBOM
 

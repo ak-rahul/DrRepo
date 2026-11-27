@@ -201,6 +201,62 @@ def to_summary(report: dict[str, Any], max_issues: int = 10) -> str:
     return "\n".join(lines) + "\n"
 
 
+def diff_to_markdown(diff: dict[str, Any], max_issues: int = 10) -> str:
+    """What a change made better or worse (`report.diff`), short enough for a PR comment.
+    Repository text is neutralized as in `to_summary`."""
+    name = _inert(diff["repository"].get("full_name") or diff["repository"].get("name") or "")
+    base, head = diff["base"], diff["head"]
+
+    def side(s: dict[str, Any]) -> str:
+        sha = f"`{s['commit_sha'][:12]}`" if s.get("commit_sha") else "?"
+        score = f"{s['overall_score']:.0f}" if s.get("overall_score") is not None else "n/a"
+        return f"{sha} ({score})"
+
+    delta = diff.get("overall_delta")
+    verdict = "no change" if not delta else f"{delta:+.1f}"
+    lines = [
+        f"### DrRepo diff: {name}: {verdict}",
+        "",
+        f"{side(base)} → {side(head)} · {len(diff['new_issues'])} new, "
+        f"{len(diff['worsened_issues'])} worse, {len(diff['fixed_issues'])} fixed, "
+        f"{diff['unchanged_issues']} unchanged",
+        "",
+        "| Category | Base | Head | Change |",
+        "|---|---|---|---|",
+    ]
+    for key, c in diff["category_deltas"].items():
+        shown = [f"{c[k]:.0f}" if c[k] is not None else "n/a" for k in ("base", "head")]
+        change = f"{c['delta']:+.1f}" if c["delta"] else "-"
+        lines.append(f"| {key.replace('_', ' ').title()} | {shown[0]} | {shown[1]} | {change} |")
+
+    def table(title: str, issues: list[dict[str, Any]], note: list[str] | None = None) -> None:
+        if not issues:
+            return
+        lines.extend(["", f"**{title}**", "", "| Severity | Issue | Location |", "|---|---|---|"])
+        for n, issue in enumerate(issues[:max_issues]):
+            sev = issue["severity"]
+            extra = f" ({note[n]})" if note else ""
+            lines.append(
+                f"| {_SEVERITY_ICON.get(sev, '')} {sev} | {_inert(issue['title'])}{_count(issue)}"
+                f"{extra} | {_inert(_location(issue)) or '-'} |"
+            )
+        if len(issues) > max_issues:
+            lines.extend(["", f"…and {len(issues) - max_issues} more."])
+
+    table("New", diff["new_issues"])
+    worse = diff["worsened_issues"]
+    table(
+        "Worse",
+        [w["issue"] for w in worse],
+        [f"was {w['base_severity']}, ×{w['base_occurrences']}" for w in worse],
+    )
+    table("Fixed", diff["fixed_issues"])
+    if diff.get("deep_categories"):
+        lines.extend(["", "Investigated with tools: " + ", ".join(diff["deep_categories"]) + "."])
+    lines.extend(["", f"<sub>DrRepo {_inert(diff.get('drrepo_version', ''))}</sub>"])
+    return "\n".join(lines) + "\n"
+
+
 def to_sarif(report: dict[str, Any]) -> str:
     """SARIF 2.1.0 for GitHub code scanning. One result per sampled location.
 

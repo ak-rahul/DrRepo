@@ -139,6 +139,17 @@ async def analyze_repository(
     except ValueError as e:
         return {"error": str(e)}
 
+    progress = _progress_reporter(ctx)
+    # ctx.info() is deprecated in MCP 2 (SEP-2577); logs go to stderr instead.
+    logger.info(f"MCP: starting analysis of {repo_url}")
+    report = await anyio.to_thread.run_sync(
+        lambda: service.analyze(repo_url, description, deep=deep, progress=progress, ref=ref)
+    )
+    return _summary(report, max(0, min(max_issues, 100)))
+
+
+def _progress_reporter(ctx: Context) -> Any:
+    """A progress callback, callable from any thread, that sends MCP progress notifications."""
     steps = {"n": 0}
     # LangGraph runs parallel nodes in its own thread pool, not in anyio worker
     # threads, so from_thread.run needs an explicit token for this event loop.
@@ -153,12 +164,49 @@ async def analyze_repository(
         except Exception as e:
             logger.debug(f"MCP progress notification failed: {e}")
 
-    # ctx.info() is deprecated in MCP 2 (SEP-2577); logs go to stderr instead.
-    logger.info(f"MCP: starting analysis of {repo_url}")
-    report = await anyio.to_thread.run_sync(
-        lambda: service.analyze(repo_url, description, deep=deep, progress=progress, ref=ref)
+    return progress
+
+
+@mcp.tool()
+async def compare_commits(
+    repo_url: str,
+    base: str,
+    ctx: Context,
+    head: str | None = None,
+    deep: bool = False,
+    max_issues: int = 15,
+) -> dict[str, Any]:
+    """What changed between two commits of a repository: new, worse and fixed issues and
+    score deltas (for reviewing a pull request or a release).
+
+    Analyzes both commits (2-6 minutes). With deep=True the head commit is re-analyzed
+    with tool-calling investigations, but only in categories that got worse.
+
+    Args:
+        repo_url: e.g. "https://github.com/psf/requests".
+        base: Branch, tag, or full commit SHA to compare against (e.g. "main").
+        head: Branch, tag, or full commit SHA with the change (default: the default branch).
+        deep: Investigate the categories that got worse with tools.
+        max_issues: How many issues to list in each of new, worse and fixed.
+    """
+    service = get_service()
+    try:
+        RepoRef.parse(repo_url)
+        validate_ref(base)
+        if head is not None:
+            validate_ref(head)
+    except ValueError as e:
+        return {"error": str(e)}
+    progress = _progress_reporter(ctx)
+    logger.info(f"MCP: comparing {repo_url} {base}..{head or 'default branch'}")
+    diff = await anyio.to_thread.run_sync(
+        lambda: service.compare(repo_url, base, head, deep=deep, progress=progress)
     )
-    return _summary(report, max(0, min(max_issues, 100)))
+    limit = max(0, min(max_issues, 100))
+    document = {k: v for k, v in diff.items() if k != "head_report"}
+    for key in ("new_issues", "fixed_issues", "worsened_issues"):
+        document[key] = document[key][:limit]
+    return document
 
 
 def _find_report(repo: str) -> dict[str, Any] | None:

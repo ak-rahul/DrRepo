@@ -1,9 +1,10 @@
-"""Lead Investigator: decides per repository which categories get a deep,
-tool-calling investigation and which get a quick deterministic pass.
+"""Lead Investigator: decides per repository which categories get a deep or
+lite tool-calling investigation and which get a quick deterministic pass.
 
 This is what makes the strategy adaptive rather than a fixed pipeline. The
-planner is told how many deep investigations the run can afford, and the
-workflow enforces that cap afterwards regardless of what the model returns.
+planner is told how many budget units the run can afford (a deep investigation
+costs 2, a lite one 1), and `enforce_budget` applies that cap afterwards
+regardless of what the model returns.
 
 Naming gotcha (verified live against Groq): pydantic output classes must NOT
 start with an underscore -- Groq's tool-calling mangles `_Foo` into ' _Foo' and
@@ -29,7 +30,7 @@ CategoryName = Literal[
 
 class CategoryPlanOutput(BaseModel):
     category: CategoryName
-    depth: Literal["shallow", "deep"]
+    depth: Literal["shallow", "lite", "deep"]
     rationale: str = Field(description="One sentence citing the recon signal behind the choice")
 
 
@@ -37,7 +38,7 @@ class InvestigationPlanOutput(BaseModel):
     plans: list[CategoryPlanOutput]
 
 
-# When more categories are flagged deep than the budget allows, keep these first.
+# When the picks cost more than the budget allows, these keep their depth first.
 DEEP_PRIORITY = [
     Category.SECURITY,
     Category.DEPENDENCIES,
@@ -52,22 +53,20 @@ class LeadInvestigator:
         self._llm = llm
 
     def plan(
-        self, recon_summary: dict[str, Any], max_deep: int, user_context: str = ""
+        self, recon_summary: dict[str, Any], max_units: int, user_context: str = ""
     ) -> InvestigationPlan:
-        """Produce a plan with at most `max_deep` deep categories.
+        """Produce a plan costing at most `max_units` (deep 2, lite 1).
 
         Never raises: any failure (including an open circuit breaker) yields an
         all-shallow plan, because planning must never block the analysis.
         """
-        if max_deep <= 0:
-            return InvestigationPlan.all_shallow(
-                "token budget allows no deep investigations this run"
-            )
+        if max_units <= 0:
+            return InvestigationPlan.all_shallow("token budget allows no investigations this run")
 
         prompt = (
             f"Recon signals:\n{json.dumps(recon_summary, indent=2, default=str)}\n\n"
             + (f"User context: {user_context.strip()}\n\n" if user_context.strip() else "")
-            + f"You may mark at most {max_deep} categories as deep."
+            + f"Budget: {max_units} units (deep costs 2, lite costs 1, shallow is free)."
         )
         try:
             result = self._llm.structured(InvestigationPlanOutput, prompts.planner_prompt(), prompt)
@@ -76,7 +75,7 @@ class LeadInvestigator:
             return InvestigationPlan.all_shallow(
                 f"planner unavailable ({type(e).__name__}); defaulted to shallow"
             )
-        return enforce_deep_cap(plan_from_output(result), max_deep)
+        return enforce_budget(plan_from_output(result), max_units)
 
 
 def plan_from_output(result: InvestigationPlanOutput) -> InvestigationPlan:
@@ -102,14 +101,37 @@ def plan_from_output(result: InvestigationPlanOutput) -> InvestigationPlan:
     return InvestigationPlan(plans=plans)
 
 
-def enforce_deep_cap(plan: InvestigationPlan, max_deep: int) -> InvestigationPlan:
-    """Downgrade the lowest-priority deep categories beyond `max_deep`."""
-    deep = [c for c in DEEP_PRIORITY if plan.depth_for(c) == InvestigationDepth.DEEP]
-    for category in deep[max(0, max_deep) :]:
+def restrict_plan(plan: InvestigationPlan, allowed: frozenset[str]) -> InvestigationPlan:
+    """Make every category outside `allowed` shallow (diff mode: only what got worse)."""
+    for name, original in plan.plans.items():
+        if name not in allowed and original.depth.investigates:
+            plan.plans[name] = CategoryPlan(
+                original.category,
+                InvestigationDepth.SHALLOW,
+                f"{original.rationale} (shallow: unchanged since the base commit)",
+            )
+    return plan
+
+
+def enforce_budget(plan: InvestigationPlan, max_units: int) -> InvestigationPlan:
+    """Keep the plan within `max_units`, in `DEEP_PRIORITY` order.
+
+    A deep pick that no longer fits becomes lite if one unit is left, else
+    shallow; a lite pick that doesn't fit becomes shallow.
+    """
+    remaining = max(0, max_units)
+    for category in DEEP_PRIORITY:
         original = plan.plans[category.value]
-        plan.plans[category.value] = CategoryPlan(
-            category,
-            InvestigationDepth.SHALLOW,
-            f"{original.rationale} (downgraded to shallow: run token budget allows {max_deep} deep investigation(s))",
-        )
+        depth = original.depth
+        if not depth.investigates:
+            continue
+        if depth.budget_units > remaining:
+            depth = InvestigationDepth.LITE if remaining >= 1 else InvestigationDepth.SHALLOW
+            plan.plans[category.value] = CategoryPlan(
+                category,
+                depth,
+                f"{original.rationale} (downgraded to {depth.value}: the run token budget "
+                f"allows {max_units} unit(s))",
+            )
+        remaining -= depth.budget_units
     return plan

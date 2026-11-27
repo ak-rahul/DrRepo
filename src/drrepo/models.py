@@ -131,10 +131,24 @@ class CollectorStatus(StrEnum):
 
 
 class InvestigationDepth(StrEnum):
-    """How a category was analyzed: one narrative call, or a tool-calling loop."""
+    """How a category was analyzed: one narrative call, or a tool-calling loop.
+
+    `lite` is a tool-calling loop with half the tool calls, for borderline
+    categories. It costs half a deep investigation's budget.
+    """
 
     SHALLOW = "shallow"
+    LITE = "lite"
     DEEP = "deep"
+
+    @property
+    def budget_units(self) -> int:
+        """Budget cost in units of half a deep investigation."""
+        return {"shallow": 0, "lite": 1, "deep": 2}[self.value]
+
+    @property
+    def investigates(self) -> bool:
+        return self is not InvestigationDepth.SHALLOW
 
 
 @dataclass

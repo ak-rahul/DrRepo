@@ -39,7 +39,7 @@ src/drrepo/
   agents/           llm (chat model, TokenBudget, LLMRuntime), planner, investigator,
                     tools (all investigator tools + build_tools), analysts/ (one per category),
                     prompts (loader) + instructions/*.md (every agent's job, as documents)
-  report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX)
+  report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX), diff (two reports compared)
   interfaces/       cli, streamlit_app, mcp_server, health (checks + FastAPI app)
 ```
 
@@ -77,13 +77,13 @@ Scanners run with `cwd` set to the clone, and every path is rewritten repo-relat
 
 Every agent's job, inputs, tools and bounds are documented in [agents.md](agents.md); their prompts are the markdown files in `agents/instructions/`.
 
-Agent findings pass a deterministic grounding check (`agents/grounding.py`) before they are merged: fabricated citations are dropped, and unverifiable ones are capped at low severity. See [agents.md](agents.md#grounding-check).
+Agent findings pass a deterministic grounding check (`agents/grounding.py`) before they are merged: fabricated citations are dropped, and unverifiable ones are capped at low severity. Grounded high and critical findings then go to the critic (`agents/critic.py`), which can lower a severity or mark a finding disputed, never raise or remove one. See [agents.md](agents.md#grounding-check).
 
 ## Stage 2: planner (`agents/planner.py`)
 
-`LeadInvestigator` makes one structured-output call. The output model uses `Literal`-typed fields so the model can't invent categories or depths. The prompt contains recon counts (`pipeline.recon_summary`), the user's context, and a cap: "at most N deep categories".
+`LeadInvestigator` makes one structured-output call. The output model uses `Literal`-typed fields so the model can't invent categories or depths (`shallow`, `lite`, `deep`). The prompt contains recon counts (`pipeline.recon_summary`), the user's context, and a budget in units: deep costs 2, lite 1.
 
-The budget is reserved before the fan-out. The planner node computes `N = budget.affordable_count(estimated_tokens_per_deep_investigation)`, and `enforce_deep_cap` drops extra deep picks in this order: security > dependencies > code quality > maintainability > documentation. If the five parallel nodes checked the budget themselves, they would all see it full at once.
+The budget is reserved before the fan-out. The planner node prices a unit at half of `RunContext.deep_estimate()` (measured from score history by `AnalysisService`, else `estimated_tokens_per_deep_investigation`), computes `N = budget.affordable_count(unit cost)`, and `enforce_budget` demotes picks that don't fit in this order: security > dependencies > code quality > maintainability > documentation. If the five parallel nodes checked the budget themselves, they would all see it full at once. Every LLM call records its tokens under a label (`planner`, `judgment`, `narrative`, `critic`, `investigation:<category>`), reported as `llm_usage.by_label`.
 
 Planning never blocks a run. If deep mode is disabled, there is no clone, there is no LLM, or the call fails, the result is an all-shallow plan with the reason recorded in each rationale. Note that pydantic output class names must not start with `_`: Groq turns `_Foo` into `' _Foo'` and rejects the tool call.
 

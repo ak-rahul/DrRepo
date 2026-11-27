@@ -14,7 +14,7 @@ from drrepo.agents.planner import (
     CategoryPlanOutput,
     InvestigationPlanOutput,
     LeadInvestigator,
-    enforce_deep_cap,
+    enforce_budget,
     plan_from_output,
 )
 from drrepo.config import Config
@@ -49,30 +49,46 @@ class TestPlanner:
         assert plan.depth_for(Category.DOCUMENTATION) == InvestigationDepth.SHALLOW
         assert "defaulted" in plan.plans["documentation"].rationale
 
-    def test_deep_cap_keeps_highest_priority(self):
+    def test_budget_keeps_highest_priority(self):
         plan = plan_from_output(_output(documentation="deep", security="deep", dependencies="deep"))
-        capped = enforce_deep_cap(plan, 2)
+        capped = enforce_budget(plan, 4)  # two deep investigations
         assert set(_deep(capped)) == {Category.SECURITY, Category.DEPENDENCIES}
-        assert "downgraded" in capped.plans["documentation"].rationale
+        assert "downgraded to shallow" in capped.plans["documentation"].rationale
+
+    def test_budget_demotes_deep_to_lite_before_shallow(self):
+        plan = plan_from_output(
+            _output(security="deep", dependencies="deep", code_quality="lite", documentation="lite")
+        )
+        capped = enforce_budget(plan, 3)
+        depths = {c: capped.depth_for(c) for c in Category}
+        assert depths[Category.SECURITY] == InvestigationDepth.DEEP  # 2 units
+        assert depths[Category.DEPENDENCIES] == InvestigationDepth.LITE  # 1 unit left
+        assert depths[Category.CODE_QUALITY] == InvestigationDepth.SHALLOW
+        assert depths[Category.DOCUMENTATION] == InvestigationDepth.SHALLOW
+        assert "downgraded to lite" in capped.plans["dependencies"].rationale
+        assert sum(d.budget_units for d in depths.values()) <= 3
 
     def test_plan_calls_structured_output_and_records_budget(self):
         llm = _llm_returning(_output(security="deep", code_quality="deep"))
-        plan = LeadInvestigator(llm).plan({"stars": 1}, max_deep=1, user_context="focus on auth")
+        plan = LeadInvestigator(llm.for_role("planner")).plan(
+            {"stars": 1}, max_units=2, user_context="focus on auth"
+        )
         assert _deep(plan) == [Category.SECURITY]
         messages = llm.client.with_structured_output.return_value.invoke.call_args.args[0]
-        assert "focus on auth" in messages[1].content and "at most 1" in messages[1].content
-        assert llm.budget.usage()["used_tokens"] > 0
+        assert "focus on auth" in messages[1].content and "Budget: 2 units" in messages[1].content
+        usage = llm.budget.usage()
+        assert usage["used_tokens"] > 0 and usage["by_label"] == {"planner": usage["used_tokens"]}
 
     def test_zero_budget_skips_llm(self):
         llm = _llm_returning(_output(security="deep"))
-        plan = LeadInvestigator(llm).plan({}, max_deep=0)
+        plan = LeadInvestigator(llm).plan({}, max_units=0)
         assert _deep(plan) == []
         llm.client.with_structured_output.assert_not_called()
 
     def test_failure_defaults_to_all_shallow(self):
         client = MagicMock()
         client.with_structured_output.return_value.invoke.side_effect = CircuitOpenError("open")
-        plan = LeadInvestigator(LLMRuntime(client=client)).plan({}, max_deep=5)
+        plan = LeadInvestigator(LLMRuntime(client=client)).plan({}, max_units=10)
         assert _deep(plan) == []
         assert "CircuitOpenError" in plan.plans["security"].rationale
 
@@ -161,7 +177,12 @@ class TestBudget:
         budget = TokenBudget(100)
         budget.record(100)
         budget.reset()
-        assert budget.usage() == {"used_tokens": 0, "max_tokens": 100, "remaining_tokens": 100}
+        assert budget.usage() == {
+            "used_tokens": 0,
+            "max_tokens": 100,
+            "remaining_tokens": 100,
+            "by_label": {},
+        }
 
     def test_thread_safe_record(self):
         budget = TokenBudget(10**9)
@@ -174,3 +195,13 @@ class TestBudget:
         for t in threads:
             t.join()
         assert budget.usage()["used_tokens"] == 8000
+
+
+def test_restrict_plan_keeps_only_allowed_categories():
+    from drrepo.agents.planner import restrict_plan
+
+    plan = plan_from_output(_output(security="deep", documentation="lite"))
+    restricted = restrict_plan(plan, frozenset({"security"}))
+    assert _deep(restricted) == [Category.SECURITY]
+    assert restricted.depth_for(Category.DOCUMENTATION) == InvestigationDepth.SHALLOW
+    assert "unchanged since the base commit" in restricted.plans["documentation"].rationale

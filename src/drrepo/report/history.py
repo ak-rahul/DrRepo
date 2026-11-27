@@ -3,6 +3,10 @@
 The one place a report touches disk other than export: an append-only JSON
 file (`reports/history.json`), capped per repository. History is a
 convenience, so failing to write it never fails an analysis.
+
+Each run also records what its deep investigations really cost (`deep_tokens`),
+so the next run can size its budget from measurements instead of a fixed guess
+(`deep_investigation_estimate`).
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from drrepo.log import logger
 
 DEFAULT_HISTORY_PATH = Path("reports") / "history.json"
 _MAX_RUNS_PER_REPO = 20
+_ESTIMATE_SAMPLES_PER_REPO = 10
+_ESTIMATE_SAMPLES_OVERALL = 30
 _LOCK_TIMEOUT_SECONDS = 10.0
 # record_run() is a read-modify-write, so two runs finishing together would lose
 # an update. Two locks prevent that: a thread lock for runs inside one process
@@ -54,6 +60,37 @@ def previous_run_for(
     key = _repo_key(repository)
     matches = [r for r in history if r.get("repo_key") == key]
     return matches[-1] if matches else None
+
+
+def deep_tokens(report: dict[str, Any]) -> list[int]:
+    """Tokens each investigation in `report` used, scaled to a full deep one.
+
+    A lite investigation has half the tool calls, so its cost is doubled. Only
+    investigations with a recorded budget line count.
+    """
+    by_label = (report.get("llm_usage") or {}).get("by_label") or {}
+    measured = []
+    for name, cs in report.get("category_scores", {}).items():
+        depth = cs.get("investigation_depth")
+        tokens = by_label.get(f"investigation:{name}")
+        if depth in ("deep", "lite") and tokens:
+            measured.append(int(tokens) * (2 if depth == "lite" else 1))
+    return measured
+
+
+def deep_investigation_estimate(
+    repository: dict[str, Any], history: list[dict[str, Any]]
+) -> int | None:
+    """Mean recorded cost of a deep investigation: this repository's recent runs
+    first (cost grows with repository size), else recent runs of any repository.
+    None when nothing has been measured yet."""
+    key = _repo_key(repository)
+    own = [t for r in history if r.get("repo_key") == key for t in r.get("deep_tokens", [])]
+    sample = (
+        own[-_ESTIMATE_SAMPLES_PER_REPO:]
+        or [t for r in history for t in r.get("deep_tokens", [])][-_ESTIMATE_SAMPLES_OVERALL:]
+    )
+    return round(sum(sample) / len(sample)) if sample else None
 
 
 def compute_deltas(current_report: dict[str, Any], previous_run: dict[str, Any]) -> dict[str, Any]:
@@ -97,6 +134,7 @@ def record_run(report: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH
                     for name, cs in report["category_scores"].items()
                     if cs.get("assessed", True)
                 },
+                "deep_tokens": deep_tokens(report),
             }
         )
 
