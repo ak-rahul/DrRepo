@@ -65,6 +65,7 @@ Each collector is a plain function returning `CollectorResult(name, status, data
 | `readme` | `pipeline._readme` → `recon/readme.py` | heading-based sections, examples, badges, 0–100 score; reads the API README first, then the clone |
 | `static_analysis` | `recon/scanners.py` | `ruff --isolated --select E4,E7,E9,F,B,PLE`, tests excluded |
 | `security` | `recon/scanners.py` + `recon/secrets.py` | bandit (tests and asserts excluded), semgrep `p/security-audit` (metrics off), secret scanner |
+| `infrastructure` | `recon/infrastructure.py` | zizmor over GitHub Actions workflows and Dependabot config (offline; the repo's own config and ignore comments are disabled), hadolint over Dockerfiles (run from a neutral directory with ignore pragmas disabled), and a built-in check for containers that never drop root |
 | `dependency_audit` | `recon/dependencies.py` + `recon/manifests.py` | OSV `querybatch` → advisory details → deps.dev licenses, all bounded and cached |
 
 Scanners run with `cwd` set to the clone, and every path is rewritten repo-relative by `recon.files.relative_posix`.
@@ -74,6 +75,8 @@ Scanners run with `cwd` set to the clone, and every path is rewritten repo-relat
 **Secrets.** Provider-specific patterns, plus a generic assignment rule with an entropy floor and placeholder filter. Values are never reported. Hits under `tests/`, `fixtures/`, `examples/` and similar directories are LOW, since test suites routinely commit throwaway keys.
 
 Every agent's job, inputs, tools and bounds are documented in [agents.md](agents.md); their prompts are the markdown files in `agents/instructions/`.
+
+Agent findings pass a deterministic grounding check (`agents/grounding.py`) before they are merged: fabricated citations are dropped, and unverifiable ones are capped at low severity. See [agents.md](agents.md#grounding-check).
 
 ## Stage 2: planner (`agents/planner.py`)
 
@@ -124,6 +127,8 @@ The breaker wraps the retry loop. In half-open state it lets exactly one probe t
 A node whose predecessors sit at different depths fires once per superstep in which any predecessor finishes, unless it has `defer=True`. `pipeline._needs_defer` decides this from `CollectorSpec.after` depths: `readme` (predecessors at depths 1 and 1) is not deferred, and `planner` (1, 1, 1, 2) is. Never defer a node that feeds another deferred node: both become pending together, the downstream node runs first, then runs again. That bug once ran every category twice; `test_every_node_runs_exactly_once` guards against it.
 
 ## Security model
+
+**CI and container findings are bounded.** In the security score, zizmor, hadolint and container findings count on a gentler curve and can remove at most 40% (`INFRA_MAX_IMPACT`), so hardening gaps never outweigh flaws in the code itself. zizmor keeps its own severity only for directly exploitable audits (template injection, dangerous triggers, known-vulnerable actions and the like). Hardening advice such as unpinned actions is scored one level lower.
 
 **The analyzed code is never executed.** Nothing from the clone is installed, built, imported or run. ruff, bandit and semgrep only parse source, and ruff runs `--isolated` so repository config can't disable rules. Manifests are parsed as text.
 

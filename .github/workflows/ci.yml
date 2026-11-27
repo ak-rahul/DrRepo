@@ -105,6 +105,16 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      # Shallow evaluation set vs. evals/baseline.json. The baseline is recorded
+      # without semgrep, so semgrep stays off here too; the table goes to the job summary.
+      - name: Evaluation set
+        run: uv run drrepo eval --log-file "" -o eval.md
+        env:
+          ENABLE_SEMGREP: "false"
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      - name: Publish evaluation table
+        if: always()
+        run: test -f eval.md && cat eval.md >> "$GITHUB_STEP_SUMMARY" || true
 
   docker:
     runs-on: ubuntu-latest

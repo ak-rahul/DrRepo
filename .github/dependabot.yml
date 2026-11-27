@@ -5,6 +5,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Let new releases age before adopting them (supply-chain hygiene).
+    cooldown:
+      default-days: 7
     groups:
       langchain:
         patterns: ["langchain*", "langgraph*"]
@@ -16,6 +19,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Let new releases age before adopting them (supply-chain hygiene).
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
@@ -24,3 +30,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Let new releases age before adopting them (supply-chain hygiene).
+    cooldown:
+      default-days: 7

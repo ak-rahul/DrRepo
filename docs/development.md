@@ -41,6 +41,27 @@ mypy runs in `strict` mode over `src/` and `examples/`. Supported Python version
 - The Streamlit UI is smoke-tested with `streamlit.testing.v1.AppTest`.
 - `tests/test_examples.py` imports every script in `examples/` and tests its logic. Examples are linted and type-checked like `src/`.
 
+## Evaluation
+
+`drrepo eval` runs a small set of public repositories, each pinned to an exact commit (`evals/repos.toml`), and compares the results with the recorded baseline (`evals/baseline.json`):
+
+```bash
+uv run drrepo eval                       # shallow: compare with the baseline, exit 3 on a regression
+uv run drrepo eval --case click          # one case
+uv run drrepo eval --update-baseline     # accept the current results as the new baseline
+uv run drrepo eval --deep                # with an LLM key: compare with evals/baseline-deep.json
+```
+
+It prints a Markdown table of scores per category (with deltas), findings added and removed, deep categories, tool calls, tokens and time.
+- **Regressions:** a score drop beyond `--tolerance` (default 5 points), a category that is no longer assessed, or a failed case is a regression. It is listed under the table and gives exit code 3.
+- **Why a tolerance:** even at a pinned commit, OSV advisories and GitHub metadata are live, so some drift is expected over time.
+- **Precision:** to measure how often agent findings are right, record verdicts in `evals/labels.toml`, using the keys the table prints. Unlabeled findings are counted, never guessed.
+
+When to use it:
+- **Prompt edits:** run `drrepo eval --deep` before and after any change to `agents/instructions/`, and paste both tables into the pull request.
+- **Updating the baseline:** after an intentional scoring change, run `--update-baseline` and commit the new baseline with the change that caused it.
+- **CI:** the integration job runs the shallow eval on every push and same-repository PR, and writes the table to the job summary. The baseline is recorded without semgrep, so CI runs the eval with `ENABLE_SEMGREP=false`.
+
 ## Extending
 
 **A collector.** Write `collect_<name>(...) -> CollectorResult` in `recon/`, documenting the `data` schema in its docstring and returning `skipped`/`error` with a `detail` rather than raising. Add a `CollectorSpec` to `pipeline.COLLECTORS` (set `needs_clone`, and `after` if it consumes another collector's output). The graph wiring and `defer` are derived automatically. Read its output in an analyst with `collector_data(recon, "<name>")`. [examples/custom_collector.py](../examples/custom_collector.py) is a complete, tested walk-through.

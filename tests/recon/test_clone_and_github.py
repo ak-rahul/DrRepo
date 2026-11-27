@@ -17,28 +17,69 @@ class TestClone:
         cloned, result = clone_repo("https://gitlab.com/a/b", config)
         assert cloned is None and result.status.value == "error"
 
-    def test_hardened_command_and_cleanup(self, config, monkeypatch):
-        captured: dict[str, object] = {}
+    @staticmethod
+    def _fake_git(monkeypatch, sha="a" * 40):
+        calls: list[dict[str, object]] = []
 
         def fake_run(cmd, **kwargs):
-            captured.update(cmd=cmd, **kwargs)
-            return SimpleNamespace(returncode=0, stderr="", stdout="")
+            calls.append({"cmd": cmd, **kwargs})
+            stdout = sha + "\n" if "rev-parse" in cmd else ""
+            return SimpleNamespace(returncode=0, stderr="", stdout=stdout)
 
         monkeypatch.setattr(clone.shutil, "which", lambda _n: "/usr/bin/git")
         monkeypatch.setattr(clone.subprocess, "run", fake_run)
+        return calls
+
+    def test_hardened_command_records_commit_and_cleans_up(self, config, monkeypatch):
+        calls = self._fake_git(monkeypatch)
         cloned, result = clone_repo("https://github.com/octo/demo/tree/main", config)
         try:
             assert result.status.value == "ok"
-            cmd = captured["cmd"]
+            assert result.data["commit_sha"] == "a" * 40 and result.data["ref"] is None
+            cmd = calls[0]["cmd"]
+            assert "clone" in cmd
             assert cmd[-2] == "https://github.com/octo/demo.git"  # normalized, after "--"
             assert cmd[-3] == "--"
             assert "core.symlinks=false" in cmd and "credential.helper=" in cmd
-            assert captured["env"]["GIT_TERMINAL_PROMPT"] == "0"
-            assert captured["stdin"] is subprocess.DEVNULL
+            assert calls[0]["env"]["GIT_TERMINAL_PROMPT"] == "0"
+            assert calls[0]["stdin"] is subprocess.DEVNULL
+            assert "rev-parse" in calls[-1]["cmd"]
         finally:
             assert cloned is not None
             cloned.cleanup()
         assert not cloned.path.exists()
+
+    def test_ref_uses_shallow_fetch_after_double_dash(self, config, monkeypatch):
+        calls = self._fake_git(monkeypatch)
+        cloned, result = clone_repo("https://github.com/octo/demo", config, ref="v1.2.0")
+        assert cloned is not None
+        cloned.cleanup()
+        assert result.data["ref"] == "v1.2.0"
+        fetch = next(c["cmd"] for c in calls if "fetch" in c["cmd"])
+        assert fetch[-2:] == ["--", "v1.2.0"] and "--depth" in fetch
+        assert "core.symlinks=false" in next(c["cmd"] for c in calls if "checkout" in c["cmd"])
+
+    @pytest.mark.parametrize(
+        "bad", ["--upload-pack=x", "a..b", "x@{1}", "-x", "a b", "a.lock", "a/", ""]
+    )
+    def test_unsafe_refs_never_reach_git(self, config, monkeypatch, bad):
+        calls = self._fake_git(monkeypatch)
+        cloned, result = clone_repo("https://github.com/octo/demo", config, ref=bad)
+        assert cloned is None and result.status.value == "error" and calls == []
+
+    def test_abbreviated_sha_gets_a_precise_hint(self, config, monkeypatch):
+        monkeypatch.setattr(clone.shutil, "which", lambda _n: "git")
+        monkeypatch.setattr(
+            clone.subprocess,
+            "run",
+            lambda cmd, **_k: SimpleNamespace(
+                returncode=128 if "fetch" in cmd else 0,
+                stderr="fatal: couldn't find remote ref abc1234",
+                stdout="",
+            ),
+        )
+        _, result = clone_repo("https://github.com/octo/demo", config, ref="abc1234")
+        assert "full 40-character SHA" in result.detail
 
     def test_failure_cleans_up_and_hints_private(self, config, monkeypatch):
         created = []
@@ -75,7 +116,9 @@ class TestClone:
     def test_size_cap(self, monkeypatch):
         monkeypatch.setattr(clone.shutil, "which", lambda _n: "git")
         monkeypatch.setattr(
-            clone.subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=0, stderr="")
+            clone.subprocess,
+            "run",
+            lambda *_a, **_k: SimpleNamespace(returncode=0, stderr="", stdout="f" * 40),
         )
         monkeypatch.setattr(clone, "_dir_size_mb", lambda _p: 999.0)
         cloned, result = clone_repo("https://github.com/a/b", Config(clone_max_size_mb=10))

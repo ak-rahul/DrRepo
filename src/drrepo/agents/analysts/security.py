@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from drrepo.agents.analysts.base import (
@@ -14,9 +15,22 @@ from drrepo.agents.analysts.base import (
     decay_score,
     issue_penalty,
 )
-from drrepo.models import Category, Severity
+from drrepo.models import Category, Issue, Severity
 
 _SCALE = 40.0
+# CI workflow and container findings (recon/infrastructure.py) are scored on a
+# gentler, bounded curve: they can take at most INFRA_MAX_IMPACT off the code
+# security score, so hardening gaps never outweigh flaws in the code itself.
+INFRA_SOURCES = frozenset({"zizmor", "hadolint", "drrepo"})
+INFRA_MAX_IMPACT = 0.4
+_INFRA_SCALE = 60.0
+
+
+def security_score(issues: list[Issue]) -> float:
+    code = [i for i in issues if i.source not in INFRA_SOURCES]
+    infra = [i for i in issues if i.source in INFRA_SOURCES]
+    infra_factor = 1 - INFRA_MAX_IMPACT * (1 - math.exp(-issue_penalty(infra) / _INFRA_SCALE))
+    return round(decay_score(issue_penalty(code), _SCALE) * infra_factor, 1)
 
 
 def security_severity(finding: dict[str, Any]) -> Severity:
@@ -73,14 +87,27 @@ class SecurityAnalyst(Analyst):
     tool_families = ("files", "scanners", "git_history")
     rescore_scale = _SCALE
 
+    def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:
+        return security_score(issues) if issues else 100.0
+
     def assess(self, recon: Recon) -> Assessment:
         security = collector_data(recon, "security")
         if security is None:
             detail = collector_detail(recon, "security", "security scanners did not run")
             return self.unassessed(f"Security could not be assessed: {detail}.")
 
-        findings = dedupe_cross_tool(security.get("findings", []))
-        tool_status = security.get("tool_status", {})
+        infrastructure = collector_data(recon, "infrastructure") or {}
+        findings = dedupe_cross_tool(security.get("findings", [])) + [
+            f for f in infrastructure.get("findings", []) if f.get("category") == "security"
+        ]
+        tool_status = {
+            **security.get("tool_status", {}),
+            **{
+                tool: s
+                for tool, s in infrastructure.get("tool_status", {}).items()
+                if not s.startswith("skipped: no ")  # a repo without workflows isn't a problem
+            },
+        }
         ran = ", ".join(t for t, s in tool_status.items() if s == "ok") or "none"
         issues = aggregate(
             findings,
@@ -107,7 +134,7 @@ class SecurityAnalyst(Analyst):
         )
         return Assessment(
             issues=issues,
-            score=decay_score(issue_penalty(issues), _SCALE),
+            score=security_score(issues),
             summary=summary,
             narrative_facts=facts,
             notes=notes,

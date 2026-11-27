@@ -15,7 +15,7 @@ Code from the analyzed repository is never executed, installed, or built.
 
 | Category | Signals |
 |---|---|
-| Security | bandit, semgrep `p/security-audit`, secret scanner |
+| Security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (CI workflows), hadolint (Dockerfiles) |
 | Code quality | ruff (bug-class rules), normalized per 1k lines |
 | Dependencies | OSV.dev advisories for exact pins/lockfiles, license compatibility, pinning |
 | Documentation | README structure and completeness |

@@ -26,6 +26,7 @@ jobs:
           uvx --from git+https://github.com/ak-rahul/DrRepo
           drrepo analyze "https://github.com/${{ github.repository }}"
           --shallow --format sarif,md -o drrepo --fail-under 60
+          --trust-repo-suppressions
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional: LLM summaries. Drop --shallow above to allow deep investigations too.

@@ -25,6 +25,7 @@ You are investigating the security of this repository.
    - server-side request forgery: user-controlled URLs fetched by the server;
    - weak cryptography: MD5 or SHA1 for passwords, hard-coded keys or IVs, `random` used for tokens;
    - secrets in config files, `.env` examples with real values, or CI workflows.
-3. **Check change history** with `get_file_git_history` on files that handle credentials or authentication, when that would clarify whether a secret was ever committed.
+3. **CI and containers:** zizmor and hadolint findings for workflows and Dockerfiles are listed. For any `template-injection` or `dangerous-triggers` finding, read the workflow and say whether attacker-controlled input (PR titles, branch names, issue bodies) can actually reach a `run:` step.
+4. **Check change history** with `get_file_git_history` on files that handle credentials or authentication, when that would clarify whether a secret was ever committed.
 
 Useful starting searches: `search_code` for `subprocess|os\.system|eval\(|exec\(|pickle\.loads|yaml\.load|verify=False|shell=True`.

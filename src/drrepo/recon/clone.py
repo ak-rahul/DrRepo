@@ -11,11 +11,17 @@ Hardening applied to every clone:
 - `core.symlinks=false`: symlinks are checked out as plain text files, so no
   file inside the clone can point outside it.
 - `GIT_LFS_SKIP_SMUDGE=1`: LFS objects are never downloaded.
+- a requested ref (branch, tag, or commit SHA) is validated against a strict
+  pattern before it reaches `git`, and is always passed after `--`.
+
+Every clone records the exact commit it checked out (`commit_sha`), so a report
+always says which code it describes.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +35,21 @@ from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus, RepoRef
 
 NAME = "repo_clone"
+
+# Branch, tag, or (abbreviated) commit SHA. Deliberately stricter than git's own
+# rules: no leading "-", no "..", no "@{", no ".lock" suffix, no whitespace.
+_REF_RE = re.compile(r"^(?!.*\.\.)(?!.*@\{)(?!.*\.lock$)[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+
+
+_ABBREVIATED_SHA_RE = re.compile(r"^[0-9a-f]{7,39}$")
+
+
+def validate_ref(ref: str) -> str:
+    """Return `ref` stripped, or raise ValueError (user-presentable) if it is unsafe."""
+    ref = ref.strip()
+    if not _REF_RE.match(ref) or ref.endswith("/"):
+        raise ValueError(f"{ref!r} is not a valid branch, tag, or commit SHA")
+    return ref
 
 
 @dataclass
@@ -84,15 +105,75 @@ def _git_env() -> dict[str, str]:
     return env
 
 
-def clone_repo(repo_url: str, config: Config) -> tuple[ClonedRepo | None, CollectorResult]:
-    """Shallow-clone `repo_url` into a temp directory.
+def _git(args: list[str], cwd: Path | None, timeout: float) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-c", "credential.helper=", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=_git_env(),
+        stdin=subprocess.DEVNULL,
+        check=False,  # return codes are inspected by the caller
+    )
+
+
+def _clone_commands(clone_url: str, dest: Path, ref: str | None) -> list[list[str]]:
+    """The git invocations for a shallow checkout of the default branch or of `ref`.
+
+    A named ref uses init + fetch instead of `clone --branch`, because only
+    fetch accepts a commit SHA (GitHub serves any reachable commit).
+    """
+    hardening = ["-c", "core.symlinks=false", "-c", "core.longpaths=true"]
+    if ref is None:
+        return [
+            [
+                *hardening,
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--no-tags",
+                "--quiet",
+                "--",
+                clone_url,
+                str(dest),
+            ]
+        ]
+    return [
+        ["init", "--quiet", "--", str(dest)],
+        [*hardening, "-C", str(dest), "remote", "add", "origin", "--", clone_url],
+        [
+            *hardening,
+            "-C",
+            str(dest),
+            "fetch",
+            "--depth",
+            "1",
+            "--no-tags",
+            "--quiet",
+            "origin",
+            "--",
+            ref,
+        ],
+        [*hardening, "-C", str(dest), "checkout", "--quiet", "--detach", "FETCH_HEAD"],
+    ]
+
+
+def clone_repo(
+    repo_url: str, config: Config, ref: str | None = None
+) -> tuple[ClonedRepo | None, CollectorResult]:
+    """Shallow-clone `repo_url` (at `ref`, or the default branch) into a temp directory.
 
     Returns `(ClonedRepo | None, CollectorResult)`. On failure the first element
     is None and the result explains why; downstream clone-dependent collectors
-    are then skipped rather than failing the whole run.
+    are then skipped rather than failing the whole run. On success the result's
+    data holds `commit_sha` (full SHA of the checked-out commit) and `ref`.
     """
     try:
-        ref = RepoRef.parse(repo_url)
+        repo = RepoRef.parse(repo_url)
+        if ref is not None:
+            ref = validate_ref(ref)
     except ValueError as e:
         return None, CollectorResult(name=NAME, status=CollectorStatus.ERROR, detail=str(e))
 
@@ -102,67 +183,50 @@ def clone_repo(repo_url: str, config: Config) -> tuple[ClonedRepo | None, Collec
         )
 
     dest = Path(tempfile.mkdtemp(prefix="drrepo_clone_"))
-    cmd = [
-        "git",
-        "-c",
-        "credential.helper=",
-        "-c",
-        "core.symlinks=false",
-        "-c",
-        "core.longpaths=true",
-        "clone",
-        "--depth",
-        "1",
-        "--single-branch",
-        "--no-tags",
-        "--quiet",
-        "--",
-        ref.clone_url,
-        str(dest),
-    ]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=config.clone_timeout_seconds,
-            env=_git_env(),
-            stdin=subprocess.DEVNULL,
-            check=False,  # the return code is inspected below
-        )
-    except subprocess.TimeoutExpired:
-        _rmtree(dest)
-        logger.warning(f"Clone of {ref.full_name} timed out after {config.clone_timeout_seconds}s")
-        return None, CollectorResult(
-            name=NAME,
-            status=CollectorStatus.ERROR,
-            detail=f"Clone timed out after {config.clone_timeout_seconds}s",
-        )
-    except OSError as e:
-        _rmtree(dest)
-        return None, CollectorResult(
-            name=NAME, status=CollectorStatus.ERROR, detail=f"Could not run git: {e}"
-        )
+    target = f"{repo.full_name}@{ref}" if ref else repo.full_name
+    for args in _clone_commands(repo.clone_url, dest, ref):
+        try:
+            result = _git(args, cwd=None, timeout=config.clone_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            _rmtree(dest)
+            logger.warning(f"Clone of {target} timed out after {config.clone_timeout_seconds}s")
+            return None, CollectorResult(
+                name=NAME,
+                status=CollectorStatus.ERROR,
+                detail=f"Clone timed out after {config.clone_timeout_seconds}s",
+            )
+        except OSError as e:
+            _rmtree(dest)
+            return None, CollectorResult(
+                name=NAME, status=CollectorStatus.ERROR, detail=f"Could not run git: {e}"
+            )
+        if result.returncode != 0:
+            _rmtree(dest)
+            stderr = result.stderr.strip()
+            logger.warning(f"Clone of {target} failed: {stderr[:300]}")
+            if "could not read Username" in stderr or "not found" in stderr.lower():
+                hint = " (repository is private or does not exist)"
+            elif ref and ("couldn't find remote ref" in stderr or "not our ref" in stderr):
+                hint = (
+                    " (abbreviated SHAs can't be fetched; use the full 40-character SHA)"
+                    if _ABBREVIATED_SHA_RE.match(ref)
+                    else f" (no branch, tag, or commit named {ref!r})"
+                )
+            else:
+                hint = ""
+            return None, CollectorResult(
+                name=NAME,
+                status=CollectorStatus.ERROR,
+                detail=f"git clone failed{hint}: {stderr[:300]}",
+            )
 
-    if result.returncode != 0:
-        _rmtree(dest)
-        stderr = result.stderr.strip()
-        logger.warning(f"Clone of {ref.full_name} failed: {stderr[:300]}")
-        hint = (
-            " (repository is private or does not exist)"
-            if "could not read Username" in stderr or "not found" in stderr.lower()
-            else ""
-        )
-        return None, CollectorResult(
-            name=NAME,
-            status=CollectorStatus.ERROR,
-            detail=f"git clone failed{hint}: {stderr[:300]}",
-        )
+    head = _git(["-C", str(dest), "rev-parse", "HEAD"], cwd=None, timeout=30)
+    commit_sha = head.stdout.strip() if head.returncode == 0 else None
 
     size_mb = _dir_size_mb(dest)
     if size_mb > config.clone_max_size_mb:
         _rmtree(dest)
-        logger.warning(f"Clone of {ref.full_name} exceeded size cap: {size_mb:.0f}MB")
+        logger.warning(f"Clone of {target} exceeded size cap: {size_mb:.0f}MB")
         return None, CollectorResult(
             name=NAME,
             status=CollectorStatus.SKIPPED,
@@ -172,9 +236,14 @@ def clone_repo(repo_url: str, config: Config) -> tuple[ClonedRepo | None, Collec
             ),
         )
 
-    logger.info(f"Cloned {ref.full_name} ({size_mb:.1f}MB)")
-    return ClonedRepo(path=dest, repo_url=ref.html_url), CollectorResult(
+    logger.info(f"Cloned {target} at {(commit_sha or '?')[:12]} ({size_mb:.1f}MB)")
+    return ClonedRepo(path=dest, repo_url=repo.html_url), CollectorResult(
         name=NAME,
         status=CollectorStatus.OK,
-        data={"size_mb": round(size_mb, 1), "full_name": ref.full_name},
+        data={
+            "size_mb": round(size_mb, 1),
+            "full_name": repo.full_name,
+            "commit_sha": commit_sha,
+            "ref": ref,
+        },
     )

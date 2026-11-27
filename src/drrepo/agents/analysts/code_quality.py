@@ -14,7 +14,7 @@ from drrepo.agents.analysts.base import (
     decay_score,
     issue_penalty,
 )
-from drrepo.models import Category, Severity
+from drrepo.models import Category, Issue, Severity
 
 # Real bugs (undefined names, syntax errors, broken comparisons) vs. likely bugs
 # (bugbear) vs. hygiene (unused imports/variables, style).
@@ -23,6 +23,14 @@ _MEDIUM_PREFIXES = ("B", "F50", "F52", "F60")
 # Penalty per 1k lines of Python that maps to ~37/100.
 _PENALTY_PER_KLOC_SCALE = 30.0
 _ABSOLUTE_SCALE = 80.0
+
+
+def _penalty_score(issues: list[Issue], python_lines: int) -> float:
+    """Penalty normalized per 1k lines when the size is known, so big codebases aren't punished for size."""
+    penalty = issue_penalty(issues)
+    if python_lines:
+        return decay_score(penalty / max(python_lines / 1000.0, 1.0), _PENALTY_PER_KLOC_SCALE)
+    return decay_score(penalty, _ABSOLUTE_SCALE)
 
 
 def ruff_severity(finding: dict[str, Any]) -> Severity:
@@ -50,6 +58,10 @@ class CodeQualityAnalyst(Analyst):
     tool_families = ("files", "scanners")
     rescore_scale = 60.0
 
+    def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:
+        layout = collector_data(recon, "repo_layout") or {}
+        return _penalty_score(issues, int(layout.get("python_lines") or 0))
+
     def assess(self, recon: Recon) -> Assessment:
         static = collector_data(recon, "static_analysis")
         layout = collector_data(recon, "repo_layout") or {}
@@ -75,12 +87,7 @@ class CodeQualityAnalyst(Analyst):
             title_of=_title,
             recommendation_of=_recommendation,
         )
-        penalty = issue_penalty(issues)
-        if python_lines:
-            kloc = max(python_lines / 1000.0, 1.0)
-            score = decay_score(penalty / kloc, _PENALTY_PER_KLOC_SCALE)
-        else:
-            score = decay_score(penalty, _ABSOLUTE_SCALE)
+        score = _penalty_score(issues, python_lines)
 
         size = f" across {python_lines:,} lines of Python" if python_lines else ""
         if not findings:

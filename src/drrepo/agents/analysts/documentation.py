@@ -13,6 +13,9 @@ class DocumentationAnalyst(Analyst):
     tool_families = ("files",)
     rescore_scale = 60.0
 
+    def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:
+        return None  # the score is the README quality metric, not an issue penalty
+
     def assess(self, recon: Recon) -> Assessment:
         readme = collector_data(recon, "readme")
         if readme is None:

@@ -38,7 +38,7 @@ Each analyst lives in `agents/analysts/<category>.py` and has three parts:
 
 | Category | Evidence `assess()` scores | Tool families on the deep path |
 |---|---|---|
-| security | bandit, semgrep `p/security-audit`, secret scanner | files, scanners, git_history |
+| security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (workflows), hadolint and root-user check (Dockerfiles) | files, scanners, git_history |
 | code_quality | ruff bug-class rules, normalized per 1k lines | files, scanners |
 | dependencies | OSV.dev advisories (exact versions), deps.dev licenses, pinning | files, dependencies |
 | documentation | README structure metrics | files |
@@ -64,6 +64,20 @@ All tools are read-only and treat every argument as hostile; see [architecture.m
 | Prompt size | recon data trimmed by `summarize_recon_data` (long strings and lists capped) | — |
 | Tokens | counted against the run's `TokenBudget` | 60,000 per run |
 | Provider failures | the shared `CircuitBreaker` opens after `LLM_CIRCUIT_BREAKER_THRESHOLD` failures | 3 |
+
+### Grounding check
+
+Before an investigator's issues are merged, `agents/grounding.py` verifies each one against the clone and the investigator's own tool trace. No LLM is involved.
+
+| Finding | Result |
+|---|---|
+| Cites a file that doesn't exist, a path outside the repository, or a line past the end of the file | **dropped**, and logged with the reason |
+| Cites a real file the agent never read, searched or scanned (listing a directory doesn't count) | kept, **capped at `low`**, title prefixed `[unverified]` |
+| Includes an `evidence` excerpt that isn't within 15 lines of the cited line | kept, capped at `low`, marked unverified |
+| Cites no file at all | kept, capped at `low`, marked unverified |
+| Everything else | unchanged |
+
+The category's notes record how many findings were dropped or downgraded, so the effect is visible in every report. Agents are told these rules in `shared.md`.
 
 Any failure raises `InvestigationError` inside the loop. The category then falls back to its shallow result, and the report notes why. The trace of every tool call (tool, input, truncated output) is kept in the report, so a reader can check that each claim came from real evidence.
 

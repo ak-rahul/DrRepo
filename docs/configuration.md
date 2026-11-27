@@ -33,6 +33,8 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 | `ENABLE_BANDIT` | `true` | |
 | `ENABLE_DEPENDENCY_AUDIT` | `true` | OSV.dev lookups |
 | `ENABLE_LICENSE_AUDIT` | `true` | deps.dev license lookups (runtime dependencies only, max 30) |
+| `ENABLE_WORKFLOW_AUDIT` | `true` | zizmor over the repository's GitHub Actions workflows (offline) |
+| `ENABLE_DOCKERFILE_AUDIT` | `true` | hadolint plus a root-user check over the repository's Dockerfiles |
 
 ## Agentic investigation
 
@@ -54,6 +56,8 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 | `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` | `12000` | the planner may choose at most `budget // estimate` deep categories |
 | `ENABLE_DEPENDENCY_LOOKUP_CACHE` | `true` | in-memory, per process |
 | `ENABLE_SCORE_HISTORY` | `true` | appends to `reports/history.json` (20 runs per repository) |
+| `SUPPRESSIONS_FILE` | empty | suppression file (`.drrepo.toml` format) applied to every analysis |
+| `TRUST_REPO_SUPPRESSIONS` | `false` | also honor the analyzed repository's own `.drrepo.toml`. Enable only for your own repositories: otherwise a repository could hide its own findings |
 
 ## Logging
 

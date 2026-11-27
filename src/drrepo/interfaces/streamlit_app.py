@@ -25,6 +25,7 @@ from drrepo.config import Config
 from drrepo.interfaces.health import check_all
 from drrepo.log import configure_logging, logger
 from drrepo.models import RepoRef
+from drrepo.recon.clone import validate_ref
 from drrepo.report.exporters import to_json, to_markdown, to_sarif
 from drrepo.report.synthesis import grade
 from drrepo.service import AnalysisService
@@ -49,13 +50,15 @@ def get_service() -> AnalysisService:
     return AnalysisService(config)
 
 
-def start_job(service: AnalysisService, repo_url: str, description: str, deep: bool) -> AnalysisJob:
+def start_job(
+    service: AnalysisService, repo_url: str, description: str, deep: bool, ref: str | None = None
+) -> AnalysisJob:
     job = AnalysisJob(repo_url=repo_url)
 
     def run() -> None:
         try:
             job.result = service.analyze(
-                repo_url, description, deep=deep, progress=job.messages.append
+                repo_url, description, deep=deep, progress=job.messages.append, ref=ref
             )
             job.status = "done"
         except Exception as e:
@@ -133,6 +136,9 @@ def render_report(result: dict[str, Any]) -> None:
     st.markdown(f"## {repo.get('full_name') or repo.get('name')}")
     if repo.get("description"):
         st.caption(repo["description"])
+    if repo.get("commit_sha"):
+        at = f" on `{repo['ref']}`" if repo.get("ref") else ""
+        st.caption(f"Commit `{repo['commit_sha'][:12]}`{at}")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric(
@@ -279,6 +285,11 @@ def main() -> None:
         repo_url = st.text_input(
             "GitHub repository URL", placeholder="https://github.com/owner/repo"
         )
+        ref = st.text_input(
+            "Branch, tag, or commit (optional)",
+            placeholder="default branch",
+            help="A full 40-character SHA pins the exact code that is analyzed.",
+        )
         description = st.text_area(
             "Context for the investigators (optional)",
             placeholder="e.g. 'We are about to adopt this library; focus on security and maintenance.'",
@@ -290,12 +301,13 @@ def main() -> None:
 
     if submitted:
         try:
-            ref = RepoRef.parse(repo_url)
+            repo = RepoRef.parse(repo_url)
+            pinned = validate_ref(ref) if ref.strip() else None
         except ValueError as e:
             st.error(str(e))
         else:
             st.session_state["job"] = start_job(
-                service, ref.html_url, description, deep and not missing
+                service, repo.html_url, description, deep and not missing, pinned
             )
             st.session_state["job_shown"] = False
             st.rerun()

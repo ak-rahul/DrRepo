@@ -158,7 +158,7 @@ def test_start_job_records_result_and_errors():
         def __init__(self, fail):
             self.fail = fail
 
-        def analyze(self, repo_url, description, *, deep, progress):
+        def analyze(self, repo_url, description, *, deep, progress, ref=None):
             progress("working")
             if self.fail:
                 raise RuntimeError("boom")

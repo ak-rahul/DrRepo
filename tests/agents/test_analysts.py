@@ -337,3 +337,17 @@ def test_registry_covers_every_category():
     assert set(default_analysts()) == set(Category)
     for analyst in default_analysts().values():
         assert analyst.investigation_prompt and analyst.narrative_prompt and analyst.tool_families
+
+
+def test_ci_and_container_findings_have_bounded_impact_on_security():
+    from drrepo.agents.analysts.security import INFRA_MAX_IMPACT, security_score
+    from drrepo.models import Category, Issue, Severity
+
+    def issue(source, severity, occurrences=1):
+        return Issue(severity, Category.SECURITY, "t", "d", "r", source, occurrences=occurrences)
+
+    # Even an enormous amount of workflow hygiene debt can't take more than INFRA_MAX_IMPACT.
+    many = [issue("zizmor", Severity.HIGH, occurrences=500) for _ in range(20)]
+    assert security_score(many) >= 100 * (1 - INFRA_MAX_IMPACT) - 0.1
+    # The same findings from code scanners are not capped.
+    assert security_score([issue("bandit", Severity.HIGH, occurrences=500)]) < 30

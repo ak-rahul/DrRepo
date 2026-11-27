@@ -198,6 +198,7 @@ def test_no_llm_is_fully_deterministic(collectors):
 
 
 def test_deep_merges_investigator_issues_and_rescores(collectors):
+    (collectors["cloned"].path / "b.py").write_text("x = 1\n" * 20, encoding="utf-8")
     workflow = Workflow()
     extra = Issue(
         Severity.HIGH,
@@ -288,6 +289,24 @@ def test_readme_falls_back_to_clone(collectors):
     assert report["repository"]["name"] == "demo"  # from the RepoRef
 
 
+def test_readme_comes_from_the_analyzed_commit_not_the_api(github_data):
+    """The GitHub API serves HEAD's README; a pinned analysis must read the clone's."""
+    from drrepo.pipeline import _readme
+
+    def state(layout_readme):
+        return {
+            "collector_results": {
+                "github_metadata": ok({**github_data, "readme_content": "# HEAD\n"}),
+                "repo_layout": ok({"readme_content": layout_readme}),
+            }
+        }
+
+    pinned = _readme(state("# Pinned\n\n## Installation\n\n## Usage\n"), None)  # type: ignore[arg-type]
+    assert pinned.data["section_count"] == 3
+    api_fallback = _readme(state(""), None)  # type: ignore[arg-type]
+    assert api_fallback.data["section_count"] == 1  # the clone had no README
+
+
 def test_recon_summary_counts():
     results = {
         "security": ok(
@@ -303,3 +322,52 @@ def test_recon_summary_counts():
     summary = recon_summary(results)
     assert summary["possible_secrets"] == 1 and summary["high_severity_security_findings"] == 1
     assert summary["static_analysis_findings"] == "unavailable"
+
+
+def test_report_records_the_analyzed_commit(collectors):
+    with patch(
+        f"{P}.clone_repo",
+        return_value=(
+            collectors["cloned"],
+            ok({"commit_sha": "d" * 40, "ref": "v2"}, name="repo_clone"),
+        ),
+    ):
+        report = Workflow().run(REPO, _ctx(SHALLOW), ref="v2")
+    assert report["repository"]["commit_sha"] == "d" * 40
+    assert report["repository"]["ref"] == "v2"
+
+
+def test_fabricated_agent_findings_are_dropped_and_noted(collectors):
+    """End to end: a finding that cites a file the clone doesn't have never reaches the report."""
+    (collectors["cloned"].path / "real.py").write_text("print(1)\n", encoding="utf-8")
+    fabricated = Issue(
+        Severity.CRITICAL,
+        Category.SECURITY,
+        "Hardcoded key",
+        "d",
+        "r",
+        "investigator:security",
+        locations=[Location("does/not/exist.py", 3)],
+    )
+    unread = Issue(
+        Severity.HIGH,
+        Category.SECURITY,
+        "Weak hash",
+        "d",
+        "r",
+        "investigator:security",
+        locations=[Location("real.py", 1)],
+    )
+    result = InvestigationResult(summary="s", issues=[fabricated, unread], trace=[])
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", return_value=result),
+    ):
+        lead.return_value.plan.return_value = _plan(Category.SECURITY)
+        report = Workflow().run(REPO, _ctx(budget=TokenBudget(100_000)))
+
+    security = report["category_scores"]["security"]
+    titles = {i["title"]: i["severity"] for i in security["issues"]}
+    assert "Hardcoded key" not in titles
+    assert titles["[unverified] Weak hash"] == "low"
+    assert any(n.startswith("Grounding check:") for n in security["notes"])

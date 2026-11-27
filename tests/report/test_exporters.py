@@ -28,3 +28,18 @@ class TestExporters:
         assert "locations" not in no_location[0]
         security_rule = next(r for r in run["tool"]["driver"]["rules"] if r["id"] == "bandit/B1")
         assert security_rule["properties"]["security-severity"] == "7.5"
+
+
+def test_commit_appears_in_markdown_and_sarif_provenance(report_dict):
+    report = dict(report_dict)
+    report["repository"] = {**report["repository"], "commit_sha": "c" * 40, "ref": "v1.0"}
+    assert f"**Commit:** `{'c' * 12}` (v1.0)" in to_markdown(report)
+    [run] = json.loads(to_sarif(report))["runs"]
+    assert run["versionControlProvenance"] == [
+        {"repositoryUri": "https://github.com/octo/demo", "revisionId": "c" * 40, "branch": "v1.0"}
+    ]
+
+
+def test_no_provenance_without_a_commit(report_dict):
+    [run] = json.loads(to_sarif(report_dict))["runs"]
+    assert "versionControlProvenance" not in run

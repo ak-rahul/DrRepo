@@ -154,6 +154,12 @@ class CollectorResult:
         return {"status": self.status.value, "data": self.data, "detail": self.detail}
 
 
+def rule_key(source: str, rule_id: str | None) -> str:
+    """The stable rule id shared by SARIF and suppressions: `<source>/<rule_id>`, or the
+    bare source for checks without a rule id (e.g. `readme_analyzer`)."""
+    return f"{source}/{rule_id}" if rule_id else source
+
+
 @dataclass
 class Location:
     file: str
@@ -235,6 +241,8 @@ class CategoryFinding:
     investigation_depth: InvestigationDepth = InvestigationDepth.SHALLOW
     investigation_trace: list[ToolCallTrace] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Issues excluded by a suppression: [{"issue": Issue.to_dict(), "suppression": {...}}]
+    suppressed: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -246,6 +254,7 @@ class CategoryFinding:
             "investigation_depth": self.investigation_depth.value,
             "investigation_trace": [t.to_dict() for t in self.investigation_trace],
             "notes": list(self.notes),
+            "suppressed": list(self.suppressed),
         }
 
 
@@ -316,6 +325,7 @@ class Report:
             "issue_counts": self.issue_counts(),
             "category_scores": {name: cs.to_dict() for name, cs in self.category_scores.items()},
             "issues": [i.to_dict() for i in self.issues],
+            "suppressed": [s for cs in self.category_scores.values() for s in cs.suppressed],
             "quick_wins": self.quick_wins,
             "investigation_plan": self.investigation_plan,
             "collector_status": self.collector_status,

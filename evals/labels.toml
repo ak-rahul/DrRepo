@@ -1,0 +1,8 @@
+# Human labels for findings, used by `drrepo eval` to measure precision.
+#
+# Key format (printed by `drrepo eval` for every finding):
+#   "<case>|<category>|<source>|<rule or title>|<file>"
+# Verdicts: "true_positive" or "false_positive". Only label findings you have
+# checked by reading the cited code. Unlabeled findings are reported as such.
+
+[labels]

@@ -172,6 +172,14 @@ class Analyst(ABC):
         """System prompt for the deep path's tool-calling investigator."""
         return prompts.investigation_prompt(self.category)
 
+    def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:
+        """The category score for exactly `issues` (used after suppressions remove some).
+
+        None means this category's score isn't a function of its issues (documentation
+        scores README metrics), so suppressing an issue hides it but leaves the score.
+        """
+        return decay_score(issue_penalty(issues), self.rescore_scale)
+
     def rescore(self, recon: Recon, assessment: Assessment, extra_issues: list[Issue]) -> float:
         """Score after a deep investigation added `extra_issues` (already deduplicated)."""
         return decay_score(issue_penalty(extra_issues), self.rescore_scale, base=assessment.score)

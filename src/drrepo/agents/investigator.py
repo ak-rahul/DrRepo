@@ -46,6 +46,10 @@ class IssueOutput(BaseModel):
     recommendation: str = Field(description="Concrete fix")
     file: str | None = Field(default=None, description="Repo-relative path where the evidence is")
     line: int | None = None
+    evidence: str | None = Field(
+        default=None,
+        description="Optional exact excerpt (one or a few lines) copied from the file that shows the problem",
+    )
 
 
 class InvestigationOutput(BaseModel):
@@ -58,6 +62,8 @@ class InvestigationResult:
     summary: str
     issues: list[Issue]
     trace: list[ToolCallTrace] = field(default_factory=list)
+    # issue index -> code excerpt the agent quoted (checked by agents/grounding.py)
+    evidence: dict[int, str] = field(default_factory=dict)
 
 
 def _summarize_value(value: Any) -> Any:
@@ -155,6 +161,7 @@ def investigate(
     if not isinstance(structured, InvestigationOutput):
         raise InvestigationError("finished without submitting structured findings")
 
+    reported = [item for item in structured.issues if item.title.strip()]
     issues = [
         Issue(
             severity=Severity.parse(item.severity),
@@ -168,11 +175,13 @@ def investigate(
             if item.file
             else [],
         )
-        for item in structured.issues
-        if item.title.strip()
+        for item in reported
     ]
     return InvestigationResult(
-        summary=structured.summary.strip(), issues=issues, trace=extract_trace(messages)
+        summary=structured.summary.strip(),
+        issues=issues,
+        trace=extract_trace(messages),
+        evidence={i: item.evidence for i, item in enumerate(reported) if item.evidence},
     )
 
 

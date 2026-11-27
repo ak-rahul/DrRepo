@@ -1,0 +1,36 @@
+# Evaluation set for `drrepo eval`.
+#
+# Each case is a public repository pinned to an exact commit (a full SHA, so the
+# code under test never changes). Keep the set small and varied: it runs on
+# every push to main. Add a case when a real-world repository exposed a bug
+# or a false positive, so the fix stays fixed.
+
+[[case]]
+name = "itsdangerous"
+url = "https://github.com/pallets/itsdangerous"
+ref = "096c8d42545d3b68ea21a4f890fb2b2d8979c0bd"  # 2.2.0
+notes = "Small, well-maintained library with signing code (security analyzer path)."
+
+[[case]]
+name = "markupsafe"
+url = "https://github.com/pallets/markupsafe"
+ref = "28ace20b140d15c083e1cbc163ee6b7778ba098c"  # 3.0.2
+notes = "Tiny package with a C extension: exercises non-Python file handling."
+
+[[case]]
+name = "click"
+url = "https://github.com/pallets/click"
+ref = "874ca2bc1c30d93a4ac6e36a15ed685eafe89097"  # 8.1.7
+notes = "Medium-sized CLI library with extensive docs/ (documentation analyzer)."
+
+[[case]]
+name = "requests"
+url = "https://github.com/psf/requests"
+ref = "0e322af87745eff34caffe4df68456ebc20d9068"  # v2.32.3
+notes = "Widely used HTTP client; network code and a long history."
+
+[[case]]
+name = "attrs"
+url = "https://github.com/python-attrs/attrs"
+ref = "6771a04893780166e4b7826b63599f43ac30d00a"  # 24.2.0
+notes = "Heavily tested library with a lockfile-free layout (dependency analyzer edge case)."

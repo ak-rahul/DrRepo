@@ -231,3 +231,46 @@ def test_unexpected_error_and_interrupt_exit_codes(monkeypatch, capsys):
 
     monkeypatch.setattr(cli, "_load_config", interrupt)
     assert cli.main(["health"]) == 130
+
+
+def test_baseline_writes_suppressions_and_refuses_to_overwrite(monkeypatch, tmp_path, capsys):
+    report = {
+        "issues": [
+            {
+                "title": "Shell",
+                "category": "security",
+                "source": "bandit",
+                "rule_id": "B605",
+                "file": "a.py",
+                "line": 1,
+            },
+        ]
+    }
+
+    class Service:
+        def __init__(self, config):
+            assert config.enable_deep_investigation is False
+
+        def analyze(self, url, **kwargs):
+            assert kwargs["suppressions"] == []  # a baseline sees every current finding
+            return report
+
+    monkeypatch.setattr("drrepo.service.AnalysisService", Service)
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    out = tmp_path / ".drrepo.toml"
+    argv = ["baseline", "https://github.com/o/r", "-o", str(out), "--log-file", ""]
+    assert cli.main(argv) == cli.EXIT_OK
+    assert 'rule = "bandit/B605"' in out.read_text(encoding="utf-8")
+    assert cli.main(argv) == cli.EXIT_USAGE  # exists, no --force
+    assert "--force" in capsys.readouterr().err
+
+
+def test_analyze_reports_a_bad_suppressions_file_as_usage_error(monkeypatch, tmp_path, capsys):
+    bad = tmp_path / "s.toml"
+    bad.write_text("[[suppress]]\nrule = 'x'\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    code = cli.main(
+        ["analyze", "https://github.com/o/r", "--suppressions", str(bad), "--log-file", ""]
+    )
+    assert code == cli.EXIT_USAGE
+    assert "reason" in capsys.readouterr().err

@@ -40,6 +40,7 @@ from drrepo.config import Config
 from drrepo.interfaces.health import check_all
 from drrepo.log import logger
 from drrepo.models import RepoRef, Severity
+from drrepo.recon.clone import validate_ref
 from drrepo.recon.readme import analyze_readme
 from drrepo.report.exporters import to_json, to_markdown, to_sarif
 from drrepo.report.history import load_history
@@ -107,6 +108,7 @@ async def analyze_repository(
     description: str = "",
     deep: bool = True,
     max_issues: int = 15,
+    ref: str | None = None,
 ) -> dict[str, Any]:
     """Audit a public GitHub repository and return scores, top issues, and quick wins.
 
@@ -119,10 +121,13 @@ async def analyze_repository(
         description: Optional context or focus for the investigators ("we care about auth").
         deep: Allow tool-calling deep investigations (False = fast, deterministic pass).
         max_issues: How many of the most severe issues to include inline.
+        ref: Branch, tag, or full 40-character commit SHA (default: the default branch).
     """
     service = get_service()
     try:
         RepoRef.parse(repo_url)
+        if ref is not None:
+            validate_ref(ref)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -143,7 +148,7 @@ async def analyze_repository(
     # ctx.info() is deprecated in MCP 2 (SEP-2577); logs go to stderr instead.
     logger.info(f"MCP: starting analysis of {repo_url}")
     report = await anyio.to_thread.run_sync(
-        lambda: service.analyze(repo_url, description, deep=deep, progress=progress)
+        lambda: service.analyze(repo_url, description, deep=deep, progress=progress, ref=ref)
     )
     return _summary(report, max(0, min(max_issues, 100)))
 

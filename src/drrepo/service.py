@@ -25,9 +25,12 @@ from drrepo.agents.llm import LLMRuntime, TokenBudget, build_chat_model
 from drrepo.config import Config
 from drrepo.models import RepoRef
 from drrepo.pipeline import ProgressCallback, RunContext, Workflow
+from drrepo.recon.clone import validate_ref
 from drrepo.recon.dependencies import DependencyLookupCache
 from drrepo.report.exporters import EXPORTERS
 from drrepo.report.history import DEFAULT_HISTORY_PATH, attach_and_record_history
+from drrepo.report.suppressions import Suppression
+from drrepo.report.suppressions import load_file as load_suppression_file
 from drrepo.resilience import CircuitBreaker
 
 MAX_REPORTS_IN_MEMORY = 20
@@ -65,7 +68,10 @@ class AnalysisService:
         self._lock = threading.Lock()
 
     def new_context(
-        self, config: Config | None = None, progress: ProgressCallback | None = None
+        self,
+        config: Config | None = None,
+        progress: ProgressCallback | None = None,
+        suppressions: list[Suppression] | None = None,
     ) -> RunContext:
         """A `RunContext` for one run: shared client/breaker/cache, fresh budget."""
         config = config or self.config
@@ -78,6 +84,7 @@ class AnalysisService:
             config=config,
             llm=LLMRuntime(client=self.llm_client, breaker=self.breaker, budget=budget),
             cache=self.cache,
+            suppressions=list(suppressions or []),
         )
         if progress is not None:
             context.progress = progress
@@ -91,18 +98,35 @@ class AnalysisService:
         deep: bool | None = None,
         record_history: bool | None = None,
         progress: ProgressCallback | None = None,
+        ref: str | None = None,
+        suppressions: list[Suppression] | None = None,
     ) -> dict[str, Any]:
         """Run one analysis and return the report dict.
 
         `deep=False`/`True` overrides `enable_deep_investigation` for this run
-        only. Raises ValueError for a non-GitHub URL.
+        only. `ref` is a branch, tag, or full commit SHA (default branch if None).
+        `suppressions` defaults to the file named by `SUPPRESSIONS_FILE`, if any.
+
+        Raises:
+            ValueError: a non-GitHub URL or an invalid ref.
+            SuppressionError: the suppressions file is unreadable or malformed.
         """
         repo = RepoRef.parse(repo_url)
+        if ref is not None:
+            ref = validate_ref(ref)
         config = self.config
         if deep is not None and deep != config.enable_deep_investigation:
             config = dataclasses.replace(config, enable_deep_investigation=deep)
 
-        report = self.workflow.run(repo, self.new_context(config, progress), description)
+        if suppressions is None:
+            suppressions = (
+                load_suppression_file(Path(config.suppressions_file))
+                if config.suppressions_file
+                else []
+            )
+        report = self.workflow.run(
+            repo, self.new_context(config, progress, suppressions), description, ref
+        )
 
         if config.enable_score_history if record_history is None else record_history:
             report = attach_and_record_history(report, self.history_path)

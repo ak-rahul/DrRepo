@@ -25,6 +25,7 @@ uv run drrepo analyze https://github.com/owner/repo \
 | Flag | Effect |
 |---|---|
 | `-d, --description` | context passed to the planner and investigators |
+| `--ref REF` | analyze a branch, tag, or full 40-character commit SHA instead of the default branch |
 | `--shallow` | no deep investigations for this run |
 | `--format` | any of `json,md,sarif`; `''` writes nothing |
 | `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<UTC timestamp>.<ext>`, e.g. `psf__requests_20261127-091500Z.json` |
@@ -83,6 +84,30 @@ The image runs as a non-root user, contains `git` and semgrep, and reads credent
 
 Ports are published on `127.0.0.1` only, because none of the services has authentication. To reach them from another machine, put a reverse proxy with authentication in front rather than changing the bind address.
 
+## Suppressions and baselines
+
+Accept a reviewed finding without disabling the check:
+
+```toml
+# .drrepo.toml
+[[suppress]]
+rule = "bandit/B605"                    # SARIF rule id "<source>/<rule_id>"; "<source>/*" matches a whole tool
+path = "src/app/pager.py"               # optional glob on the issue's file
+reason = "Launches $PAGER by design"    # required
+expires = 2027-06-30                    # optional: the finding counts again after this date
+```
+
+```bash
+uv run drrepo baseline https://github.com/owner/repo -o .drrepo.toml    # accept every current finding (expires in 90 days)
+uv run drrepo analyze https://github.com/owner/repo --suppressions .drrepo.toml
+```
+
+Suppressed issues are excluded from scores, issue counts and quick wins. They are still listed under `suppressed` in the report, in a Markdown section, and in SARIF as native `suppressions`, which GitHub code scanning hides from its default view. An expired suppression stops applying, and the category notes say so.
+
+The documentation score is a README metric rather than an issue penalty, so suppressing a documentation issue hides the issue but doesn't change that score.
+
+**Trust.** A file you pass with `--suppressions` (or `SUPPRESSIONS_FILE`) always applies. A `.drrepo.toml` committed inside the analyzed repository applies only with `--trust-repo-suppressions` (or `TRUST_REPO_SUPPRESSIONS=true`), because otherwise any repository could hide its own findings. Use it in CI for your own repository. Collector status records which suppressions applied and why a repository file was ignored.
+
 ## In CI: gate and code scanning
 
 ```yaml
@@ -136,7 +161,7 @@ With stdio transport, stdout belongs to the protocol. All DrRepo logging goes to
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `analyze_repository` | `repo_url`, `description=""`, `deep=true`, `max_issues=15` | summary: scores, top issues, quick wins, resource URIs. Takes 1–5 min and streams MCP progress notifications |
+| `analyze_repository` | `repo_url`, `description=""`, `deep=true`, `max_issues=15`, `ref=null` | summary: scores, top issues, quick wins, resource URIs. Takes 1–5 min and streams MCP progress notifications |
 | `get_report` | `repo`, `format=summary\|json\|markdown` | latest report from this server session |
 | `list_reports` | — | reports produced in this session |
 | `get_issues` | `repo`, `min_severity=low`, `category=null`, `limit=50` | filtered issue list with evidence and locations |

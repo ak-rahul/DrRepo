@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from drrepo.models import rule_key
 from drrepo.report.synthesis import grade
 
 SARIF_SCHEMA_URL = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -40,6 +41,15 @@ def to_markdown(report: dict[str, Any]) -> str:
         "",
         f"**Overall score:** {score:.0f}/100 (grade {grade(score)})  ",
         f"**Repository:** {repo.get('url', '')}  ",
+        *(
+            [
+                f"**Commit:** `{repo['commit_sha'][:12]}`"
+                + (f" ({repo['ref']})" if repo.get("ref") else "")
+                + "  "
+            ]
+            if repo.get("commit_sha")
+            else []
+        ),
         f"**Generated:** {report.get('generated_at', '')} by DrRepo {report.get('drrepo_version', '')}  ",
         "**Issues:** " + ", ".join(f"{n} {sev}" for sev, n in counts.items()) if counts else "",
         "",
@@ -108,6 +118,23 @@ def to_markdown(report: dict[str, Any]) -> str:
     lines += ["## Collector status", "", "| Collector | Status | Detail |", "|---|---|---|"]
     for name, status in report.get("collector_status", {}).items():
         lines.append(f"| {name} | {status.get('status')} | {_cell(status.get('detail') or '')} |")
+    suppressed = report.get("suppressed", [])
+    if suppressed:
+        lines += [
+            "",
+            f"## Suppressed ({len(suppressed)})",
+            "",
+            "Excluded from scores and quick wins by a suppression file.",
+            "",
+            "| Issue | Location | Reason | Origin | Expires |",
+            "|---|---|---|---|---|",
+        ]
+        for entry in suppressed:
+            issue, s = entry["issue"], entry["suppression"]
+            lines.append(
+                f"| {_cell(issue['title'])} | {_location(issue) or '-'} | {_cell(s['reason'])} "
+                f"| {s['origin']} | {s.get('expires') or '-'} |"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -122,8 +149,7 @@ def to_sarif(report: dict[str, Any]) -> str:
     rules: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
     for issue in report.get("issues", []):
-        source = issue.get("source") or issue["category"]
-        rule_id = f"{source}/{issue['rule_id']}" if issue.get("rule_id") else source
+        rule_id = rule_key(issue.get("source") or issue["category"], issue.get("rule_id"))
         if rule_id not in rules:
             rules[rule_id] = {
                 "id": rule_id,
@@ -163,23 +189,63 @@ def to_sarif(report: dict[str, Any]) -> str:
             for loc in locations
         )
 
-    sarif = {
-        "$schema": SARIF_SCHEMA_URL,
-        "version": "2.1.0",
-        "runs": [
+    # Suppressed issues stay visible to code scanning, marked with SARIF's native
+    # `suppressions` (GitHub hides them from the default alert view).
+    for entry in report.get("suppressed", []):
+        issue, suppression = entry["issue"], entry["suppression"]
+        rid = rule_key(issue.get("source") or issue["category"], issue.get("rule_id"))
+        rules.setdefault(
+            rid,
             {
-                "tool": {
-                    "driver": {
-                        "name": "DrRepo",
-                        "informationUri": "https://github.com/ak-rahul/DrRepo",
-                        "version": __version__,
-                        "rules": list(rules.values()),
+                "id": rid,
+                "name": rid.replace("/", "_").replace(":", "_"),
+                "shortDescription": {"text": issue["title"][:120]},
+                "help": {"text": issue.get("recommendation", "")},
+                "properties": {"category": issue["category"], "tags": [issue["category"]]},
+            },
+        )
+        result: dict[str, Any] = {
+            "ruleId": rid,
+            "level": _SARIF_LEVEL.get(issue["severity"], "warning"),
+            "message": {"text": f"{issue['title']}: {issue.get('description', '')}".strip()[:1000]},
+            "suppressions": [
+                {
+                    "kind": "external",
+                    "status": "accepted",
+                    "justification": f"{suppression['reason']} ({suppression['origin']})",
+                }
+            ],
+        }
+        if issue.get("file"):
+            result["locations"] = [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": issue["file"], "uriBaseId": "%SRCROOT%"},
+                        "region": {"startLine": max(1, int(issue.get("line") or 1))},
                     }
-                },
-                "results": results,
+                }
+            ]
+        results.append(result)
+
+    run: dict[str, Any] = {
+        "tool": {
+            "driver": {
+                "name": "DrRepo",
+                "informationUri": "https://github.com/ak-rahul/DrRepo",
+                "version": __version__,
+                "rules": list(rules.values()),
             }
-        ],
+        },
+        "results": results,
     }
+    repo = report.get("repository", {})
+    if repo.get("commit_sha"):
+        # Ties every result to the exact commit analyzed (SARIF 2.1.0 section 3.23).
+        provenance = {"repositoryUri": repo.get("url", ""), "revisionId": repo["commit_sha"]}
+        if repo.get("ref"):
+            provenance["branch"] = repo["ref"]
+        run["versionControlProvenance"] = [provenance]
+    sarif = {"$schema": SARIF_SCHEMA_URL, "version": "2.1.0", "runs": [run]}
     return json.dumps(sarif, indent=2, ensure_ascii=False)
 
 

@@ -27,9 +27,11 @@ one runs first and then again (observed live: every category ran twice).
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -38,6 +40,7 @@ from langgraph.runtime import Runtime
 from drrepo import __version__
 from drrepo.agents.analysts import default_analysts
 from drrepo.agents.analysts.base import Analyst, Recon, collector_data, merge_issues
+from drrepo.agents.grounding import ground_issues
 from drrepo.agents.investigator import investigate
 from drrepo.agents.llm import LLMRuntime
 from drrepo.agents.planner import LeadInvestigator
@@ -49,6 +52,7 @@ from drrepo.models import (
     Category,
     CategoryFinding,
     CollectorResult,
+    CollectorStatus,
     InvestigationDepth,
     InvestigationPlan,
     RepoRef,
@@ -58,8 +62,17 @@ from drrepo.recon.clone import clone_repo
 from drrepo.recon.dependencies import DependencyLookupCache, collect_dependency_audit
 from drrepo.recon.files import collect_repo_layout
 from drrepo.recon.github import collect_github_metadata
+from drrepo.recon.infrastructure import collect_infrastructure
 from drrepo.recon.readme import analyze_readme
 from drrepo.recon.scanners import collect_security, collect_static_analysis
+from drrepo.report.suppressions import (
+    REPOSITORY_FILE,
+    Suppression,
+    SuppressionError,
+    SuppressionResult,
+)
+from drrepo.report.suppressions import apply as apply_suppressions
+from drrepo.report.suppressions import load_file as load_suppression_file
 from drrepo.report.synthesis import synthesize_report
 
 ProgressCallback = Callable[[str], None]
@@ -80,6 +93,8 @@ class RunContext:
     llm: LLMRuntime
     cache: DependencyLookupCache | None = None
     progress: ProgressCallback = field(default=_no_progress)
+    # Suppressions you passed (always applied); the repo's own are added in `Workflow.run`.
+    suppressions: list[Suppression] = field(default_factory=list)
 
     def emit(self, message: str) -> None:
         logger.info(message)
@@ -97,6 +112,7 @@ class State(TypedDict):
     repo: RepoRef
     description: str
     clone_path: str | None
+    suppressions: list[Suppression]
     collector_results: Annotated[dict[str, CollectorResult], _merge]
     investigation_plan: InvestigationPlan
     category_findings: Annotated[dict[str, CategoryFinding], _merge]
@@ -116,15 +132,18 @@ class CollectorSpec:
 
 
 def _readme(state: State, ctx: RunContext) -> CollectorResult:
-    """README from the GitHub API, falling back to the clone. SKIPPED (never an
-    analysis of "") when neither source is available -- otherwise an upstream
-    failure would be reported as "every section missing"."""
+    """README from the clone (the exact commit analyzed), falling back to the GitHub
+    API, which always serves the default branch's HEAD. SKIPPED (never an analysis
+    of "") when neither source is available -- otherwise an upstream failure would
+    be reported as "every section missing"."""
     github = collector_data(state["collector_results"], "github_metadata")
     layout = collector_data(state["collector_results"], "repo_layout")
+    if layout is not None and layout.get("readme_content"):
+        return analyze_readme(layout["readme_content"])
     if github is not None and github.get("readme_content"):
         return analyze_readme(github["readme_content"])
     if layout is not None:
-        return analyze_readme(layout.get("readme_content", ""))
+        return analyze_readme("")
     if github is not None:
         return analyze_readme("")
     return CollectorResult.skipped("readme", "no README source available")
@@ -158,6 +177,12 @@ COLLECTORS: tuple[CollectorSpec, ...] = (
         "dependency_audit",
         lambda s, c: collect_dependency_audit(s["clone_path"] or "", c.config, cache=c.cache),
         "Auditing dependencies against OSV.dev",
+        needs_clone=True,
+    ),
+    CollectorSpec(
+        "infrastructure",
+        lambda s, c: collect_infrastructure(s["clone_path"] or "", c.config),
+        "Auditing CI workflows and Dockerfiles",
         needs_clone=True,
     ),
     CollectorSpec("readme", _readme, after=("github_metadata", "repo_layout")),
@@ -260,8 +285,23 @@ class Workflow:
         """Deterministic assessment, then (if planned) a deep investigation on top of it."""
         analyst = self.analysts[category]
         recon = state["collector_results"]
+        today = datetime.now(UTC).date()
         assessment = analyst.assess(recon)
+        recon_supp = apply_suppressions(assessment.issues, state["suppressions"], today)
+        if recon_supp.suppressed or recon_supp.expired:
+            rescored = (
+                analyst.score_issues(recon, recon_supp.kept)
+                if recon_supp.suppressed and assessment.assessed
+                else None
+            )
+            assessment = dataclasses.replace(
+                assessment,
+                issues=recon_supp.kept,
+                score=assessment.score if rescored is None else rescored,
+                notes=[*assessment.notes, *recon_supp.notes()],
+            )
         shallow = analyst.narrate(assessment, ctx.llm)
+        shallow.suppressed = _suppressed_entries(recon_supp)
 
         if (
             state["investigation_plan"].depth_for(category) != InvestigationDepth.DEEP
@@ -297,12 +337,24 @@ class Workflow:
             )
             return shallow
 
+        grounding = ground_issues(
+            result.issues,
+            clone_root=state["clone_path"],
+            trace=result.trace,
+            evidence=result.evidence,
+        )
+        for issue, reason in grounding.dropped:
+            logger.info(f"{category.value}: dropped agent finding {issue.title!r}: {reason}")
+        agent_supp = apply_suppressions(grounding.kept, state["suppressions"], today)
         known = {i.dedupe_key() for i in shallow.issues}
-        new_issues = [i for i in result.issues if i.dedupe_key() not in known]
+        new_issues = [i for i in agent_supp.kept if i.dedupe_key() not in known]
         ctx.emit(
             f"{category.label}: deep investigation finished "
             f"({len(result.trace)} tool calls, {len(new_issues)} new issues)"
         )
+        notes = list(shallow.notes)
+        if note := grounding.note():
+            notes.append(note)
         return CategoryFinding(
             category=category,
             score=analyst.rescore(recon, assessment, new_issues)
@@ -313,8 +365,36 @@ class Workflow:
             assessed=shallow.assessed,
             investigation_depth=InvestigationDepth.DEEP,
             investigation_trace=result.trace,
-            notes=shallow.notes,
+            notes=notes,
+            suppressed=shallow.suppressed + _suppressed_entries(agent_supp),
         )
+
+    @staticmethod
+    def _load_suppressions(
+        ctx: RunContext, clone: Path | None
+    ) -> tuple[list[Suppression], CollectorResult]:
+        """Your suppressions, plus the repository's own `.drrepo.toml` when trusted.
+
+        The outcome is recorded as a `suppressions` entry in collector status, so a
+        report always says which suppressions applied, and why a repo file didn't.
+        """
+        suppressions = list(ctx.suppressions)
+        data = {"local": len(suppressions), "repository": 0}
+        detail = None
+        repo_file = clone / REPOSITORY_FILE if clone else None
+        if repo_file is not None and repo_file.is_file():
+            if not ctx.config.trust_repo_suppressions:
+                detail = f"repository {REPOSITORY_FILE} ignored (TRUST_REPO_SUPPRESSIONS is off)"
+            else:
+                try:
+                    from_repo = load_suppression_file(repo_file, origin="repository")
+                except SuppressionError as e:
+                    return suppressions, CollectorResult(
+                        "suppressions", CollectorStatus.ERROR, data, f"{e}; repository file ignored"
+                    )
+                suppressions += from_repo
+                data["repository"] = len(from_repo)
+        return suppressions, CollectorResult("suppressions", CollectorStatus.OK, data, detail)
 
     def _synthesizer_node(self, state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
         runtime.context.emit("Synthesizing report")
@@ -323,6 +403,7 @@ class Workflow:
         layout = collector_data(results, "repo_layout") or {}
         languages = list((layout.get("lines_by_language") or {}).keys())
         repo = state["repo"]
+        clone = collector_data(results, "repo_clone") or {}
         repository = {
             "name": github.get("name", repo.name),
             "full_name": github.get("full_name", repo.full_name),
@@ -332,6 +413,10 @@ class Workflow:
             "stars": github.get("stars", 0),
             "forks": github.get("forks", 0),
             "license": github.get("license_spdx_id"),
+            # The exact code this report describes. `ref` is what was requested,
+            # else the default branch (None if neither is known).
+            "commit_sha": clone.get("commit_sha"),
+            "ref": clone.get("ref") or github.get("default_branch"),
         }
         report = synthesize_report(
             repository=repository,
@@ -382,15 +467,27 @@ class Workflow:
 
     # ---- entrypoint --------------------------------------------------------
 
-    def run(self, repo: RepoRef, ctx: RunContext, description: str = "") -> dict[str, Any]:
-        """Clone, run the graph, clean up. Returns `Report.to_dict()` (+ `llm_usage`)."""
-        ctx.emit(f"Cloning {repo.full_name}")
-        cloned, clone_result = clone_repo(repo.html_url, ctx.config)
+    def run(
+        self, repo: RepoRef, ctx: RunContext, description: str = "", ref: str | None = None
+    ) -> dict[str, Any]:
+        """Clone (at `ref`, or the default branch), run the graph, clean up.
+
+        Returns `Report.to_dict()` (+ `llm_usage`).
+        """
+        ctx.emit(f"Cloning {repo.full_name}" + (f" at {ref}" if ref else ""))
+        cloned, clone_result = clone_repo(repo.html_url, ctx.config, ref)
+        suppressions, suppression_status = self._load_suppressions(
+            ctx, cloned.path if cloned else None
+        )
         initial: State = {
             "repo": repo,
             "description": description,
             "clone_path": str(cloned.path) if cloned else None,
-            "collector_results": {"repo_clone": clone_result},
+            "suppressions": suppressions,
+            "collector_results": {
+                "repo_clone": clone_result,
+                "suppressions": suppression_status,
+            },
             "investigation_plan": InvestigationPlan.all_shallow("not planned yet"),
             "category_findings": {},
             "report": None,
@@ -405,6 +502,10 @@ class Workflow:
             report["llm_usage"] = ctx.llm.budget.usage()
         ctx.emit("Analysis complete")
         return report
+
+
+def _suppressed_entries(result: SuppressionResult) -> list[dict[str, Any]]:
+    return [{"issue": i.to_dict(), "suppression": s.to_dict()} for i, s in result.suppressed]
 
 
 def recon_summary(results: Recon) -> dict[str, Any]:

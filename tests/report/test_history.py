@@ -59,3 +59,13 @@ class TestHistory:
         path = tmp_path / "h.json"
         path.write_text("{not json", encoding="utf-8")
         assert history.load_history(path) == []
+
+
+def test_history_records_and_compares_commits(tmp_path, report_dict):
+    path = tmp_path / "h.json"
+    first = dict(report_dict, repository={**report_dict["repository"], "commit_sha": "1" * 40})
+    history.attach_and_record_history(first, path)
+    second = dict(report_dict, repository={**report_dict["repository"], "commit_sha": "2" * 40})
+    second = history.attach_and_record_history(second, path)
+    assert second["score_history"]["previous_commit_sha"] == "1" * 40
+    assert [r["commit_sha"] for r in history.load_history(path)] == ["1" * 40, "2" * 40]

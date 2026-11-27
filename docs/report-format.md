@@ -4,7 +4,9 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`.
 
 ```jsonc
 {
-  "repository": {"name", "full_name", "url", "description", "language", "stars", "forks", "license"},
+  "repository": {"name", "full_name", "url", "description", "language", "stars", "forks", "license",
+                 "commit_sha",   // full SHA of the exact commit analyzed (null if the clone failed)
+                 "ref"},         // requested branch/tag/SHA, else the default branch
   "overall_score": 73.7,                 // 0-100, weighted over assessed categories only
   "generated_at": "2026-11-27T12:35:46+00:00",
   "drrepo_version": "3.1.0",
@@ -18,15 +20,18 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`.
       "issues": [Issue, …],
       "investigation_depth": "deep",     // "shallow" | "deep"
       "investigation_trace": [{"tool", "tool_input", "observation"}],
-      "notes": ["Deep investigation reached its 8-tool-call budget…"]
+      "notes": ["Deep investigation reached its 8-tool-call budget…"],
+      "suppressed": [{"issue": Issue, "suppression": {…}}]   // excluded from this score
     }
   },
-  "issues": [Issue, …],                  // all categories, most severe first
+  "issues": [Issue, …],                  // all categories, most severe first (suppressed ones excluded)
+  "suppressed": [{"issue": Issue, "suppression": {"rule", "path", "reason", "expires", "origin"}}],
   "quick_wins": ["…"],                   // up to 5 distinct low/medium recommendations
   "investigation_plan": {"security": {"depth": "deep", "rationale": "…"}},
   "collector_status": {"security": {"status": "ok", "detail": null}},
   "llm_usage": {"used_tokens", "max_tokens", "remaining_tokens"},      // when budget tracking is on
-  "score_history": {"previous_timestamp", "overall_score_delta", "category_score_deltas"}  // when a previous run exists
+  "score_history": {"previous_timestamp", "previous_commit_sha", "overall_score_delta",
+                    "category_score_deltas"}  // when a previous run exists
 }
 ```
 

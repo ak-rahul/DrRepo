@@ -89,6 +89,8 @@ class Config:
     enable_bandit: bool = True
     enable_dependency_audit: bool = True
     enable_license_audit: bool = True
+    enable_workflow_audit: bool = True  # zizmor over .github/workflows
+    enable_dockerfile_audit: bool = True  # hadolint + root-user check over Dockerfiles
 
     # Agentic investigation: bounds on the tool-calling investigator loops.
     max_tool_calls_per_investigator: int = 8
@@ -113,6 +115,11 @@ class Config:
     # Per-package OSV/deps.dev lookup cache (shared across runs in the
     # Streamlit app and MCP server -- see service.py).
     enable_dependency_lookup_cache: bool = True
+
+    # Suppressions (report/suppressions.py). A file you pass always applies; the
+    # analyzed repository's own .drrepo.toml only when explicitly trusted.
+    suppressions_file: str = ""
+    trust_repo_suppressions: bool = False
 
     # Score history: append each run's scores to reports/history.json so a
     # later run can report a delta against the previous analysis.
@@ -181,6 +188,8 @@ class Config:
             enable_bandit=_env_bool("ENABLE_BANDIT", d.enable_bandit),
             enable_dependency_audit=_env_bool("ENABLE_DEPENDENCY_AUDIT", d.enable_dependency_audit),
             enable_license_audit=_env_bool("ENABLE_LICENSE_AUDIT", d.enable_license_audit),
+            enable_workflow_audit=_env_bool("ENABLE_WORKFLOW_AUDIT", d.enable_workflow_audit),
+            enable_dockerfile_audit=_env_bool("ENABLE_DOCKERFILE_AUDIT", d.enable_dockerfile_audit),
             max_tool_calls_per_investigator=_env_int(
                 "MAX_TOOL_CALLS_PER_INVESTIGATOR", d.max_tool_calls_per_investigator
             ),
@@ -212,6 +221,8 @@ class Config:
                 "ENABLE_DEPENDENCY_LOOKUP_CACHE", d.enable_dependency_lookup_cache
             ),
             enable_score_history=_env_bool("ENABLE_SCORE_HISTORY", d.enable_score_history),
+            suppressions_file=_env_str("SUPPRESSIONS_FILE", d.suppressions_file),
+            trust_repo_suppressions=_env_bool("TRUST_REPO_SUPPRESSIONS", d.trust_repo_suppressions),
         )
         return config
 

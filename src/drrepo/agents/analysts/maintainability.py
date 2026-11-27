@@ -8,6 +8,7 @@ from drrepo.agents.analysts.base import (
     Analyst,
     Assessment,
     Recon,
+    aggregate,
     collector_data,
     decay_score,
     issue_penalty,
@@ -158,6 +159,21 @@ class MaintainabilityAnalyst(Analyst):
                 )
             )
 
+        container_findings = [
+            f
+            for f in (collector_data(recon, "infrastructure") or {}).get("findings", [])
+            if f.get("category") == "maintainability"
+        ]
+        issues += aggregate(
+            container_findings,
+            category=self.category,
+            severity_of=lambda f: Severity.parse(f.get("severity"), default=Severity.LOW),
+            title_of=lambda f, n: (
+                f"hadolint {f.get('rule')}: {(f.get('message') or '')[:70]}"
+                + (f" ({n} occurrences)" if n > 1 else "")
+            ),
+            recommendation_of=lambda f: f"Fix the Dockerfile per {f.get('url') or f.get('rule')}.",
+        )
         issues = sort_issues(issues)
         present = [k.removeprefix("has_").replace("_", " ") for k, v in structure.items() if v]
         summary = (

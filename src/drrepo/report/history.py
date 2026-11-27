@@ -66,6 +66,7 @@ def compute_deltas(current_report: dict[str, Any], previous_run: dict[str, Any])
 
     return {
         "previous_timestamp": previous_run["timestamp"],
+        "previous_commit_sha": previous_run.get("commit_sha"),
         "overall_score_delta": round(
             current_report["overall_score"] - previous_run["overall_score"], 1
         ),
@@ -89,6 +90,7 @@ def record_run(report: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH
             {
                 "repo_key": key,
                 "timestamp": datetime.now(UTC).isoformat(),
+                "commit_sha": report["repository"].get("commit_sha"),
                 "overall_score": report["overall_score"],
                 "category_scores": {
                     name: cs["score"]

@@ -5,11 +5,14 @@
     drrepo mcp         [--transport stdio]    Model Context Protocol server
     drrepo health      [--json]               connectivity of LLM provider, GitHub, OSV.dev
     drrepo doctor                             full local diagnostics
+    drrepo eval        [--deep] [--update-baseline]   run the evaluation set vs. its baseline
+    drrepo baseline    <url> [-o .drrepo.toml]         accept current findings as suppressions
     drrepo health-api  [--port 8000]          FastAPI health endpoint
 
 `drrepo <url>` is shorthand for `drrepo analyze <url>`.
 
-Exit codes: 0 success, 1 runtime error, 2 usage/config error, 3 score below --fail-under.
+Exit codes: 0 success, 1 runtime error, 2 usage/config error, 3 score below
+--fail-under (analyze) or a regression against the baseline (eval).
 """
 
 from __future__ import annotations
@@ -30,9 +33,10 @@ from drrepo.config import Config
 from drrepo.errors import ConfigurationError
 from drrepo.log import configure_logging, logger
 from drrepo.report.exporters import FORMATS
+from drrepo.report.suppressions import SuppressionError
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_FAIL_UNDER = 0, 1, 2, 3
-SUBCOMMANDS = {"analyze", "ui", "mcp", "health", "doctor", "health-api"}
+SUBCOMMANDS = {"analyze", "ui", "mcp", "health", "doctor", "health-api", "eval", "baseline"}
 
 
 def _load_config(env_file: str | None) -> Config:
@@ -52,11 +56,17 @@ def print_summary(report: dict[str, Any], top: int = 10) -> None:
     print(f" DrRepo report: {repo.get('full_name') or repo.get('name', 'Unknown')}")
     print("=" * width)
     print(f" URL:      {repo.get('url', 'n/a')}")
+    if repo.get("commit_sha"):
+        at = f" ({repo['ref']})" if repo.get("ref") else ""
+        print(f" Commit:   {repo['commit_sha'][:12]}{at}")
     print(f" Score:    {score:.1f}/100  (grade {grade(score)})")
     history = report.get("score_history")
     if history:
         delta = history["overall_score_delta"]
-        print(f" Trend:    {delta:+.1f} since {history['previous_timestamp'][:10]}")
+        since = history["previous_timestamp"][:10]
+        if history.get("previous_commit_sha"):
+            since += f" ({history['previous_commit_sha'][:12]})"
+        print(f" Trend:    {delta:+.1f} since {since}")
     counts = report.get("issue_counts", {})
     print(" Issues:   " + ", ".join(f"{n} {sev}" for sev, n in counts.items()))
 
@@ -107,6 +117,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         config = dataclasses.replace(config, enable_deep_investigation=False)
     if args.no_history:
         config = dataclasses.replace(config, enable_score_history=False)
+    if args.suppressions:
+        config = dataclasses.replace(config, suppressions_file=args.suppressions)
+    if args.trust_repo_suppressions:
+        config = dataclasses.replace(config, trust_repo_suppressions=True)
     configure_logging(
         config.log_level,
         log_file=args.log_file,
@@ -135,8 +149,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             print(f"  · {message}", file=sys.stderr)
 
     try:
-        report = AnalysisService(config).analyze(args.repo_url, args.description, progress=progress)
-    except ValueError as e:
+        report = AnalysisService(config).analyze(
+            args.repo_url, args.description, progress=progress, ref=args.ref
+        )
+    except (ValueError, SuppressionError) as e:
         print(f"error: {e}", file=sys.stderr)
         return EXIT_USAGE
 
@@ -288,6 +304,100 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return EXIT_OK if ok else EXIT_ERROR
 
 
+def cmd_baseline(args: argparse.Namespace) -> int:
+    """Analyze (deterministically) and write every current finding as a suppression."""
+    from datetime import UTC, datetime, timedelta
+
+    from drrepo.report.suppressions import baseline_toml
+    from drrepo.service import AnalysisService
+
+    config = dataclasses.replace(
+        _load_config(args.env_file), enable_deep_investigation=False, enable_score_history=False
+    )
+    configure_logging(config.log_level, log_file=args.log_file, console_level="WARNING")
+    output = Path(args.output)
+    if output.exists() and not args.force:
+        print(f"error: {output} exists; pass --force to overwrite it", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        report = AnalysisService(config).analyze(
+            args.repo_url, ref=args.ref, record_history=False, suppressions=[]
+        )
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    today = datetime.now(UTC).date()
+    expires = today + timedelta(days=args.expires_days) if args.expires_days else None
+    issues = report.get("issues", [])
+    output.write_text(
+        baseline_toml(issues, reason=f"baseline {today.isoformat()}", expires=expires),
+        encoding="utf-8",
+        newline="\n",
+    )
+    print(
+        f"Wrote {output} accepting {len(issues)} current finding(s). Replace the generic "
+        "reasons with real justifications, then pass it with --suppressions (or commit it "
+        "and set TRUST_REPO_SUPPRESSIONS=true for your own repository).",
+        file=sys.stderr,
+    )
+    return EXIT_OK
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    from drrepo.evaluation import (
+        compare,
+        load_cases,
+        load_labels,
+        read_baseline,
+        render_markdown,
+        run_cases,
+        write_baseline,
+    )
+    from drrepo.service import AnalysisService
+
+    config = dataclasses.replace(
+        _load_config(args.env_file),
+        enable_deep_investigation=args.deep,
+        enable_score_history=False,
+    )
+    configure_logging(config.log_level, log_file=args.log_file, console_level="WARNING")
+    try:
+        cases = load_cases(Path(args.manifest))
+        labels = load_labels(Path(args.labels))
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    if args.case:
+        unknown = set(args.case) - {c.name for c in cases}
+        if unknown:
+            print(f"error: unknown case(s): {sorted(unknown)}", file=sys.stderr)
+            return EXIT_USAGE
+        cases = [c for c in cases if c.name in args.case]
+    baseline_path = Path(args.baseline or f"evals/baseline{'-deep' if args.deep else ''}.json")
+
+    service = AnalysisService(config)
+    results = run_cases(
+        lambda case: service.analyze(case.url, ref=case.ref, deep=args.deep, record_history=False),
+        cases,
+        progress=lambda message: print(f"  · {message}", file=sys.stderr),
+    )
+    if args.update_baseline:
+        try:
+            write_baseline(baseline_path, results)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return EXIT_ERROR
+        print(f"Baseline written: {baseline_path} ({len(results)} cases)", file=sys.stderr)
+        return EXIT_OK
+
+    comparison = compare(results, read_baseline(baseline_path), labels, args.tolerance)
+    markdown = render_markdown(comparison, results, args.tolerance)
+    print(markdown)
+    if args.output:
+        Path(args.output).write_text(markdown, encoding="utf-8")
+    return EXIT_FAIL_UNDER if comparison.regressed else EXIT_OK
+
+
 def cmd_health_api(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -312,6 +422,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("analyze", parents=[common], help="analyze a repository")
     p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
     p.add_argument("-d", "--description", default="", help="context/focus for the investigators")
+    p.add_argument(
+        "--ref", help="branch, tag, or full commit SHA to analyze (default: the default branch)"
+    )
+    p.add_argument("--suppressions", help="suppression file (.drrepo.toml format) to apply")
+    p.add_argument(
+        "--trust-repo-suppressions",
+        action="store_true",
+        help="also honor the analyzed repository's own .drrepo.toml (use for your own repo)",
+    )
     p.add_argument(
         "--shallow", action="store_true", help="skip deep investigations (fast, deterministic)"
     )
@@ -357,6 +476,38 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", parents=[common], help="diagnose the local installation")
     p.add_argument("--offline", action="store_true", help="skip network checks")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser(
+        "baseline", parents=[common], help="write current findings as a suppression file"
+    )
+    p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
+    p.add_argument("--ref", help="branch, tag, or full commit SHA (default: the default branch)")
+    p.add_argument("-o", "--output", default=".drrepo.toml", help="file to write")
+    p.add_argument(
+        "--expires-days",
+        type=int,
+        default=90,
+        help="expire each suppression after N days (0 = never; default 90)",
+    )
+    p.add_argument("--force", action="store_true", help="overwrite an existing file")
+    p.set_defaults(func=cmd_baseline)
+
+    p = sub.add_parser(
+        "eval", parents=[common], help="run the evaluation set and compare with the baseline"
+    )
+    p.add_argument("--manifest", default="evals/repos.toml", help="cases to run")
+    p.add_argument(
+        "--baseline", help="baseline JSON (default: evals/baseline.json, or baseline-deep.json)"
+    )
+    p.add_argument("--labels", default="evals/labels.toml", help="human verdicts for precision")
+    p.add_argument("--case", action="append", help="run only this case (repeatable)")
+    p.add_argument("--deep", action="store_true", help="allow deep investigations (needs an LLM)")
+    p.add_argument(
+        "--tolerance", type=float, default=5.0, help="allowed score drop before a regression"
+    )
+    p.add_argument("--update-baseline", action="store_true", help="record this run as the baseline")
+    p.add_argument("-o", "--output", help="also write the Markdown table to this file")
+    p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("health-api", parents=[common], help="serve the FastAPI health endpoint")
     p.add_argument("--host", default="127.0.0.1")
