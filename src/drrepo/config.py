@@ -17,7 +17,18 @@ from dataclasses import dataclass, fields
 
 from drrepo.errors import ConfigurationError
 
-SUPPORTED_PROVIDERS = ("groq", "openai")
+SUPPORTED_PROVIDERS = ("groq", "openai", "anthropic", "ollama")
+# Used when MODEL_NAME is unset. Override any of them with MODEL_NAME / MODEL_NAME_<ROLE>.
+DEFAULT_MODELS = {
+    "groq": "llama-3.3-70b-versatile",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-5-5",
+    "ollama": "llama3.1",
+}
+# Roles a model can be chosen for. "planner" also serves the documentation rubric
+# (both are structured-output calls); "narrative" writes summaries; "investigation"
+# runs the tool-calling deep investigations.
+LLM_ROLES = ("planner", "narrative", "investigation")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -50,6 +61,11 @@ def _env_int(name: str, default: int) -> int:
         raise ConfigurationError(f"{name}={raw!r} is not an integer") from e
 
 
+def _env_list(name: str) -> tuple[str, ...]:
+    """Comma-separated values, stripped; empty entries dropped."""
+    return tuple(v.strip() for v in os.getenv(name, "").split(",") if v.strip())
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -67,11 +83,16 @@ class Config:
     # API keys
     groq_api_key: str = ""
     openai_api_key: str = ""
+    anthropic_api_key: str = ""
     github_token: str = ""
 
-    # Model configuration
+    # Model configuration. Empty model names fall back: role -> MODEL_NAME -> provider default.
     model_provider: str = "groq"
-    model_name: str = "llama-3.3-70b-versatile"
+    model_name: str = ""
+    model_name_planner: str = ""
+    model_name_narrative: str = ""
+    model_name_investigation: str = ""
+    ollama_base_url: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 2000
     llm_request_timeout_seconds: int = 60
@@ -89,8 +110,14 @@ class Config:
     enable_bandit: bool = True
     enable_dependency_audit: bool = True
     enable_license_audit: bool = True
+    # License policy (SPDX ids, case-insensitive). When either is set it replaces the
+    # built-in copyleft heuristic: deny-listed licenses are violations, and with an
+    # allow-list every other known license is too.
+    license_deny: tuple[str, ...] = ()
+    license_allow: tuple[str, ...] = ()
     enable_workflow_audit: bool = True  # zizmor over .github/workflows
     enable_dockerfile_audit: bool = True  # hadolint + root-user check over Dockerfiles
+    enable_scorecard: bool = True  # OpenSSF Scorecard checks a shallow clone can't see
 
     # Agentic investigation: bounds on the tool-calling investigator loops.
     max_tool_calls_per_investigator: int = 8
@@ -98,6 +125,8 @@ class Config:
     # Kill switch: force every category "shallow" -- a regression safety net
     # and a cost control for anyone who wants the fast/cheap mode.
     enable_deep_investigation: bool = True
+    # Bounded LLM judgment that can adjust a score (today: the documentation rubric).
+    enable_llm_judgment: bool = True
 
     # LLM circuit breaker: opens after repeated LLM-call failures so parallel
     # category nodes fail fast instead of each retrying an exhausted quota.
@@ -170,9 +199,16 @@ class Config:
         config = cls(
             groq_api_key=_env_str("GROQ_API_KEY", ""),
             openai_api_key=_env_str("OPENAI_API_KEY", ""),
+            anthropic_api_key=_env_str("ANTHROPIC_API_KEY", ""),
             github_token=_env_str("GH_TOKEN", "") or _env_str("GITHUB_TOKEN", ""),
             model_provider=_env_str("MODEL_PROVIDER", d.model_provider).lower(),
             model_name=_env_str("MODEL_NAME", d.model_name),
+            model_name_planner=_env_str("MODEL_NAME_PLANNER", d.model_name_planner),
+            model_name_narrative=_env_str("MODEL_NAME_NARRATIVE", d.model_name_narrative),
+            model_name_investigation=_env_str(
+                "MODEL_NAME_INVESTIGATION", d.model_name_investigation
+            ),
+            ollama_base_url=_env_str("OLLAMA_BASE_URL", d.ollama_base_url),
             temperature=_env_float("TEMPERATURE", d.temperature),
             max_tokens=_env_int("MAX_TOKENS", d.max_tokens),
             llm_request_timeout_seconds=_env_int(
@@ -188,8 +224,11 @@ class Config:
             enable_bandit=_env_bool("ENABLE_BANDIT", d.enable_bandit),
             enable_dependency_audit=_env_bool("ENABLE_DEPENDENCY_AUDIT", d.enable_dependency_audit),
             enable_license_audit=_env_bool("ENABLE_LICENSE_AUDIT", d.enable_license_audit),
+            license_deny=_env_list("LICENSE_DENY"),
+            license_allow=_env_list("LICENSE_ALLOW"),
             enable_workflow_audit=_env_bool("ENABLE_WORKFLOW_AUDIT", d.enable_workflow_audit),
             enable_dockerfile_audit=_env_bool("ENABLE_DOCKERFILE_AUDIT", d.enable_dockerfile_audit),
+            enable_scorecard=_env_bool("ENABLE_SCORECARD", d.enable_scorecard),
             max_tool_calls_per_investigator=_env_int(
                 "MAX_TOOL_CALLS_PER_INVESTIGATOR", d.max_tool_calls_per_investigator
             ),
@@ -199,6 +238,7 @@ class Config:
             enable_deep_investigation=_env_bool(
                 "ENABLE_DEEP_INVESTIGATION", d.enable_deep_investigation
             ),
+            enable_llm_judgment=_env_bool("ENABLE_LLM_JUDGMENT", d.enable_llm_judgment),
             enable_llm_circuit_breaker=_env_bool(
                 "ENABLE_LLM_CIRCUIT_BREAKER", d.enable_llm_circuit_breaker
             ),
@@ -226,15 +266,35 @@ class Config:
         )
         return config
 
+    def model_for(self, role: str | None = None) -> str:
+        """The model for `role` (one of LLM_ROLES), else MODEL_NAME, else the provider default."""
+        by_role = {
+            "planner": self.model_name_planner,
+            "narrative": self.model_name_narrative,
+            "investigation": self.model_name_investigation,
+        }
+        return by_role.get(role or "") or self.model_name or DEFAULT_MODELS[self.model_provider]
+
+    def models_by_role(self) -> dict[str, str]:
+        return {role: self.model_for(role) for role in LLM_ROLES}
+
+    def api_key(self) -> str:
+        """The API key for the configured provider ("" for keyless providers like Ollama)."""
+        return {
+            "groq": self.groq_api_key,
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+        }.get(self.model_provider, "")
+
     def validate_for_llm(self) -> list[str]:
         """Return the missing required keys for the configured LLM provider.
 
-        Empty list means valid. Never raises, so callers decide what to do.
+        Empty list means valid (Ollama needs no key). Never raises, so callers decide.
         """
-        if self.model_provider == "groq" and not self.groq_api_key:
-            return ["GROQ_API_KEY"]
-        if self.model_provider == "openai" and not self.openai_api_key:
-            return ["OPENAI_API_KEY"]
+        if self.model_provider == "ollama":
+            return []
+        if not self.api_key():
+            return [f"{self.model_provider.upper()}_API_KEY"]
         return []
 
 

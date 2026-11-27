@@ -1,4 +1,4 @@
-"""Dependency analyst: known vulnerabilities (OSV.dev), pinning, license compatibility."""
+"""Dependency analyst: known vulnerabilities (OSV.dev), pinning, license policy or compatibility."""
 
 from __future__ import annotations
 
@@ -103,13 +103,25 @@ def vulnerability_issues(vulns: list[dict[str, Any]]) -> list[Issue]:
         )
         more = f"; and {len(items) - 5} more" if len(items) > 5 else ""
         kind = "development-only " if dev_only else ""
+        imported: list[int] = [
+            int(v["imported_in"]) for v in items if v.get("imported_in") is not None
+        ]
+        if imported and max(imported) > 0:
+            evidence = f" Imported directly in {max(imported)} source file(s)."
+        elif imported:
+            evidence = (
+                " Not imported directly by this repository's source: likely a transitive "
+                "dependency, still reachable through whatever depends on it."
+            )
+        else:
+            evidence = ""
         issues.append(
             Issue(
                 severity=worst,
                 category=Category.DEPENDENCIES,
                 title=f"{package}@{version}: {len(items)} known vulnerabilit{'y' if len(items) == 1 else 'ies'}"
                 + (" (dev)" if dev_only else ""),
-                description=f"{kind}{ecosystem} package {package} {version} is affected by {listing}{more}.",
+                description=f"{kind}{ecosystem} package {package} {version} is affected by {listing}{more}.{evidence}",
                 recommendation=(
                     f"Upgrade {package} to {fixed} or later."
                     if fixed
@@ -119,6 +131,37 @@ def vulnerability_issues(vulns: list[dict[str, Any]]) -> list[Issue]:
                 source="osv.dev",
                 rule_id=items[0]["vuln_id"],
                 occurrences=1,
+            )
+        )
+    return issues
+
+
+def license_policy_issues(
+    licenses: list[dict[str, Any]], deny: tuple[str, ...], allow: tuple[str, ...]
+) -> list[Issue]:
+    """Violations of an explicit license policy (LICENSE_DENY / LICENSE_ALLOW)."""
+    denied = {d.lower() for d in deny}
+    allowed = {a.lower() for a in allow}
+    issues = []
+    for lic in licenses:
+        spdx = lic.get("license")
+        if not spdx:
+            continue
+        if spdx.lower() in denied:
+            severity, rule, why = Severity.HIGH, "license-denied", "is on the deny list"
+        elif allowed and spdx.lower() not in allowed:
+            severity, rule, why = Severity.MEDIUM, "license-not-allowed", "is not on the allow list"
+        else:
+            continue
+        issues.append(
+            Issue(
+                severity=severity,
+                category=Category.DEPENDENCIES,
+                title=f"{lic['package']}: license {spdx} {why}",
+                description=f"{lic['package']}@{lic['version']} ({lic['ecosystem']}) is licensed {spdx}, which {why} of this audit's license policy.",
+                recommendation=f"Replace {lic['package']}, obtain an exception, or update the policy.",
+                source="license-policy",
+                rule_id=rule,
             )
         )
     return issues
@@ -200,7 +243,15 @@ class DependencyAnalyst(Analyst):
             )
 
         vuln_issues = vulnerability_issues(deps.get("vulnerabilities", []))
-        issues = vuln_issues + license_issues(deps.get("licenses", []), repo_license)
+        licenses = deps.get("licenses", [])
+        # The policy travels in the collector's data (it is per-run config), not on the analyst.
+        policy = deps.get("license_policy") or {}
+        deny, allow = tuple(policy.get("deny", ())), tuple(policy.get("allow", ()))
+        issues = vuln_issues + (
+            license_policy_issues(licenses, deny, allow)
+            if deny or allow
+            else license_issues(licenses, repo_license)
+        )
         if unpinned and not has_lockfile:
             issues.append(
                 Issue(

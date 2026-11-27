@@ -203,3 +203,34 @@ def test_real_ruff_on_real_file(make_repo):
     result = run_ruff(root)
     assert result.available
     assert [(f["rule"], f["file"], f["line"]) for f in result.findings] == [("F821", "bad.py", 2)]
+
+
+def test_semgrep_rulesets_follow_the_repos_main_languages(make_repo):
+    root = make_repo(
+        {
+            **{f"src/m{i}.py": "x = 1" for i in range(5)},
+            **{f"web/c{i}.ts": "let x = 1" for i in range(4)},
+            "tools/once.go": "package main",  # below MIN_FILES_FOR_RULESET: no Go ruleset
+            **{f"node_modules/lib/i{i}.js": "x" for i in range(9)},  # vendored: ignored
+        }
+    )
+    assert scanners.semgrep_rulesets(root) == ["p/python", "p/typescript"]
+
+
+def test_semgrep_rulesets_are_capped(make_repo):
+    files = {
+        f"{lang}/f{i}.{ext}": "x"
+        for lang, ext in [("a", "py"), ("b", "js"), ("c", "go"), ("d", "rb"), ("e", "php")]
+        for i in range(4)
+    }
+    assert len(scanners.semgrep_rulesets(make_repo(files))) == scanners.MAX_LANGUAGE_RULESETS
+
+
+def test_semgrep_gets_every_ruleset_and_collector_records_them(make_repo, fake_run):
+    root = make_repo({f"pkg/m{i}.py": "x = 1" for i in range(3)})
+    fake_run.outputs["semgrep"] = json.dumps({"results": []})
+    fake_run.outputs["bandit"] = json.dumps({"results": []})
+    result = collect_security(str(root), Config())
+    semgrep_argv = next(c["argv"] for c in fake_run.calls if Path(c["argv"][0]).stem == "semgrep")
+    assert "--config=p/security-audit" in semgrep_argv and "--config=p/python" in semgrep_argv
+    assert result.data["semgrep_rulesets"] == ["p/security-audit", "p/python"]

@@ -21,7 +21,7 @@ _SCALE = 40.0
 # CI workflow and container findings (recon/infrastructure.py) are scored on a
 # gentler, bounded curve: they can take at most INFRA_MAX_IMPACT off the code
 # security score, so hardening gaps never outweigh flaws in the code itself.
-INFRA_SOURCES = frozenset({"zizmor", "hadolint", "drrepo"})
+INFRA_SOURCES = frozenset({"zizmor", "hadolint", "drrepo", "scorecard"})
 INFRA_MAX_IMPACT = 0.4
 _INFRA_SCALE = 60.0
 
@@ -97,9 +97,12 @@ class SecurityAnalyst(Analyst):
             return self.unassessed(f"Security could not be assessed: {detail}.")
 
         infrastructure = collector_data(recon, "infrastructure") or {}
-        findings = dedupe_cross_tool(security.get("findings", [])) + [
-            f for f in infrastructure.get("findings", []) if f.get("category") == "security"
-        ]
+        scorecard = collector_data(recon, "scorecard") or {}
+        findings = (
+            dedupe_cross_tool(security.get("findings", []))
+            + [f for f in infrastructure.get("findings", []) if f.get("category") == "security"]
+            + scorecard.get("findings", [])
+        )
         tool_status = {
             **security.get("tool_status", {}),
             **{
@@ -117,6 +120,13 @@ class SecurityAnalyst(Analyst):
             recommendation_of=_recommendation,
         )
         notes = [f"{tool}: {status}" for tool, status in tool_status.items() if status != "ok"]
+        analyzed = (collector_data(recon, "repo_clone") or {}).get("commit_sha")
+        scanned = scorecard.get("scanned_commit")
+        if scorecard.get("findings") and analyzed and scanned and scanned != analyzed:
+            notes.append(
+                f"OpenSSF Scorecard findings describe commit {scanned[:12]} (its last scan on "
+                f"{scorecard.get('date', '?')}), not the analyzed commit {analyzed[:12]}."
+            )
         if not issues:
             return Assessment(
                 issues=[], score=100.0, summary=f"No security findings from: {ran}.", notes=notes

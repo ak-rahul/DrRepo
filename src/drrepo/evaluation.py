@@ -96,6 +96,15 @@ def summarize(case: EvalCase, report: dict[str, Any], elapsed_seconds: float) ->
         ),
         "tool_calls": sum(len(cs.get("investigation_trace", [])) for cs in categories.values()),
         "tokens": (report.get("llm_usage") or {}).get("used_tokens"),
+        # Which prompts, model and scanner versions produced this result.
+        "provenance": report.get("provenance"),
+        # A failed collector (e.g. a GitHub API rate limit) changes scores for reasons
+        # unrelated to the code; such a run must not be compared or baselined.
+        "collector_errors": {
+            name: status.get("detail") or "error"
+            for name, status in report.get("collector_status", {}).items()
+            if status.get("status") == "error"
+        },
         "elapsed_seconds": round(elapsed_seconds, 1),
     }
 
@@ -129,6 +138,7 @@ class CaseDiff:
     new_findings: list[str] = field(default_factory=list)
     gone_findings: list[str] = field(default_factory=list)
     regressions: list[str] = field(default_factory=list)
+    provenance_changes: list[str] = field(default_factory=list)  # context, not regressions
 
 
 @dataclass
@@ -141,6 +151,28 @@ class Comparison:
     @property
     def regressed(self) -> bool:
         return any(c.regressions or c.error for c in self.cases)
+
+
+def provenance_changes(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[str]:
+    """What changed in the prompts, model, or scanner versions between two runs."""
+    if not before or not after:
+        return []
+    changes = []
+    old_inst, new_inst = before.get("instructions", {}), after.get("instructions", {})
+    edited = sorted(
+        k for k in old_inst.keys() | new_inst.keys() if old_inst.get(k) != new_inst.get(k)
+    )
+    if edited:
+        changes.append(f"instructions changed: {', '.join(edited)}")
+    if before.get("llm") != after.get("llm"):
+        changes.append(f"model changed: {before.get('llm')} -> {after.get('llm')}")
+    old_tools, new_tools = before.get("tools", {}), after.get("tools", {})
+    changes += [
+        f"{tool} {old_tools.get(tool)} -> {new_tools.get(tool)}"
+        for tool in sorted(old_tools.keys() | new_tools.keys())
+        if old_tools.get(tool) != new_tools.get(tool)
+    ]
+    return changes
 
 
 def _delta(current: float | None, baseline: float | None) -> float | None:
@@ -167,6 +199,18 @@ def compare(
                 diff.regressions.append("no baseline for this case (run with --update-baseline)")
             diffs.append(diff)
             continue
+        new_errors = {
+            name: detail
+            for name, detail in result.get("collector_errors", {}).items()
+            if name not in base.get("collector_errors", {})
+        }
+        if new_errors:
+            diff.regressions += [
+                f"environment: {name} failed ({detail}); scores not comparable"
+                for name, detail in sorted(new_errors.items())
+            ]
+            diffs.append(diff)
+            continue
         diff.overall_delta = _delta(result["overall"], base.get("overall"))
         if diff.overall_delta is not None and diff.overall_delta < -tolerance:
             diff.regressions.append(f"overall score fell {diff.overall_delta:+.1f}")
@@ -178,6 +222,9 @@ def compare(
                 diff.regressions.append(f"{category.value} is no longer assessed")
             elif (d := diff.category_deltas[category.value]) is not None and d < -tolerance:
                 diff.regressions.append(f"{category.value} fell {d:+.1f}")
+        diff.provenance_changes = provenance_changes(
+            base.get("provenance"), result.get("provenance")
+        )
         before_findings = set(base.get("findings", []))
         now_findings = set(result["findings"])
         diff.new_findings = sorted(now_findings - before_findings)
@@ -244,6 +291,7 @@ def render_markdown(
         )
     for diff in comparison.cases:
         details = [f"- regression: {r}" for r in diff.regressions]
+        details += [f"- provenance: {c}" for c in diff.provenance_changes]
         details += [f"- new: `{k}`" for k in diff.new_findings]
         details += [f"- gone: `{k}`" for k in diff.gone_findings]
         if details:
@@ -255,6 +303,14 @@ def write_baseline(path: Path, results: dict[str, dict[str, Any]]) -> None:
     failed = [name for name, r in results.items() if r.get("error")]
     if failed:
         raise ValueError(f"not writing a baseline with failed cases: {failed}")
+    degraded = {
+        name: r["collector_errors"] for name, r in results.items() if r.get("collector_errors")
+    }
+    if degraded:
+        raise ValueError(
+            f"not writing a baseline from a degraded run (collector errors: {degraded}); "
+            "set GH_TOKEN if the GitHub API was rate limited"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     # LF on every OS: the baseline is committed, so its diffs must not churn on line endings.
     text = json.dumps(results, indent=2, sort_keys=True) + "\n"

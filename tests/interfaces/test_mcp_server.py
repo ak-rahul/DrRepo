@@ -105,6 +105,7 @@ def test_registered_surface():
         "health_check",
     }
     assert "drrepo://reports/{owner}/{name}/sarif" in templates
+    assert "drrepo://reports/{owner}/{name}/sbom" in templates
     assert prompts == {"review_repository"}
 
 
@@ -184,6 +185,7 @@ def test_readme_tool_is_pure():
 
 def test_report_resources(service):
     assert json.loads(_read("drrepo://reports/octo/demo/sarif"))["version"] == "2.1.0"
+    assert json.loads(_read("drrepo://reports/octo/demo/sbom"))["bomFormat"] == "CycloneDX"
     assert json.loads(_read("drrepo://reports/octo/demo"))["overall_score"] == 77.0
     assert _read("drrepo://reports/octo/demo/markdown").startswith("# DrRepo")
 
@@ -239,3 +241,9 @@ def test_run_passes_host_and_port_to_http_transports(monkeypatch, transport, exp
     monkeypatch.setattr(mcp_server.mcp, "run", lambda *a, **k: calls.append((a, k)))
     mcp_server.run(transport, host="10.0.0.5", port=9000)
     assert calls == [expected]
+
+
+def test_schema_resource_serves_the_report_contract():
+    schema = json.loads(_read("drrepo://schema/report"))
+    assert schema["title"] == "DrRepo report"
+    assert "schema_version" in schema["required"]

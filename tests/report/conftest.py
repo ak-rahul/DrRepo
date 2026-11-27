@@ -1,5 +1,7 @@
 """Shared fixtures for the report package: a small but realistic synthesized report."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from drrepo.models import (
@@ -12,6 +14,7 @@ from drrepo.models import (
     ToolCallTrace,
 )
 from drrepo.report.synthesis import synthesize_report
+from tests.conftest import ok
 
 
 def _finding(category, score, assessed=True, issues=None, trace=None):
@@ -73,3 +76,34 @@ def report_dict():
         drrepo_version="9.9.9",
     )
     return report.to_dict()
+
+
+@pytest.fixture
+def pipeline(tmp_path, github_data):
+    """Patch clone + every collector with one bandit finding; yields the fake clone dir."""
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    cloned = MagicMock(path=clone)
+    finding = {
+        "tool": "bandit",
+        "rule": "B605",
+        "message": "shell",
+        "severity": "HIGH",
+        "file": "src/pager.py",
+        "line": 3,
+    }
+    results = {
+        "clone_repo": (cloned, ok(name="repo_clone")),
+        "collect_github_metadata": ok(github_data),
+        "collect_repo_layout": ok({"file_structure": {"has_tests": True}}),
+        "collect_static_analysis": ok({"findings": []}),
+        "collect_security": ok({"findings": [finding], "tool_status": {"bandit": "ok"}}),
+        "collect_dependency_audit": ok({"vulnerabilities": [], "manifests": [], "unpinned": []}),
+        "collect_infrastructure": ok({"findings": [], "tool_status": {}}),
+    }
+    patches = [patch(f"drrepo.pipeline.{n}", return_value=r) for n, r in results.items()]
+    for p in patches:
+        p.start()
+    yield clone
+    for p in patches:
+        p.stop()

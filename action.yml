@@ -1,0 +1,165 @@
+name: DrRepo audit
+description: Audit a public GitHub repository and gate on its score, with SARIF code scanning, an SBOM and a PR summary.
+author: ak-rahul
+branding:
+  icon: activity
+  color: green
+
+inputs:
+  repository:
+    description: Repository to analyze, as owner/name. It must be public on GitHub.
+    default: ${{ github.repository }}
+  ref:
+    description: Branch, tag or full commit SHA to analyze. Defaults to the pull request head, else the workflow's commit.
+    default: ${{ github.event.pull_request.head.sha || github.sha }}
+  deep:
+    description: Allow deep, tool-calling LLM investigations. Needs an LLM key in the step's env (for example GROQ_API_KEY).
+    default: "false"
+  fail-under:
+    description: Fail the step if the overall score is below this value. Empty means never fail on the score.
+    default: ""
+  formats:
+    description: Report files to write (json, md, sarif, cdx, summary). sarif is added when upload-sarif is true.
+    default: md,sarif
+  output-dir:
+    description: Directory the reports are written to.
+    default: drrepo-report
+  upload-sarif:
+    description: "Upload the SARIF results to GitHub code scanning. Needs `security-events: write`."
+    default: "true"
+  comment:
+    description: "Post or update one summary comment on the pull request. Needs `pull-requests: write`."
+    default: "false"
+  suppressions:
+    description: Suppression file (.drrepo.toml format) to apply.
+    default: ""
+  trust-repo-suppressions:
+    description: >-
+      Also honor the analyzed repository's own .drrepo.toml. On pull requests from forks the
+      PR author controls that file, so keep this false where forks can trigger the workflow.
+    default: "false"
+  semgrep-version:
+    description: Install this semgrep version and run it. Empty skips semgrep (faster).
+    default: ""
+  github-token:
+    description: Token for GitHub API calls (rate limits) and the PR comment.
+    default: ${{ github.token }}
+
+outputs:
+  score:
+    description: Overall score, 0 to 100. Empty if the analysis failed.
+    value: ${{ steps.analyze.outputs.score }}
+  grade:
+    description: Letter grade (A to F).
+    value: ${{ steps.analyze.outputs.grade }}
+  report:
+    description: Path of the full JSON report.
+    value: ${{ steps.analyze.outputs.report }}
+  sarif:
+    description: Path of the SARIF file, when one was written.
+    value: ${{ steps.analyze.outputs.sarif }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      with:
+        enable-cache: false
+
+    - name: Install semgrep
+      if: inputs.semgrep-version != ''
+      shell: bash
+      env:
+        SEMGREP_VERSION: ${{ inputs.semgrep-version }}
+      run: uv tool install "semgrep==${SEMGREP_VERSION}"
+
+    - name: Analyze
+      id: analyze
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        REF: ${{ inputs.ref }}
+        DEEP: ${{ inputs.deep }}
+        FAIL_UNDER: ${{ inputs.fail-under }}
+        REPORT_FORMATS: ${{ inputs.formats }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+        SUPPRESSIONS: ${{ inputs.suppressions }}
+        TRUST_REPO: ${{ inputs.trust-repo-suppressions }}
+        SEMGREP_VERSION: ${{ inputs.semgrep-version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -uo pipefail
+        formats="${REPORT_FORMATS},summary"
+        if [ "${UPLOAD_SARIF}" = "true" ]; then formats="${formats},sarif"; fi
+        formats="$(printf '%s' "${formats}" | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)"
+
+        args=(analyze "https://github.com/${REPOSITORY}" --format "${formats}" -o "${OUTPUT_DIR}"
+              --json --no-history --env-file "" --log-file "")
+        if [ -n "${REF}" ]; then args+=(--ref "${REF}"); fi
+        if [ "${DEEP}" != "true" ]; then args+=(--shallow); fi
+        if [ -n "${FAIL_UNDER}" ]; then args+=(--fail-under "${FAIL_UNDER}"); fi
+        if [ -n "${SUPPRESSIONS}" ]; then args+=(--suppressions "${SUPPRESSIONS}"); fi
+        if [ "${TRUST_REPO}" = "true" ]; then args+=(--trust-repo-suppressions); fi
+        if [ -z "${SEMGREP_VERSION}" ]; then export ENABLE_SEMGREP=false; fi
+
+        mkdir -p "${OUTPUT_DIR}"
+        report="${OUTPUT_DIR}/report.json"
+        # The action runs the DrRepo code at the exact ref the workflow pinned.
+        uvx --from "${GITHUB_ACTION_PATH}" drrepo "${args[@]}" > "${report}"
+        status=$?
+        echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+        if [ ! -s "${report}" ]; then
+          echo "::error title=DrRepo::The analysis failed (exit ${status}); see the log above."
+          exit 0
+        fi
+        uv run --no-project --quiet --with "${GITHUB_ACTION_PATH}" python - "${report}" >> "${GITHUB_OUTPUT}" <<'PY'
+        import json, sys
+        from drrepo.report.synthesis import grade
+        score = float(json.load(open(sys.argv[1], encoding="utf-8"))["overall_score"])
+        print(f"score={score}")
+        print(f"grade={grade(score)}")
+        PY
+        echo "report=${report}" >> "${GITHUB_OUTPUT}"
+        sarif="$(find "${OUTPUT_DIR}" -maxdepth 1 -name '*.sarif' -print -quit)"
+        echo "sarif=${sarif}" >> "${GITHUB_OUTPUT}"
+        summary="$(find "${OUTPUT_DIR}" -maxdepth 1 -name '*.summary.md' -print -quit)"
+        echo "summary=${summary}" >> "${GITHUB_OUTPUT}"
+        if [ -n "${summary}" ]; then cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"; fi
+
+    - name: Upload SARIF
+      if: inputs.upload-sarif == 'true' && steps.analyze.outputs.sarif != ''
+      uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3.39.5
+      with:
+        sarif_file: ${{ steps.analyze.outputs.sarif }}
+        category: drrepo
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number && steps.analyze.outputs.summary != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        SUMMARY: ${{ steps.analyze.outputs.summary }}
+      run: |
+        set -uo pipefail
+        marker="<!-- drrepo-summary -->"
+        body="$(printf '%s\n%s' "${marker}" "$(cat "${SUMMARY}")")"
+        existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+          --jq ".[] | select(.user.type == \"Bot\" and (.body | startswith(\"${marker}\"))) | .id" | head -n 1)"
+        if [ -n "${existing}" ]; then
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="${body}" > /dev/null
+        else
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="${body}" > /dev/null
+        fi || echo "::warning title=DrRepo::Could not post the PR comment (pull requests from forks get a read-only token)."
+
+    - name: Enforce the result
+      shell: bash
+      env:
+        STATUS: ${{ steps.analyze.outputs.status }}
+      run: |
+        if [ "${STATUS}" = "3" ]; then
+          echo "::error title=DrRepo::The score is below fail-under."
+        fi
+        exit "${STATUS:-1}"

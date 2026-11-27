@@ -172,6 +172,21 @@ class Analyst(ABC):
         """System prompt for the deep path's tool-calling investigator."""
         return prompts.investigation_prompt(self.category)
 
+    def judge(
+        self,
+        recon: Recon,
+        assessment: Assessment,
+        llm: LLMRuntime,
+        clone_root: str | None,
+    ) -> Assessment:
+        """Optional bounded LLM judgment on top of the deterministic assessment.
+
+        Called only when an LLM is available and `ENABLE_LLM_JUDGMENT` is on. It may
+        add issues and move the score within a bound the analyst defines; it must
+        never remove a deterministic issue. Default: no judgment.
+        """
+        return assessment
+
     def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:
         """The category score for exactly `issues` (used after suppressions remove some).
 

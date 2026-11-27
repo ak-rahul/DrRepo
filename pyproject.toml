@@ -56,6 +56,14 @@ Issues = "https://github.com/ak-rahul/DrRepo/issues"
 [project.scripts]
 drrepo = "drrepo.interfaces.cli:main"
 
+[project.optional-dependencies]
+anthropic = [
+    "langchain-anthropic>=1.0,<2",
+]
+ollama = [
+    "langchain-ollama>=1.0,<2",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
@@ -64,6 +72,9 @@ dev = [
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
     "pip-audit>=2.10.1",
+    "jsonschema>=4.23",
+    "cyclonedx-python-lib[json-validation]>=11.13.0",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -88,6 +99,7 @@ include = [
     "/CONTRIBUTING.md",
     "/pyproject.toml",
     "/uv.lock",
+    "/action.yml",
 ]
 exclude = ["__pycache__"]
 

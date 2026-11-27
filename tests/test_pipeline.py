@@ -371,3 +371,12 @@ def test_fabricated_agent_findings_are_dropped_and_noted(collectors):
     assert "Hardcoded key" not in titles
     assert titles["[unverified] Weak hash"] == "low"
     assert any(n.startswith("Grounding check:") for n in security["notes"])
+
+
+def test_a_crashing_collector_degrades_instead_of_failing_the_run(collectors):
+    with patch(f"{P}.collect_security", side_effect=KeyError("boom")):
+        report = Workflow().run(REPO, _ctx(SHALLOW))
+    status = report["collector_status"]["security"]
+    assert status["status"] == "error" and "KeyError" in status["detail"]
+    assert report["category_scores"]["security"]["assessed"] is False
+    assert report["category_scores"]["code_quality"]["assessed"] is True  # the rest carried on

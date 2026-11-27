@@ -1,8 +1,13 @@
-"""Documentation analyst: README completeness and structure."""
+"""Documentation analyst: README metrics, plus a bounded LLM rubric when available."""
 
 from __future__ import annotations
 
+import dataclasses
+
+from drrepo.agents import rubric
 from drrepo.agents.analysts.base import Analyst, Assessment, Recon, collector_data
+from drrepo.agents.llm import LLMRuntime
+from drrepo.log import logger
 from drrepo.models import Category, Issue, Location, Severity
 
 _CRITICAL_SECTIONS = {"Installation", "Usage"}
@@ -93,9 +98,10 @@ class DocumentationAnalyst(Analyst):
                 )
 
         score = float(readme.get("quality_score", 0.0))
+        # The clone's README is the pinned commit's; the API serves HEAD.
         excerpt = (
-            (collector_data(recon, "github_metadata") or {}).get("readme_content")
-            or layout.get("readme_content")
+            layout.get("readme_content")
+            or (collector_data(recon, "github_metadata") or {}).get("readme_content")
             or ""
         )[:800]
         facts = (
@@ -116,3 +122,106 @@ class DocumentationAnalyst(Analyst):
         return Assessment(
             issues=issues, score=score, summary=summary, narrative_facts=facts if words else None
         )
+
+    def judge(
+        self,
+        recon: Recon,
+        assessment: Assessment,
+        llm: LLMRuntime,
+        clone_root: str | None,
+    ) -> Assessment:
+        """Grade the README against the rubric and move the score within ±MAX_ADJUSTMENT."""
+        layout = collector_data(recon, "repo_layout") or {}
+        readme = layout.get("readme_content") or (
+            collector_data(recon, "github_metadata") or {}
+        ).get("readme_content")
+        if not assessment.assessed or not readme:
+            return assessment
+        try:
+            result = rubric.evaluate(
+                llm,
+                readme,
+                layout.get("build_config") or {},
+                layout.get("file_structure") or {},
+                clone_root,
+            )
+        except Exception as e:
+            logger.warning(f"documentation rubric failed ({e}); using README metrics only")
+            return dataclasses.replace(
+                assessment,
+                notes=[
+                    *assessment.notes,
+                    f"Documentation rubric unavailable ({type(e).__name__}); README metrics only.",
+                ],
+            )
+        if result.rubric_score is None:
+            return assessment
+
+        readme_file = layout.get("readme_path") or "README.md"
+        issues = [self._reconcile(issue, result) for issue in assessment.issues]
+        covered = {i.rule_id for i in issues}
+        for name, item in result.items.items():
+            if item.verdict not in ("missing", "partial"):
+                continue
+            sections = rubric.SECTIONS_BY_CRITERION.get(name, ())
+            if any(f"missing-section-{s.lower()}" in covered for s in sections):
+                continue  # the metric already reports it
+            severity = (
+                Severity.MEDIUM
+                if item.verdict == "missing" and name in ("installation", "usage")
+                else Severity.LOW
+            )
+            issues.append(
+                Issue(
+                    severity=severity,
+                    category=self.category,
+                    title=f"README {'does not cover' if item.verdict == 'missing' else 'only partly covers'} {name}",
+                    description=f"{item.reason} (Rubric criterion: the README {rubric.CRITERIA[name]}.)",
+                    recommendation=f"Make sure the README {rubric.CRITERIA[name]}.",
+                    source="doc_rubric",
+                    rule_id=f"rubric-{name}",
+                    locations=[Location(file=readme_file)],
+                )
+            )
+
+        score = rubric.bounded_score(assessment.score, result.rubric_score)
+        counts = ", ".join(f"{n} {v}" for v, n in result.counts().items() if n)
+        note = (
+            f"Documentation rubric ({counts}): score {assessment.score:.0f} -> {score:.0f} "
+            f"(LLM judgment, bounded to ±{rubric.MAX_ADJUSTMENT:.0f})."
+        )
+        notes = [*assessment.notes, note]
+        if result.spot_check_downgrades:
+            notes.append(
+                "Rubric verdicts citing missing files were downgraded: "
+                + ", ".join(result.spot_check_downgrades)
+                + "."
+            )
+        facts = (
+            (assessment.narrative_facts or "")
+            + "\nRubric verdicts:\n"
+            + "\n".join(
+                f"- {name}: {item.verdict} ({item.reason})" for name, item in result.items.items()
+            )
+        )
+        return dataclasses.replace(
+            assessment, issues=issues, score=score, notes=notes, narrative_facts=facts
+        )
+
+    @staticmethod
+    def _reconcile(issue: Issue, result: rubric.RubricResult) -> Issue:
+        """A heading-based "missing section" the rubric found covered is downgraded, not removed."""
+        for name, sections in rubric.SECTIONS_BY_CRITERION.items():
+            item = result.items.get(name)
+            if (
+                item is not None
+                and item.verdict == "met"
+                and issue.rule_id in {f"missing-section-{s.lower()}" for s in sections}
+            ):
+                return dataclasses.replace(
+                    issue,
+                    severity=Severity.LOW,
+                    description=f"{issue.description} The documentation rubric found it covered "
+                    f"under another heading: {item.reason}",
+                )
+        return issue

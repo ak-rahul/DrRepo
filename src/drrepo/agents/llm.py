@@ -16,10 +16,11 @@ would make every attempt pay full backoff against an already-open circuit.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from drrepo.config import Config
+from drrepo.errors import ConfigurationError
 from drrepo.resilience import CircuitBreaker, is_retryable_llm_error, retry_with_backoff
 
 # -------------------------------------------------------------- budget ---
@@ -101,15 +102,32 @@ class TokenBudget:
 # -------------------------------------------------------------- client ---
 
 
-def build_chat_model(config: Config) -> Any:
-    """Construct the LangChain chat model for the configured provider."""
+def _optional_import(module: str, extra: str) -> Any:
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError as e:
+        raise ConfigurationError(
+            f"MODEL_PROVIDER needs the optional '{extra}' extra: uv sync --extra {extra} "
+            f"(or pip install 'drrepo[{extra}]')"
+        ) from e
+
+
+def build_chat_model(config: Config, model: str | None = None) -> Any:
+    """Construct the LangChain chat model for the configured provider.
+
+    `model` defaults to `config.model_for()`. SDK retries are always off: retries
+    are ours (`retry_with_backoff`), layered inside the circuit breaker.
+    """
     from pydantic import SecretStr
 
+    model = model or config.model_for()
     if config.model_provider == "groq":
         from langchain_groq import ChatGroq
 
         return ChatGroq(
-            model=config.model_name,
+            model=model,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             timeout=config.llm_request_timeout_seconds,
@@ -120,12 +138,31 @@ def build_chat_model(config: Config) -> Any:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=config.model_name,
+            model=model,
             temperature=config.temperature,
             max_completion_tokens=config.max_tokens,
             timeout=config.llm_request_timeout_seconds,
             max_retries=0,
             api_key=SecretStr(config.openai_api_key),
+        )
+    if config.model_provider == "anthropic":
+        anthropic = _optional_import("langchain_anthropic", "anthropic")
+        return anthropic.ChatAnthropic(
+            model=model,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            timeout=config.llm_request_timeout_seconds,
+            max_retries=0,
+            api_key=SecretStr(config.anthropic_api_key),
+        )
+    if config.model_provider == "ollama":
+        ollama = _optional_import("langchain_ollama", "ollama")
+        return ollama.ChatOllama(
+            model=model,
+            temperature=config.temperature,
+            num_predict=config.max_tokens,
+            base_url=config.ollama_base_url,
+            client_kwargs={"timeout": config.llm_request_timeout_seconds},
         )
     # Unreachable: Config.__post_init__ rejects unknown providers.
     raise ValueError(f"Unsupported model provider: {config.model_provider!r}")  # pragma: no cover
@@ -145,10 +182,20 @@ class LLMRuntime:
     client: Any  # None means "no LLM configured": callers skip LLM work entirely
     breaker: CircuitBreaker | None = None
     budget: TokenBudget | None = None
+    # Optional per-role clients (config.LLM_ROLES); roles without one use `client`.
+    role_clients: dict[str, Any] = field(default_factory=dict)
 
     @property
     def available(self) -> bool:
         return self.client is not None
+
+    def for_role(self, role: str) -> LLMRuntime:
+        """The runtime for one role. It shares this run's breaker and budget, so
+        routing roles to different models can't hide an outage or double the spend."""
+        client = self.role_clients.get(role, self.client)
+        if client is self.client and not self.role_clients:
+            return self
+        return LLMRuntime(client=client, breaker=self.breaker, budget=self.budget)
 
     def guarded(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Run `func` under the circuit breaker (if any)."""

@@ -5,6 +5,7 @@ Each agent's job is written as a document, not as string constants in code:
     instructions/planner.md          ## System                 the Lead Investigator
     instructions/<category>.md       ## Narrative              shallow-path summary prompt
                                      ## Investigation          deep-path ReAct system prompt
+    instructions/documentation.md    ## Rubric                 the bounded README rubric (agents/rubric.py)
     instructions/shared.md           ## Narrative rules        appended to every Narrative
                                      ## Investigation rules    appended to every Investigation
 
@@ -59,6 +60,11 @@ def _sections(name: str) -> dict[str, str]:
     return sections
 
 
+def sections(name: str) -> dict[str, str]:
+    """Every section of `instructions/<name>.md`, as sent to models (comments stripped)."""
+    return dict(_sections(name))
+
+
 def section(name: str, heading: str) -> str:
     """The body of `## <heading>` in `instructions/<name>.md`.
 
@@ -88,6 +94,7 @@ def investigation_prompt(category: Category) -> str:
 def validate_all() -> None:
     """Load every prompt the pipeline can request. Raises `InstructionsError`."""
     planner_prompt()
+    section("documentation", "Rubric")
     for category in Category:
         narrative_prompt(category)
         investigation_prompt(category)

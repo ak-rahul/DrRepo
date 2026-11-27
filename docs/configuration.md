@@ -6,10 +6,17 @@ All settings come from environment variables, optionally loaded from a `.env` fi
 
 | Variable | Default | Notes |
 |---|---|---|
-| `MODEL_PROVIDER` | `groq` | `groq` or `openai` |
-| `MODEL_NAME` | `llama-3.3-70b-versatile` | must support tool calling for deep mode |
+| `MODEL_PROVIDER` | `groq` | `groq`, `openai`, `anthropic` (extra `anthropic`), or `ollama` (extra `ollama`, local models: code never leaves the machine) |
+| `MODEL_NAME` | provider default | groq `llama-3.3-70b-versatile`, openai `gpt-4o-mini`, anthropic `claude-sonnet-5-5`, ollama `llama3.1`. Must support tool calling for deep mode |
+| `MODEL_NAME_PLANNER` | `MODEL_NAME` | model for the Lead Investigator and the documentation rubric (structured output) |
+| `MODEL_NAME_NARRATIVE` | `MODEL_NAME` | model for the short category summaries (a small, cheap model is fine) |
+| `MODEL_NAME_INVESTIGATION` | `MODEL_NAME` | model for deep tool-calling investigations (pick your most reliable tool-user) |
 | `GROQ_API_KEY` | — | required when the provider is `groq` |
 | `OPENAI_API_KEY` | — | required when the provider is `openai` |
+| `ANTHROPIC_API_KEY` | — | required when the provider is `anthropic` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server for the `ollama` provider (no key) |
+
+All roles share one circuit breaker and one per-run token budget, so routing roles to different models can't hide an outage or double the spend. `drrepo health` checks that the provider offers every configured model. Optional providers are installed as extras: `uv sync --extra anthropic` or `uv sync --extra ollama` (`pip install "drrepo[anthropic]"` from a wheel).
 | `TEMPERATURE` | `0.3` | |
 | `MAX_TOKENS` | `2000` | max completion tokens per call |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `60` | per HTTP request to the provider |
@@ -33,14 +40,20 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 | `ENABLE_BANDIT` | `true` | |
 | `ENABLE_DEPENDENCY_AUDIT` | `true` | OSV.dev lookups |
 | `ENABLE_LICENSE_AUDIT` | `true` | deps.dev license lookups (runtime dependencies only, max 30) |
+| `LICENSE_DENY` | empty | comma-separated SPDX ids (case-insensitive). A runtime dependency under one is a high `license-denied` issue |
+| `LICENSE_ALLOW` | empty | comma-separated SPDX ids. A runtime dependency under any other known license is a medium `license-not-allowed` issue |
 | `ENABLE_WORKFLOW_AUDIT` | `true` | zizmor over the repository's GitHub Actions workflows (offline) |
 | `ENABLE_DOCKERFILE_AUDIT` | `true` | hadolint plus a root-user check over the repository's Dockerfiles |
+| `ENABLE_SCORECARD` | `true` | OpenSSF Scorecard lookup (public API; repositories without a published Scorecard are skipped) |
+
+Setting either license variable replaces the built-in heuristic (copyleft dependencies in a permissively licensed repository). Dependencies with no license metadata are not policy violations; compound expressions such as `MIT OR Apache-2.0` are matched as written.
 
 ## Agentic investigation
 
 | Variable | Default | Notes |
 |---|---|---|
 | `ENABLE_DEEP_INVESTIGATION` | `true` | `false` = every category shallow (the CLI equivalent is `--shallow`) |
+| `ENABLE_LLM_JUDGMENT` | `true` | bounded LLM judgment that can adjust a score: the documentation rubric, at most ±25 points. `false` = README metrics only |
 | `MAX_TOOL_CALLS_PER_INVESTIGATOR` | `8` | step budget per investigation |
 | `INVESTIGATOR_TIMEOUT_SECONDS` | `90` | wall-clock budget per investigation |
 

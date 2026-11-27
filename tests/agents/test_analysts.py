@@ -10,6 +10,7 @@ from drrepo.agents.analysts.code_quality import CodeQualityAnalyst, ruff_severit
 from drrepo.agents.analysts.dependencies import (
     DependencyAnalyst,
     license_issues,
+    license_policy_issues,
     vulnerability_issues,
 )
 from drrepo.agents.analysts.documentation import DocumentationAnalyst
@@ -256,6 +257,70 @@ class TestDependencies:
     def test_audit_failure_unassessed(self):
         result = DependencyAnalyst().assess({"dependency_audit": failed("OSV down")})
         assert result.assessed is False and "OSV down" in result.summary
+
+    def test_license_policy_replaces_the_heuristic(self):
+        licenses = [
+            {"package": "gpl-lib", "ecosystem": "PyPI", "version": "1", "license": "GPL-3.0-only"},
+            {"package": "mpl-lib", "ecosystem": "PyPI", "version": "1", "license": "MPL-2.0"},
+            {"package": "mit-lib", "ecosystem": "PyPI", "version": "1", "license": "MIT"},
+            {"package": "unknown", "ecosystem": "PyPI", "version": "1", "license": None},
+        ]
+        found = {
+            i.title.split(":")[0]: i
+            for i in license_policy_issues(licenses, deny=("gpl-3.0-only",), allow=("MIT",))
+        }
+        assert set(found) == {"gpl-lib", "mpl-lib"}  # unknown licenses are not policy violations
+        assert (found["gpl-lib"].rule_id, found["gpl-lib"].severity) == (
+            "license-denied",
+            Severity.HIGH,
+        )
+        assert (found["mpl-lib"].rule_id, found["mpl-lib"].severity) == (
+            "license-not-allowed",
+            Severity.MEDIUM,
+        )
+        assert {i.source for i in found.values()} == {"license-policy"}
+        # Deny only: everything not denied passes.
+        assert [i.rule_id for i in license_policy_issues(licenses, ("MPL-2.0",), ())] == [
+            "license-denied"
+        ]
+
+    def test_policy_travels_in_the_collector_data(self):
+        audit = {
+            "packages_checked": 1,
+            "manifests": ["requirements.txt"],
+            "licenses": [
+                {"package": "gpl-lib", "ecosystem": "PyPI", "version": "1", "license": "GPL-3.0"}
+            ],
+        }
+        heuristic = DependencyAnalyst().assess({"dependency_audit": ok(audit)})
+        assert [i.rule_id for i in heuristic.issues] == []  # no repo license: no conflict
+        policy = {**audit, "license_policy": {"deny": ["GPL-3.0"], "allow": []}}
+        enforced = DependencyAnalyst().assess({"dependency_audit": ok(policy)})
+        assert [i.rule_id for i in enforced.issues] == ["license-denied"]
+
+    @pytest.mark.parametrize(
+        ("imported_in", "expected"),
+        [
+            (3, "Imported directly in 3 source file(s)."),
+            (0, "likely a transitive dependency, still reachable"),
+            (None, None),
+        ],
+    )
+    def test_import_evidence_annotates_without_changing_severity(self, imported_in, expected):
+        vuln = {
+            "package": "req",
+            "ecosystem": "PyPI",
+            "version": "1.0",
+            "vuln_id": "A",
+            "severity": "high",
+            "imported_in": imported_in,
+        }
+        [issue] = vulnerability_issues([vuln])
+        assert issue.severity == Severity.HIGH
+        if expected is None:
+            assert "mported" not in issue.description
+        else:
+            assert expected in issue.description
 
 
 class TestMaintainability:

@@ -17,6 +17,7 @@ Both collectors' data schema (status OK): findings: [finding], tool_status: {too
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 import subprocess
@@ -28,7 +29,7 @@ from typing import Any
 from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus
-from drrepo.recon.files import SKIP_DIRS, relative_posix
+from drrepo.recon.files import SKIP_DIRS, language_file_counts, relative_posix
 from drrepo.recon.secrets import scan_secrets
 
 # Ruff runs `--isolated` (ignoring the analyzed repo's own config, which could
@@ -36,6 +37,22 @@ from drrepo.recon.secrets import scan_secrets
 # comparable across repositories.
 RUFF_RULES = "E4,E7,E9,F,B,PLE"
 SEMGREP_CONFIG = "p/security-audit"
+# Language rulesets added on top of p/security-audit for the languages a repository
+# actually contains, most common first, capped so a polyglot repo stays bounded.
+SEMGREP_LANGUAGE_RULESETS = {
+    "Python": "p/python",
+    "JavaScript": "p/javascript",
+    "TypeScript": "p/typescript",
+    "Go": "p/golang",
+    "Java": "p/java",
+    "Kotlin": "p/kotlin",
+    "Ruby": "p/ruby",
+    "PHP": "p/php",
+    "C#": "p/csharp",
+    "Rust": "p/rust",
+}
+MAX_LANGUAGE_RULESETS = 3
+MIN_FILES_FOR_RULESET = 3  # a stray script shouldn't pull in a whole ruleset
 TEST_DIRS = frozenset({"tests", "test", "testing"})
 _BANDIT_EXCLUDES = ",".join(f"*/{d}/*" for d in sorted(SKIP_DIRS | TEST_DIRS))
 
@@ -155,13 +172,29 @@ def run_bandit(root: Path, target: Path | None = None, timeout: int = 120) -> Sc
     return ScanResult("bandit", True, findings)
 
 
-def run_semgrep(root: Path, target: Path | None = None, timeout: int = 120) -> ScanResult:
+def semgrep_rulesets(root: Path) -> list[str]:
+    """Registry rulesets for the repository's main languages (see SEMGREP_LANGUAGE_RULESETS)."""
+    rulesets = [
+        SEMGREP_LANGUAGE_RULESETS[language]
+        for language, count in language_file_counts(root).items()
+        if language in SEMGREP_LANGUAGE_RULESETS and count >= MIN_FILES_FOR_RULESET
+    ]
+    return list(dict.fromkeys(rulesets))[:MAX_LANGUAGE_RULESETS]
+
+
+def run_semgrep(
+    root: Path,
+    target: Path | None = None,
+    timeout: int = 120,
+    rulesets: tuple[str, ...] | list[str] = (),
+) -> ScanResult:
     target_arg = _target_arg(root, target or root)
+    configs = [f"--config={c}" for c in dict.fromkeys([SEMGREP_CONFIG, *rulesets])]
     stdout, err = _run(
         "semgrep",
         [
             "scan",
-            f"--config={SEMGREP_CONFIG}",
+            *configs,
             "--json",
             "--quiet",
             "--metrics=off",
@@ -228,10 +261,11 @@ def collect_security(clone_path: str, config: Config) -> CollectorResult:
     timeout = config.collector_timeout_seconds
     tool_status: dict[str, str] = {}
     findings: list[dict[str, Any]] = []
+    rulesets = semgrep_rulesets(root) if config.enable_semgrep else []
 
     for enabled, tool, runner in (
         (config.enable_bandit, "bandit", run_bandit),
-        (config.enable_semgrep, "semgrep", run_semgrep),
+        (config.enable_semgrep, "semgrep", functools.partial(run_semgrep, rulesets=rulesets)),
     ):
         if not enabled:
             tool_status[tool] = "disabled by config"
@@ -261,5 +295,9 @@ def collect_security(clone_path: str, config: Config) -> CollectorResult:
     return CollectorResult(
         name="security",
         status=CollectorStatus.OK,
-        data={"findings": findings, "tool_status": tool_status},
+        data={
+            "findings": findings,
+            "tool_status": tool_status,
+            "semgrep_rulesets": [SEMGREP_CONFIG, *rulesets] if config.enable_semgrep else [],
+        },
     )

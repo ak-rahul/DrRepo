@@ -14,6 +14,10 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
 
+# Version of the `Report.to_dict()` contract (report/report.schema.json).
+# Minor bump: a new optional field. Major bump: a removed, renamed, or retyped field.
+REPORT_SCHEMA_VERSION = "1.0"
+
 # ---------------------------------------------------------- repository ---
 
 _GITHUB_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$")
@@ -308,6 +312,8 @@ class Report:
     investigation_plan: dict[str, Any] = field(default_factory=dict)
     generated_at: str = ""
     drrepo_version: str = ""
+    # Package inventory: [{ecosystem, name, version, scope, license, vulnerabilities}]
+    dependencies: list[dict[str, Any]] = field(default_factory=list)
 
     def issue_counts(self) -> dict[str, int]:
         counts = {s.value: 0 for s in Severity}
@@ -316,8 +322,12 @@ class Report:
         return counts
 
     def to_dict(self) -> dict[str, Any]:
-        """Plain JSON-able dict -- the one shape every exporter and UI consumes."""
+        """Plain JSON-able dict -- the one shape every exporter and UI consumes.
+
+        Its contract is `report/report.schema.json` (see `report.schema.validate`).
+        """
         return {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "repository": self.repository,
             "overall_score": round(self.overall_score, 1),
             "generated_at": self.generated_at,
@@ -327,6 +337,7 @@ class Report:
             "issues": [i.to_dict() for i in self.issues],
             "suppressed": [s for cs in self.category_scores.values() for s in cs.suppressed],
             "quick_wins": self.quick_wins,
+            "dependencies": self.dependencies,
             "investigation_plan": self.investigation_plan,
             "collector_status": self.collector_status,
         }

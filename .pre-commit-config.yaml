@@ -48,6 +48,7 @@ repos:
     rev: 0.39.0
     hooks:
       - id: check-github-workflows
+      - id: check-github-actions # action.yml
       - id: check-dependabot
       - id: check-compose-spec
 
@@ -58,7 +59,7 @@ repos:
         name: zizmor (GitHub Actions security)
         entry: uvx zizmor@1.33.1 --offline
         language: system
-        files: ^(\.github/workflows/.*|examples/github-workflow)\.ya?ml$
+        files: ^(\.github/workflows/.*|examples/github-workflow|action)\.ya?ml$
       - id: actionlint
         name: actionlint
         entry: uvx --from actionlint-py==1.7.12.25 actionlint

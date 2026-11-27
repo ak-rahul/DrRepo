@@ -27,7 +27,7 @@ uv run drrepo analyze https://github.com/owner/repo \
 | `-d, --description` | context passed to the planner and investigators |
 | `--ref REF` | analyze a branch, tag, or full 40-character commit SHA instead of the default branch |
 | `--shallow` | no deep investigations for this run |
-| `--format` | any of `json,md,sarif`; `''` writes nothing |
+| `--format` | any of `json,md,sarif,cdx,summary`: `cdx` is a CycloneDX 1.6 SBOM (`.cdx.json`), `summary` a short Markdown summary for PR comments (`.summary.md`); `''` writes nothing |
 | `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<UTC timestamp>.<ext>`, e.g. `psf__requests_20261127-091500Z.json` |
 | `--json` | print the full JSON report to stdout (progress stays on stderr) |
 | `--fail-under N` | exit code 3 if the overall score is below N |
@@ -54,7 +54,7 @@ uv run drrepo health-api [--port 8000]              # FastAPI health endpoint
 - the overall score and grade, with deltas against the previous analysis of the same repository
 - per-category scores (🕵️ marks deep-investigated categories; `n/a` marks unassessable ones)
 - tabs: **Summary** (narratives, notes, quick wins), **Issues** (filter by severity and category), **How it investigated** (the planner's rationale and every tool call with its output), **Raw data** (collector status and full JSON)
-- JSON, Markdown, and SARIF downloads
+- JSON, Markdown, SARIF and CycloneDX SBOM downloads
 
 ## Python
 
@@ -108,20 +108,47 @@ The documentation score is a README metric rather than an issue penalty, so supp
 
 **Trust.** A file you pass with `--suppressions` (or `SUPPRESSIONS_FILE`) always applies. A `.drrepo.toml` committed inside the analyzed repository applies only with `--trust-repo-suppressions` (or `TRUST_REPO_SUPPRESSIONS=true`), because otherwise any repository could hide its own findings. Use it in CI for your own repository. Collector status records which suppressions applied and why a repository file was ignored.
 
-## In CI: gate and code scanning
+## In CI: the GitHub Action
 
 ```yaml
-- uses: astral-sh/setup-uv@v6
-- run: uvx --from git+https://github.com/ak-rahul/DrRepo drrepo analyze "https://github.com/${{ github.repository }}" --shallow --format sarif -o drrepo --fail-under 60
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-- uses: github/codeql-action/upload-sarif@v3
-  if: always()
-  with:
-    sarif_file: drrepo
+permissions:
+  contents: read
+  security-events: write   # SARIF upload
+  pull-requests: write     # only for `comment: true`
+steps:
+  - uses: ak-rahul/DrRepo@<release commit SHA>
+    with:
+      fail-under: "60"
+      comment: ${{ github.event_name == 'pull_request' }}
 ```
 
-A complete workflow (weekly schedule, permissions, Markdown artifact) is in [examples/github-workflow.yml](../examples/github-workflow.yml).
+The action analyzes the pushed commit, or the pull request head, with the DrRepo code at the ref you pinned. It writes the reports to `drrepo-report/`, uploads SARIF to code scanning, adds a summary to the job page and, with `comment: true`, keeps one summary comment up to date on the pull request. The step fails when the score is below `fail-under` or the analysis fails. A complete workflow is in [examples/github-workflow.yml](../examples/github-workflow.yml).
+
+| Input | Default | |
+|---|---|---|
+| `repository` | the workflow's repository | `owner/name`; must be public |
+| `ref` | PR head SHA, else `github.sha` | branch, tag, or full SHA |
+| `deep` | `false` | allow deep investigations (needs an LLM key in the step's `env`) |
+| `fail-under` | empty | fail below this score |
+| `formats` | `md,sarif` | any of `json,md,sarif,cdx,summary`; `summary` is always written |
+| `output-dir` | `drrepo-report` | |
+| `upload-sarif` | `true` | needs `security-events: write` |
+| `comment` | `false` | needs `pull-requests: write`; pull requests from forks get a read-only token, so the step warns and carries on |
+| `suppressions` | empty | suppression file to apply |
+| `trust-repo-suppressions` | `false` | honor the repository's `.drrepo.toml`; a fork's pull request controls that file |
+| `semgrep-version` | empty | install and run this semgrep version |
+| `github-token` | `github.token` | GitHub API calls and the comment |
+
+Outputs: `score`, `grade`, `report` (the JSON report's path) and `sarif`.
+
+Text in the summary comes from the analyzed repository, so the summary format neutralizes it: `@mentions` can't notify anyone, and HTML and images don't render.
+
+**Without the action.** Any CI system can run the CLI:
+
+```bash
+uvx --from git+https://github.com/ak-rahul/DrRepo drrepo analyze "https://github.com/owner/repo" \
+    --ref "$COMMIT_SHA" --shallow --format sarif,summary -o drrepo --fail-under 60
+```
 
 DrRepo analyzes the public GitHub copy of the repository, not the CI checkout. Each SARIF result's `uri` is repo-relative, so GitHub annotates the right files.
 
@@ -179,6 +206,8 @@ With stdio transport, stdout belongs to the protocol. All DrRepo logging goes to
 | `drrepo://reports/{owner}/{name}` | `application/json` |
 | `drrepo://reports/{owner}/{name}/markdown` | `text/markdown` |
 | `drrepo://reports/{owner}/{name}/sarif` | `application/sarif+json` |
+| `drrepo://reports/{owner}/{name}/sbom` | `application/vnd.cyclonedx+json` (CycloneDX 1.6) |
+| `drrepo://schema/report` | `application/schema+json` (the report JSON Schema) |
 
 ### Prompts
 

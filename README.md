@@ -9,15 +9,15 @@
 
 **Agentic health check for public GitHub repositories.**
 
-DrRepo clones a repository, runs real scanners over it (ruff, bandit, semgrep, a secret scanner, OSV.dev and deps.dev lookups), and gives the results to a *Lead Investigator* LLM agent. That agent decides which categories need a deep, tool-calling investigation. Everything ends up in one scored report: JSON, Markdown, or SARIF for GitHub code scanning.
+DrRepo clones a repository, runs real scanners over it (ruff, bandit, semgrep, a secret scanner, OSV.dev and deps.dev lookups), and gives the results to a *Lead Investigator* LLM agent. That agent decides which categories need a deep, tool-calling investigation. Everything ends up in one scored report: JSON, Markdown, SARIF for GitHub code scanning, or a CycloneDX SBOM.
 
 Code from the analyzed repository is never executed, installed, or built.
 
 | Category | Signals |
 |---|---|
-| Security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (CI workflows), hadolint (Dockerfiles) |
+| Security | bandit, semgrep (security audit plus per-language rulesets), secret scanner, zizmor (CI workflows), hadolint (Dockerfiles), OpenSSF Scorecard |
 | Code quality | ruff (bug-class rules), normalized per 1k lines |
-| Dependencies | OSV.dev advisories for exact pins/lockfiles, license compatibility, pinning |
+| Dependencies | OSV.dev advisories for exact pins/lockfiles, license policy or compatibility, pinning, CycloneDX SBOM |
 | Documentation | README structure and completeness |
 | Maintainability | tests, CI, license, policies, activity, archived status |
 
@@ -36,13 +36,14 @@ uv run drrepo ui                                          # web UI on :8501
 uv run drrepo mcp                                         # MCP server (stdio)
 ```
 
-Without an API key DrRepo still runs. The report is then fully deterministic, with no LLM summaries and no deep investigation.
+Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or local models through Ollama (`uv sync --extra ollama`), with an optional model per role. Without an API key DrRepo still runs. The report is then fully deterministic, with no LLM summaries and no deep investigation.
 
 ## Interfaces
 
-- **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif] [--fail-under 70]`. The exit code makes it usable as a CI gate.
+- **CLI**: `drrepo analyze <url> [--shallow] [--format json,md,sarif,cdx,summary] [--fail-under 70]`. The exit code makes it usable as a CI gate.
+- **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score, uploads SARIF to code scanning, and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
 - **Web UI**: live progress, issue filters, the investigator's tool-call trace, and report downloads.
-- **MCP server**: 8 tools, 3 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
+- **MCP server**: 8 tools, 5 resources, and 1 prompt for Claude Desktop, Claude Code, and other MCP clients. See [docs/usage.md](docs/usage.md#mcp-server).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
 - **Health API**: `drrepo health-api` serves liveness, readiness, and dependency checks.
 
@@ -67,7 +68,7 @@ Findings and scores come from deterministic code; the LLM only writes summaries 
 | [Configuration](docs/configuration.md) | every environment variable |
 | [Architecture](docs/architecture.md) | design, pipeline, resilience, security model |
 | [Agents](docs/agents.md) | every agent's job, tools, bounds, and how to edit its instructions |
-| [Report format](docs/report-format.md) | JSON schema, scoring math, SARIF mapping |
+| [Report format](docs/report-format.md) | JSON schema, scoring math, SARIF and CycloneDX mapping |
 | [Development](docs/development.md) | setup, tests, extending DrRepo |
 | [Changelog](CHANGELOG.md) · [Security](SECURITY.md) | release notes · reporting vulnerabilities |
 

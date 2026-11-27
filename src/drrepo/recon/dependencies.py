@@ -8,14 +8,22 @@ installs anything. Three lookups, each bounded and cached:
 
 `data` schema (status OK):
     packages_checked: int, dev_packages: int, unpinned: [name], manifests: [path],
+    packages: [{ecosystem, name, version, scope: "runtime" | "dev"}],
+    license_policy: {deny: [spdx], allow: [spdx]}   (from config; empty = built-in heuristic)
     vulnerabilities: [{package, ecosystem, version, dev, vuln_id, summary, severity,
-                       aliases, fixed_versions}],
+                       aliases, fixed_versions, imported_in}],
     licenses: [{package, ecosystem, version, license}]
+
+`imported_in` is the number of source files that import the package directly
+(None for dev tooling or ecosystems without import detection). Zero usually
+means a transitive dependency, which is still reachable through its parent, so
+it informs triage and never changes a severity.
 """
 
 from __future__ import annotations
 
 import contextlib
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -26,6 +34,7 @@ import httpx
 from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus
+from drrepo.recon.files import iter_repo_files, read_text_file
 from drrepo.recon.manifests import Package, discover, normalize_pypi_name
 
 NAME = "dependency_audit"
@@ -234,6 +243,63 @@ def query_licenses(
     return results
 
 
+# Distributions whose import name differs from the package name.
+_PYPI_IMPORT_ALIASES = {
+    "pyyaml": ("yaml",),
+    "beautifulsoup4": ("bs4",),
+    "pillow": ("PIL",),
+    "scikit-learn": ("sklearn",),
+    "python-dateutil": ("dateutil",),
+    "opencv-python": ("cv2",),
+    "pyjwt": ("jwt",),
+    "attrs": ("attr", "attrs"),
+    "pymysql": ("pymysql",),
+    "protobuf": ("google.protobuf",),
+    "msgpack-python": ("msgpack",),
+}
+_PY_SUFFIXES = {".py", ".pyi"}
+_JS_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+_MAX_IMPORT_SCAN_FILES = 5000
+
+
+def _import_pattern(ecosystem: str, name: str) -> re.Pattern[str] | None:
+    if ecosystem == "PyPI":
+        modules = _PYPI_IMPORT_ALIASES.get(name, (name.replace("-", "_"),))
+        alternatives = "|".join(re.escape(m) for m in modules)
+        return re.compile(rf"^\s*(?:from|import)\s+(?:{alternatives})(?=[\s.,;]|$)", re.MULTILINE)
+    if ecosystem == "npm":
+        quoted = re.escape(name)
+        return re.compile(rf"""(?:require\(|from\s+|import\s*\(?)\s*['"]{quoted}(?:/[^'"]*)?['"]""")
+    return None
+
+
+def import_evidence(root: Path, packages: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """How many source files import each `(ecosystem, name)` directly. One pass over the tree."""
+    patterns = {pkg: p for pkg in packages if (p := _import_pattern(*pkg)) is not None}
+    counts = dict.fromkeys(patterns, 0)
+    if not patterns:
+        return counts
+    for index, path in enumerate(iter_repo_files(root)):
+        if index >= _MAX_IMPORT_SCAN_FILES:
+            break
+        suffix = path.suffix.lower()
+        relevant = [
+            (pkg, p)
+            for pkg, p in patterns.items()
+            if (pkg[0] == "PyPI" and suffix in _PY_SUFFIXES)
+            or (pkg[0] == "npm" and suffix in _JS_SUFFIXES)
+        ]
+        if not relevant:
+            continue
+        text = read_text_file(path)
+        if not text:
+            continue
+        for pkg, pattern in relevant:
+            if pattern.search(text):
+                counts[pkg] += 1
+    return counts
+
+
 def collect_dependency_audit(
     clone_path: str,
     config: Config,
@@ -261,6 +327,16 @@ def collect_dependency_audit(
         "dev_packages": len(packages) - len(runtime),
         "unpinned": deps.unpinned,
         "manifests": manifests,
+        "license_policy": {"deny": list(config.license_deny), "allow": list(config.license_allow)},
+        "packages": [
+            {
+                "ecosystem": eco,
+                "name": name,
+                "version": version,
+                "scope": "dev" if (eco, name, version) in deps.dev else "runtime",
+            }
+            for eco, name, version in packages
+        ],
     }
     if not manifests:
         return CollectorResult(
@@ -295,6 +371,12 @@ def collect_dependency_audit(
             except Exception as e:  # degraded, not failed: vuln data is still valid
                 logger.warning(f"deps.dev license audit failed: {e}")
 
+    runtime_vulnerable = sorted(
+        {(v["ecosystem"], v["package"]) for v in vulnerabilities if not v.get("dev")}
+    )
+    evidence = import_evidence(root, runtime_vulnerable)
+    for v in vulnerabilities:
+        v["imported_in"] = None if v.get("dev") else evidence.get((v["ecosystem"], v["package"]))
     return CollectorResult(
         name=NAME,
         status=CollectorStatus.OK,

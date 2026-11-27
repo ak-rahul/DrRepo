@@ -10,7 +10,7 @@ Run each one from the repository root after `uv sync`. They read `.env` the same
 | [custom_collector.py](custom_collector.py) | Extending the pipeline with a new recon collector and an analyst that scores its output |
 | [mcp_client.py](mcp_client.py) | Driving `drrepo mcp` over stdio from Python: listing tools, a tool call with progress notifications, reading a report resource |
 | [mcp_client_config.json](mcp_client_config.json) | A Claude Desktop / stdio MCP client config template |
-| [github-workflow.yml](github-workflow.yml) | A drop-in GitHub Actions workflow that gates on the score and uploads SARIF to code scanning |
+| [github-workflow.yml](github-workflow.yml) | A drop-in workflow using the DrRepo action: score gate, SARIF upload, SBOM, and a pull request summary comment |
 
 ```bash
 uv run python examples/basic_usage.py https://github.com/pallets/itsdangerous --shallow

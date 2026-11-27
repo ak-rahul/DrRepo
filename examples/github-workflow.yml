@@ -1,5 +1,6 @@
 # Drop into .github/workflows/drrepo.yml of the repository you want audited.
-# DrRepo analyzes the public GitHub copy of the repository, not the CI checkout.
+# DrRepo analyzes the public GitHub copy of the repository at the pushed commit
+# (or the pull request head), not the CI checkout, so the repository must be public.
 name: DrRepo
 
 on:
@@ -12,35 +13,34 @@ on:
 
 permissions:
   contents: read
-  security-events: write # upload SARIF to code scanning
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+      pull-requests: write # the summary comment
     steps:
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
-
-      - name: Analyze
-        run: >-
-          uvx --from git+https://github.com/ak-rahul/DrRepo
-          drrepo analyze "https://github.com/${{ github.repository }}"
-          --shallow --format sarif,md -o drrepo --fail-under 60
-          --trust-repo-suppressions
+      - name: DrRepo
+        id: drrepo
+        # Pin a release commit SHA when you copy this; `main` keeps the example current.
+        uses: ak-rahul/DrRepo@main # zizmor: ignore[unpinned-uses]
+        with:
+          fail-under: "60"
+          formats: md,cdx # Markdown report and CycloneDX SBOM; SARIF is added for upload
+          comment: ${{ github.event_name == 'pull_request' }}
+          # Honors .drrepo.toml in your repository. Pull requests from forks can edit that
+          # file, so drop this line if forks can trigger the workflow.
+          trust-repo-suppressions: "true"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: LLM summaries. Drop --shallow above to allow deep investigations too.
+          # Optional: LLM summaries. Add `deep: "true"` above to allow deep investigations.
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
-      - name: Upload SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3.39.5
-        with:
-          sarif_file: drrepo
-
-      - name: Keep the Markdown report
+      - name: Keep the reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: drrepo-report
-          path: drrepo/*.md
+          path: drrepo-report/

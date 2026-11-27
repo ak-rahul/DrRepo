@@ -11,7 +11,7 @@
     },
     "commit_sha": "6771a04893780166e4b7826b63599f43ac30d00a",
     "deep_categories": [],
-    "elapsed_seconds": 6.6,
+    "elapsed_seconds": 6.8,
     "findings": [
       "attrs|code_quality|ruff|B015|bench/test_benchmarks.py",
       "attrs|code_quality|ruff|B905|src/attr/_make.py",
@@ -32,6 +32,26 @@
       "attrs|security|zizmor|unpinned-uses|.github/workflows/build-docset.yml"
     ],
     "overall": 79.6,
+    "provenance": {
+      "instructions": {
+        "code_quality": "71c3df38e73b",
+        "dependencies": "d67d526ac0c9",
+        "documentation": "cc78019995e6",
+        "maintainability": "7d20d3ff7a6b",
+        "planner": "dbadf608dfea",
+        "security": "eba26c80b3f6",
+        "shared": "23d2ae1a80b5"
+      },
+      "llm": null,
+      "tools": {
+        "bandit": "1.9.4",
+        "git": "2.47.0",
+        "hadolint": "2.15.1",
+        "ruff": "0.17.6",
+        "semgrep": null,
+        "zizmor": "1.33.1"
+      }
+    },
     "tokens": 0,
     "tool_calls": 0,
     "unverified_agent_findings": 0
@@ -43,18 +63,19 @@
       "code_quality": 97.2,
       "dependencies": 100.0,
       "documentation": 48.0,
-      "maintainability": 100.0,
+      "maintainability": 98.0,
       "security": 15.7
     },
     "commit_sha": "874ca2bc1c30d93a4ac6e36a15ed685eafe89097",
     "deep_categories": [],
-    "elapsed_seconds": 11.0,
+    "elapsed_seconds": 7.5,
     "findings": [
       "click|code_quality|ruff|B905|src/click/core.py",
       "click|documentation|readme_analyzer|missing-section-contributing|README.rst",
       "click|documentation|readme_analyzer|missing-section-documentation|README.rst",
       "click|documentation|readme_analyzer|missing-section-features|README.rst",
       "click|documentation|readme_analyzer|missing-section-license|README.rst",
+      "click|maintainability|repo_hygiene|no-security-policy|",
       "click|security|bandit|B110|src/click/_compat.py",
       "click|security|bandit|B311|examples/termui/termui.py",
       "click|security|bandit|B404|src/click/_termui_impl.py",
@@ -69,7 +90,27 @@
       "click|security|zizmor|template-injection|.github/workflows/publish.yaml",
       "click|security|zizmor|unpinned-uses|.github/workflows/publish.yaml"
     ],
-    "overall": 66.2,
+    "overall": 65.9,
+    "provenance": {
+      "instructions": {
+        "code_quality": "71c3df38e73b",
+        "dependencies": "d67d526ac0c9",
+        "documentation": "cc78019995e6",
+        "maintainability": "7d20d3ff7a6b",
+        "planner": "dbadf608dfea",
+        "security": "eba26c80b3f6",
+        "shared": "23d2ae1a80b5"
+      },
+      "llm": null,
+      "tools": {
+        "bandit": "1.9.4",
+        "git": "2.47.0",
+        "hadolint": "2.15.1",
+        "ruff": "0.17.6",
+        "semgrep": null,
+        "zizmor": "1.33.1"
+      }
+    },
     "tokens": 0,
     "tool_calls": 0,
     "unverified_agent_findings": 0
@@ -81,12 +122,12 @@
       "code_quality": 100.0,
       "dependencies": 100.0,
       "documentation": 24.0,
-      "maintainability": 100.0,
+      "maintainability": 90.5,
       "security": 76.0
     },
     "commit_sha": "096c8d42545d3b68ea21a4f890fb2b2d8979c0bd",
     "deep_categories": [],
-    "elapsed_seconds": 5.7,
+    "elapsed_seconds": 7.7,
     "findings": [
       "itsdangerous|documentation|readme_analyzer|missing-section-contributing|README.md",
       "itsdangerous|documentation|readme_analyzer|missing-section-documentation|README.md",
@@ -94,10 +135,32 @@
       "itsdangerous|documentation|readme_analyzer|missing-section-installation|README.md",
       "itsdangerous|documentation|readme_analyzer|missing-section-license|README.md",
       "itsdangerous|documentation|readme_analyzer|short-readme|README.md",
+      "itsdangerous|maintainability|repo_hygiene|inactive|",
+      "itsdangerous|maintainability|repo_hygiene|no-security-policy|",
       "itsdangerous|security|bandit|B110|src/itsdangerous/timed.py",
       "itsdangerous|security|bandit|B324|src/itsdangerous/signer.py"
     ],
-    "overall": 81.4,
+    "overall": 80.0,
+    "provenance": {
+      "instructions": {
+        "code_quality": "71c3df38e73b",
+        "dependencies": "d67d526ac0c9",
+        "documentation": "cc78019995e6",
+        "maintainability": "7d20d3ff7a6b",
+        "planner": "dbadf608dfea",
+        "security": "eba26c80b3f6",
+        "shared": "23d2ae1a80b5"
+      },
+      "llm": null,
+      "tools": {
+        "bandit": "1.9.4",
+        "git": "2.47.0",
+        "hadolint": "2.15.1",
+        "ruff": "0.17.6",
+        "semgrep": null,
+        "zizmor": "1.33.1"
+      }
+    },
     "tokens": 0,
     "tool_calls": 0,
     "unverified_agent_findings": 0
@@ -109,12 +172,12 @@
       "code_quality": 100.0,
       "dependencies": 100.0,
       "documentation": 24.0,
-      "maintainability": 100.0,
+      "maintainability": 98.0,
       "security": 75.8
     },
     "commit_sha": "28ace20b140d15c083e1cbc163ee6b7778ba098c",
     "deep_categories": [],
-    "elapsed_seconds": 4.5,
+    "elapsed_seconds": 5.8,
     "findings": [
       "markupsafe|documentation|readme_analyzer|missing-section-contributing|README.md",
       "markupsafe|documentation|readme_analyzer|missing-section-documentation|README.md",
@@ -122,6 +185,7 @@
       "markupsafe|documentation|readme_analyzer|missing-section-installation|README.md",
       "markupsafe|documentation|readme_analyzer|missing-section-license|README.md",
       "markupsafe|documentation|readme_analyzer|short-readme|README.md",
+      "markupsafe|maintainability|repo_hygiene|no-security-policy|",
       "markupsafe|security|bandit|B404|bench.py",
       "markupsafe|security|bandit|B603|bench.py",
       "markupsafe|security|zizmor|artipacked|.github/workflows/pre-commit.yaml",
@@ -130,7 +194,27 @@
       "markupsafe|security|zizmor|template-injection|.github/workflows/publish.yaml",
       "markupsafe|security|zizmor|unpinned-uses|.github/workflows/publish.yaml"
     ],
-    "overall": 81.3,
+    "overall": 81.0,
+    "provenance": {
+      "instructions": {
+        "code_quality": "71c3df38e73b",
+        "dependencies": "d67d526ac0c9",
+        "documentation": "cc78019995e6",
+        "maintainability": "7d20d3ff7a6b",
+        "planner": "dbadf608dfea",
+        "security": "eba26c80b3f6",
+        "shared": "23d2ae1a80b5"
+      },
+      "llm": null,
+      "tools": {
+        "bandit": "1.9.4",
+        "git": "2.47.0",
+        "hadolint": "2.15.1",
+        "ruff": "0.17.6",
+        "semgrep": null,
+        "zizmor": "1.33.1"
+      }
+    },
     "tokens": 0,
     "tool_calls": 0,
     "unverified_agent_findings": 0
@@ -147,7 +231,7 @@
     },
     "commit_sha": "0e322af87745eff34caffe4df68456ebc20d9068",
     "deep_categories": [],
-    "elapsed_seconds": 7.0,
+    "elapsed_seconds": 7.5,
     "findings": [
       "requests|code_quality|ruff|B004|src/requests/hooks.py",
       "requests|code_quality|ruff|B010|src/requests/models.py",
@@ -171,6 +255,26 @@
       "requests|security|zizmor|excessive-permissions|.github/workflows/close-issues.yml"
     ],
     "overall": 65.3,
+    "provenance": {
+      "instructions": {
+        "code_quality": "71c3df38e73b",
+        "dependencies": "d67d526ac0c9",
+        "documentation": "cc78019995e6",
+        "maintainability": "7d20d3ff7a6b",
+        "planner": "dbadf608dfea",
+        "security": "eba26c80b3f6",
+        "shared": "23d2ae1a80b5"
+      },
+      "llm": null,
+      "tools": {
+        "bandit": "1.9.4",
+        "git": "2.47.0",
+        "hadolint": "2.15.1",
+        "ruff": "0.17.6",
+        "semgrep": null,
+        "zizmor": "1.33.1"
+      }
+    },
     "tokens": 0,
     "tool_calls": 0,
     "unverified_agent_findings": 0

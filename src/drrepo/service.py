@@ -27,7 +27,7 @@ from drrepo.models import RepoRef
 from drrepo.pipeline import ProgressCallback, RunContext, Workflow
 from drrepo.recon.clone import validate_ref
 from drrepo.recon.dependencies import DependencyLookupCache
-from drrepo.report.exporters import EXPORTERS
+from drrepo.report.exporters import EXPORTERS, EXTENSIONS
 from drrepo.report.history import DEFAULT_HISTORY_PATH, attach_and_record_history
 from drrepo.report.suppressions import Suppression
 from drrepo.report.suppressions import load_file as load_suppression_file
@@ -51,8 +51,17 @@ class AnalysisService:
         self.config = config
         self.history_path = history_path
         self.workflow = workflow or Workflow()
+        self.role_clients: dict[str, Any] = {}
         if llm_client is _UNSET:
-            llm_client = build_chat_model(config) if not config.validate_for_llm() else None
+            llm_client = None
+            if not config.validate_for_llm():
+                # One client per distinct model: roles sharing a model share a client.
+                by_model: dict[str, Any] = {}
+                for role, model in config.models_by_role().items():
+                    if model not in by_model:
+                        by_model[model] = build_chat_model(config, model)
+                    self.role_clients[role] = by_model[model]
+                llm_client = by_model.get(config.model_for()) or build_chat_model(config)
         self.llm_client = llm_client
         self.breaker = (
             CircuitBreaker(
@@ -82,7 +91,12 @@ class AnalysisService:
         )
         context = RunContext(
             config=config,
-            llm=LLMRuntime(client=self.llm_client, breaker=self.breaker, budget=budget),
+            llm=LLMRuntime(
+                client=self.llm_client,
+                breaker=self.breaker,
+                budget=budget,
+                role_clients=dict(self.role_clients),
+            ),
             cache=self.cache,
             suppressions=list(suppressions or []),
         )
@@ -172,7 +186,7 @@ def save_report(
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%SZ")
     paths = []
     for fmt in formats:
-        path = output_dir / f"{slug}_{stamp}.{fmt}"
+        path = output_dir / f"{slug}_{stamp}.{EXTENSIONS[fmt]}"
         path.write_text(EXPORTERS[fmt](report), encoding="utf-8")
         paths.append(path)
     return paths

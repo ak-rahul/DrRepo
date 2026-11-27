@@ -30,7 +30,27 @@ _TIMEOUT = 5.0
 _PROVIDER_MODELS_URL = {
     "groq": "https://api.groq.com/openai/v1/models",
     "openai": "https://api.openai.com/v1/models",
+    "anthropic": "https://api.anthropic.com/v1/models",
 }
+
+
+def _list_models(config: Config, client: httpx.Client) -> tuple[int, set[str]]:
+    """(HTTP status, model ids offered). Spends no tokens: model listing only."""
+    if config.model_provider == "ollama":
+        resp = client.get(f"{config.ollama_base_url.rstrip('/')}/api/tags")
+        if resp.status_code != 200:
+            return resp.status_code, set()
+        names = {m.get("name", "") for m in resp.json().get("models", [])}
+        # "llama3.1:latest" also answers to "llama3.1".
+        return 200, names | {n.removesuffix(":latest") for n in names}
+    if config.model_provider == "anthropic":
+        headers = {"x-api-key": config.api_key(), "anthropic-version": "2023-06-01"}
+    else:
+        headers = {"Authorization": f"Bearer {config.api_key()}"}
+    resp = client.get(_PROVIDER_MODELS_URL[config.model_provider], headers=headers)
+    if resp.status_code != 200:
+        return resp.status_code, set()
+    return 200, {m.get("id") for m in resp.json().get("data", [])}
 
 
 @dataclass
@@ -60,28 +80,27 @@ def _timed(name: str, probe: Callable[[], ComponentHealth]) -> ComponentHealth:
 
 
 def check_llm(config: Config, client: httpx.Client) -> ComponentHealth:
+    """Reachability of the provider, and that it offers every model configured per role."""
     name = f"llm_{config.model_provider}"
-    key = config.groq_api_key if config.model_provider == "groq" else config.openai_api_key
 
     def probe() -> ComponentHealth:
-        if not key:
-            return ComponentHealth(
-                name, "not_configured", detail=f"{config.model_provider.upper()} API key not set"
-            )
-        resp = client.get(
-            _PROVIDER_MODELS_URL[config.model_provider], headers={"Authorization": f"Bearer {key}"}
-        )
-        if resp.status_code == 401:
+        missing_key = config.validate_for_llm()
+        if missing_key:
+            return ComponentHealth(name, "not_configured", detail=f"{missing_key[0]} not set")
+        status, offered = _list_models(config, client)
+        if status == 401:
             return ComponentHealth(name, "down", detail="API key rejected (401)")
-        if resp.status_code == 429:
+        if status == 429:
             return ComponentHealth(name, "degraded", detail="rate limited (429)")
-        resp.raise_for_status()
-        models = {m.get("id") for m in resp.json().get("data", [])}
-        if config.model_name not in models:
+        if status != 200:
+            return ComponentHealth(name, "down", detail=f"model listing returned HTTP {status}")
+        roles = config.models_by_role()
+        unavailable = sorted({m for m in roles.values() if m not in offered})
+        if unavailable:
             return ComponentHealth(
-                name, "degraded", detail=f"model {config.model_name!r} not offered by provider"
+                name, "degraded", detail=f"model(s) not offered by provider: {unavailable}"
             )
-        return ComponentHealth(name, "up", extra={"model": config.model_name})
+        return ComponentHealth(name, "up", extra={"models": roles})
 
     return _timed(name, probe)
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -17,8 +18,13 @@ from drrepo.models import CollectorResult, CollectorStatus
 
 
 @pytest.fixture(autouse=True)
-def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail loudly if a unit test opens a real HTTP connection or runs a real clone."""
+def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Fail loudly if a unit test opens a real HTTP connection or runs a real clone.
+
+    A blocked request raises inside the code under test *and* fails the test at
+    teardown, so a broad `except` in production code (collectors degrade instead
+    of crashing) can't swallow the guard.
+    """
 
     def _no_clone(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError(
@@ -26,11 +32,22 @@ def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr("drrepo.pipeline.clone_repo", _no_clone)
-    _block_http(monkeypatch)
+    # The pipeline's Scorecard collector would call a public API; pipeline tests get
+    # a "skipped" result unless they patch it. Its own tests call the module directly.
+    monkeypatch.setattr(
+        "drrepo.pipeline.collect_scorecard",
+        lambda *_a, **_k: CollectorResult.skipped("scorecard", "network disabled in unit tests"),
+    )
+    attempts: list[str] = []
+    _block_http(monkeypatch, attempts)
+    yield
+    if attempts:
+        pytest.fail(f"unit test made real HTTP request(s): {attempts}", pytrace=False)
 
 
-def _block_http(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _blocked(*_args: Any, **_kwargs: Any) -> None:
+def _block_http(monkeypatch: pytest.MonkeyPatch, attempts: list[str]) -> None:
+    def _blocked(_transport: Any, request: httpx.Request, *_args: Any, **_kwargs: Any) -> None:
+        attempts.append(f"{request.method} {request.url}")
         raise RuntimeError(
             "unit tests must not make real HTTP requests; inject an httpx.MockTransport"
         )

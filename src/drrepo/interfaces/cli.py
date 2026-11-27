@@ -270,7 +270,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         line(
             None if missing else True,
             "configuration",
-            f"missing {missing}" if missing else f"{config.model_provider}/{config.model_name}",
+            f"missing {missing}"
+            if missing
+            else f"{config.model_provider}: "
+            + ", ".join(f"{role}={model}" for role, model in config.models_by_role().items()),
         )
         line(
             True if config.github_token else None,

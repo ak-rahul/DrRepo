@@ -57,6 +57,7 @@ def synthesize_report(
     investigation_plan: InvestigationPlan | None = None,
     generated_at: str = "",
     drrepo_version: str = "",
+    dependencies: list[dict[str, Any]] | None = None,
 ) -> Report:
     ordered: dict[str, CategoryFinding] = {
         c.value: category_findings[c.value] for c in Category if c.value in category_findings
@@ -75,7 +76,29 @@ def synthesize_report(
         investigation_plan=investigation_plan.to_dict() if investigation_plan else {},
         generated_at=generated_at,
         drrepo_version=drrepo_version,
+        dependencies=dependencies or [],
     )
+
+
+def dependency_inventory(audit: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Packages from the dependency audit, with license and advisory ids merged in."""
+    if not audit:
+        return []
+    licenses = {
+        (lic["ecosystem"], lic["package"], lic["version"]): lic.get("license")
+        for lic in audit.get("licenses", [])
+    }
+    advisories: dict[tuple[str, str, str], list[str]] = {}
+    for v in audit.get("vulnerabilities", []):
+        advisories.setdefault((v["ecosystem"], v["package"], v["version"]), []).append(v["vuln_id"])
+    return [
+        {
+            **pkg,
+            "license": licenses.get((pkg["ecosystem"], pkg["name"], pkg["version"])),
+            "vulnerabilities": advisories.get((pkg["ecosystem"], pkg["name"], pkg["version"]), []),
+        }
+        for pkg in audit.get("packages", [])
+    ]
 
 
 def grade(score: float) -> str:

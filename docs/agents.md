@@ -2,7 +2,7 @@
 
 DrRepo has seven LLM-backed roles: one **Lead Investigator** that plans the audit, and five **category analysts**, each of which can act on two paths. Every role's job description is a markdown file in [`src/drrepo/agents/instructions/`](../src/drrepo/agents/instructions/). These files are the prompts the models receive, so to change how an agent behaves, edit its document. You rarely need to touch Python.
 
-What no agent does: decide scores. Scores and the file, line, rule and severity of every scanner finding come from deterministic code (`Analyst.assess()`). Agents write summaries, and on the deep path they add issues they verified with tools. Without an API key, DrRepo runs with no agents at all and still produces a complete, deterministic report.
+What no agent does: decide scores. Scores and the file, line, rule and severity of every scanner finding come from deterministic code (`Analyst.assess()`). Agents write summaries, and on the deep path they add issues they verified with tools. The one exception is bounded: the [documentation rubric](#documentation-rubric) can move the documentation score by at most ±25 points. Without an API key, DrRepo runs with no agents at all and still produces a complete, deterministic report.
 
 ## How a run uses the agents
 
@@ -11,6 +11,8 @@ recon (no LLM) ─► Lead Investigator ─► for each of the 5 categories, in 
                   (1 structured call)     assess() in code ─► Narrative (1 call)
                                           └─ if planned deep: Investigation (ReAct loop with tools)
 ```
+
+Each role can use its own model (`MODEL_NAME_PLANNER`, `MODEL_NAME_NARRATIVE`, `MODEL_NAME_INVESTIGATION`; see [configuration.md](configuration.md)). For example, use a small, fast model for summaries and your most reliable tool-user for deep investigations. The planner's model also runs the documentation rubric. All roles share the run's circuit breaker and token budget, and the report's `provenance.llm.roles` records which model did what.
 
 | Role | Instructions | Calls per run | Output |
 |---|---|---|---|
@@ -40,7 +42,7 @@ Each analyst lives in `agents/analysts/<category>.py` and has three parts:
 |---|---|---|
 | security | bandit, semgrep `p/security-audit`, secret scanner, zizmor (workflows), hadolint and root-user check (Dockerfiles) | files, scanners, git_history |
 | code_quality | ruff bug-class rules, normalized per 1k lines | files, scanners |
-| dependencies | OSV.dev advisories (exact versions), deps.dev licenses, pinning | files, dependencies |
+| dependencies | OSV.dev advisories (exact versions) with direct-import evidence, deps.dev licenses against the license policy, pinning | files, dependencies |
 | documentation | README structure metrics | files |
 | maintainability | tests, CI, license, policies, activity, archived status | files, git_history |
 
@@ -80,6 +82,23 @@ Before an investigator's issues are merged, `agents/grounding.py` verifies each 
 The category's notes record how many findings were dropped or downgraded, so the effect is visible in every report. Agents are told these rules in `shared.md`.
 
 Any failure raises `InvestigationError` inside the loop. The category then falls back to its shallow result, and the report notes why. The trace of every tool call (tool, input, truncated output) is kept in the report, so a reader can check that each claim came from real evidence.
+
+## Documentation rubric
+
+README metrics (headings, word counts) are DrRepo's weakest heuristic. When an LLM is available (and `ENABLE_LLM_JUDGMENT` is on), the documentation analyst's `judge()` makes one structured call (`agents/rubric.py`, instructions in `documentation.md` under `## Rubric`). It grades the README against six criteria: purpose, installation, usage, configuration, contributing and status. Each gets `met`, `partial`, `missing` or `not_applicable`, with a reason. The model also sees the project's real build config (package name, entry points, lockfiles from `repo_layout.build_config`), so it can check that install and usage instructions match reality. The README is fenced as data.
+
+Everything after the call is code:
+
+| Step | Rule |
+|---|---|
+| Points | met 1, partial 0.5, missing 0; n/a excluded |
+| Score | the README metric score, moved toward the rubric score by **at most ±25** (`MAX_ADJUSTMENT`), so a README that talks the model into "perfect" gains 25 points at most |
+| Spot check | a `met` verdict citing a file that doesn't exist becomes `partial` |
+| False positives | a heading-based "no Installation section" issue that the rubric found covered under another heading is downgraded to `low`, not removed |
+| New issues | `missing` or `partial` criteria the metrics didn't already flag become `doc_rubric` issues |
+| Failure | any error leaves the metric score, with a note |
+
+The category's notes show the verdict counts and the score change, for example "score 33 -> 58 (LLM judgment, bounded to ±25)".
 
 ## The instruction files
 

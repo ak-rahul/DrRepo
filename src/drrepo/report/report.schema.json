@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ak-rahul/DrRepo/report.schema.json",
+  "title": "DrRepo report",
+  "description": "The dict every DrRepo exporter and interface consumes (Report.to_dict()). Versioned by schema_version: a new optional field is a minor bump, a removed or retyped field a major bump.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "overall_score",
+    "generated_at",
+    "drrepo_version",
+    "issue_counts",
+    "category_scores",
+    "issues",
+    "suppressed",
+    "quick_wins",
+    "dependencies",
+    "investigation_plan",
+    "collector_status"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "full_name", "url"],
+      "properties": {
+        "name": {"type": "string"},
+        "full_name": {"type": "string"},
+        "url": {"type": "string"},
+        "description": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "stars": {"type": "integer", "minimum": 0},
+        "forks": {"type": "integer", "minimum": 0},
+        "license": {"type": ["string", "null"]},
+        "commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "ref": {"type": ["string", "null"]}
+      }
+    },
+    "overall_score": {"$ref": "#/$defs/score"},
+    "generated_at": {"type": "string"},
+    "drrepo_version": {"type": "string"},
+    "issue_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical", "high", "medium", "low"],
+      "properties": {
+        "critical": {"type": "integer", "minimum": 0},
+        "high": {"type": "integer", "minimum": 0},
+        "medium": {"type": "integer", "minimum": 0},
+        "low": {"type": "integer", "minimum": 0}
+      }
+    },
+    "category_scores": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/category"},
+      "additionalProperties": {"$ref": "#/$defs/categoryFinding"}
+    },
+    "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+    "suppressed": {"type": "array", "items": {"$ref": "#/$defs/suppressedIssue"}},
+    "quick_wins": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+    "dependencies": {
+      "type": "array",
+      "description": "Package inventory from the analyzed manifests and lockfiles (the source of the CycloneDX SBOM).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ecosystem", "name", "version", "scope", "license", "vulnerabilities"],
+        "properties": {
+          "ecosystem": {"type": "string"},
+          "name": {"type": "string"},
+          "version": {"type": "string"},
+          "scope": {"enum": ["runtime", "dev"]},
+          "license": {"type": ["string", "null"]},
+          "vulnerabilities": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "investigation_plan": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/category"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["depth", "rationale"],
+        "properties": {
+          "depth": {"$ref": "#/$defs/depth"},
+          "rationale": {"type": "string"}
+        }
+      }
+    },
+    "collector_status": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "detail"],
+        "properties": {
+          "status": {"enum": ["ok", "skipped", "error"]},
+          "detail": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "llm_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["used_tokens", "max_tokens", "remaining_tokens"],
+      "properties": {
+        "used_tokens": {"type": "integer", "minimum": 0},
+        "max_tokens": {"type": "integer", "minimum": 0},
+        "remaining_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "score_history": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previous_timestamp", "overall_score_delta", "category_score_deltas"],
+      "properties": {
+        "previous_timestamp": {"type": "string"},
+        "previous_commit_sha": {"type": ["string", "null"]},
+        "overall_score_delta": {"type": "number"},
+        "category_score_deltas": {"type": "object", "additionalProperties": {"type": "number"}}
+      }
+    }
+  },
+  "$defs": {
+    "score": {"type": "number", "minimum": 0, "maximum": 100},
+    "category": {
+      "enum": ["documentation", "code_quality", "security", "dependencies", "maintainability"]
+    },
+    "severity": {"enum": ["critical", "high", "medium", "low"]},
+    "depth": {"enum": ["shallow", "deep"]},
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line"],
+      "properties": {
+        "file": {"type": "string"},
+        "line": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "category",
+        "title",
+        "description",
+        "recommendation",
+        "source",
+        "rule_id",
+        "file",
+        "line",
+        "locations",
+        "occurrences"
+      ],
+      "properties": {
+        "severity": {"$ref": "#/$defs/severity"},
+        "category": {"$ref": "#/$defs/category"},
+        "title": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "recommendation": {"type": "string"},
+        "source": {"type": "string", "minLength": 1},
+        "rule_id": {"type": ["string", "null"]},
+        "file": {"type": ["string", "null"]},
+        "line": {"type": ["integer", "null"]},
+        "locations": {"type": "array", "items": {"$ref": "#/$defs/location"}},
+        "occurrences": {"type": "integer", "minimum": 1}
+      }
+    },
+    "suppressedIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "suppression"],
+      "properties": {
+        "issue": {"$ref": "#/$defs/issue"},
+        "suppression": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rule", "path", "reason", "expires", "origin"],
+          "properties": {
+            "rule": {"type": "string"},
+            "path": {"type": ["string", "null"]},
+            "reason": {"type": "string", "minLength": 1},
+            "expires": {"type": ["string", "null"], "format": "date"},
+            "origin": {"enum": ["local", "repository"]}
+          }
+        }
+      }
+    },
+    "categoryFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "score",
+        "summary",
+        "assessed",
+        "issues",
+        "investigation_depth",
+        "investigation_trace",
+        "notes",
+        "suppressed"
+      ],
+      "properties": {
+        "category": {"$ref": "#/$defs/category"},
+        "score": {"$ref": "#/$defs/score"},
+        "summary": {"type": "string"},
+        "assessed": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+        "investigation_depth": {"$ref": "#/$defs/depth"},
+        "investigation_trace": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "tool_input", "observation"],
+            "properties": {
+              "tool": {"type": "string"},
+              "tool_input": {"type": "object"},
+              "observation": {"type": "string"}
+            }
+          }
+        },
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "suppressed": {"type": "array", "items": {"$ref": "#/$defs/suppressedIssue"}}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions", "llm", "tools"],
+      "properties": {
+        "instructions": {
+          "type": "object",
+          "description": "Short SHA-256 of each agent instructions file used.",
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{12}$"}
+        },
+        "llm": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["provider", "model"],
+          "properties": {
+            "provider": {"type": "string"},
+            "model": {"type": "string"},
+            "roles": {
+              "type": "object",
+              "description": "Model used per role (planner/rubric, narrative, investigation).",
+              "additionalProperties": {"type": "string"}
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "description": "Version of each scanner that ran, or null if unavailable.",
+          "additionalProperties": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

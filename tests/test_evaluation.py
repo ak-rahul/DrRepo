@@ -189,3 +189,19 @@ def test_cli_eval_compares_and_returns_regression_code(monkeypatch, tmp_path, ca
     ]
     assert cli.main(argv) == cli.EXIT_FAIL_UNDER
     assert "security fell -40.0" in capsys.readouterr().out
+
+
+def test_collector_failures_are_environment_problems_not_drift(tmp_path):
+    baseline = {"demo": summarize(CASE, _report(), 1)}
+    degraded_report = _report(security=10.0)
+    degraded_report["collector_status"] = {
+        "github_metadata": {"status": "error", "detail": "rate limited"}
+    }
+    current = {"demo": summarize(CASE, degraded_report, 1)}
+    [diff] = compare(current, baseline).cases
+    assert diff.regressions == [
+        "environment: github_metadata failed (rate limited); scores not comparable"
+    ]
+    assert diff.category_deltas == {}  # no misleading score deltas
+    with pytest.raises(ValueError, match="degraded run"):
+        write_baseline(tmp_path / "b.json", current)

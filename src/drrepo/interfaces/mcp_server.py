@@ -17,6 +17,7 @@ Resources
     drrepo://reports/{owner}/{name}           JSON report
     drrepo://reports/{owner}/{name}/markdown  Markdown report
     drrepo://reports/{owner}/{name}/sarif     SARIF 2.1.0 log
+    drrepo://schema/report                    JSON Schema for the report
 Prompts
     review_repository         guided "audit this repo and plan fixes" prompt
 
@@ -26,6 +27,7 @@ breaker and dependency cache carry across tool calls.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -42,8 +44,9 @@ from drrepo.log import logger
 from drrepo.models import RepoRef, Severity
 from drrepo.recon.clone import validate_ref
 from drrepo.recon.readme import analyze_readme
-from drrepo.report.exporters import to_json, to_markdown, to_sarif
+from drrepo.report.exporters import to_cyclonedx, to_json, to_markdown, to_sarif
 from drrepo.report.history import load_history
+from drrepo.report.schema import load_schema
 from drrepo.service import AnalysisService
 
 mcp = MCPServer(
@@ -96,7 +99,12 @@ def _summary(report: dict[str, Any], max_issues: int) -> dict[str, Any]:
         "score_history": report.get("score_history"),
         "resources": {
             fmt: f"drrepo://reports/{report.get('repository', {}).get('full_name')}{suffix}"
-            for fmt, suffix in (("json", ""), ("markdown", "/markdown"), ("sarif", "/sarif"))
+            for fmt, suffix in (
+                ("json", ""),
+                ("markdown", "/markdown"),
+                ("sarif", "/sarif"),
+                ("sbom", "/sbom"),
+            )
         },
     }
 
@@ -286,6 +294,18 @@ def report_markdown(owner: str, name: str) -> str:
 def report_sarif(owner: str, name: str) -> str:
     """SARIF 2.1.0 log (GitHub code scanning format) for a repository analyzed in this session."""
     return to_sarif(_resource_report(owner, name))
+
+
+@mcp.resource("drrepo://reports/{owner}/{name}/sbom", mime_type="application/vnd.cyclonedx+json")
+def report_sbom(owner: str, name: str) -> str:
+    """CycloneDX 1.6 SBOM (dependencies with OSV advisories) for a repository analyzed in this session."""
+    return to_cyclonedx(_resource_report(owner, name))
+
+
+@mcp.resource("drrepo://schema/report", mime_type="application/schema+json")
+def report_schema() -> str:
+    """JSON Schema (2020-12) for every DrRepo report: the contract the tools and resources follow."""
+    return json.dumps(load_schema(), indent=2)
 
 
 @mcp.prompt()

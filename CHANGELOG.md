@@ -22,6 +22,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Upgraded FastAPI to 0.165 and refreshed `uv.lock`.
 
 ### Fixed
+- An unexpected exception inside any collector crashed the whole analysis. The collector node now turns it into an `error` result, and the run continues.
+- The documentation narrative excerpt also came from the HEAD README instead of the analyzed commit.
 - The README was read from the GitHub API, which always serves HEAD, even when a specific commit was analyzed. It now comes from the clone, falling back to the API.
 - Score history: a failed write (read-only volume, a file locked on Windows) no longer fails a finished analysis. Concurrent writers from separate processes (UI and MCP server sharing `reports/`) no longer lose updates.
 - MCP progress notifications sent from LangGraph's worker threads were silently dropped. Clients now receive every step.
@@ -29,6 +31,19 @@ All notable changes to this project are documented here. The format follows [Kee
 - Coverage now includes the Streamlit app. It used to report 0% because the app runs as `__main__`.
 
 ### Added
+- GitHub Action (`action.yml`): `uses: ak-rahul/DrRepo@<sha>` analyzes the pushed commit or pull request head with the DrRepo code at the pinned ref, gates on `fail-under`, uploads SARIF, writes a job summary, and can keep one summary comment on the pull request. Outputs: `score`, `grade`, `report`, `sarif`. CI runs it on a pinned repository, and pre-commit lints it with zizmor and its schema.
+- `--format summary`: a short Markdown summary (score, categories, top issues) for PR comments and job summaries. Text from the analyzed repository is neutralized, so it can't mention people or load images.
+- Dependency depth:
+  - Every report lists its `dependencies` (ecosystem, name, version, runtime or dev scope, license, advisory ids).
+  - `--format cdx` exports them as a CycloneDX 1.6 SBOM with package URLs and OSV vulnerabilities. The MCP server serves it as `drrepo://reports/{owner}/{name}/sbom`.
+  - `LICENSE_DENY` and `LICENSE_ALLOW` enforce an explicit license policy in place of the copyleft heuristic.
+  - Vulnerable runtime packages note how many source files import them directly. A package that is never imported directly is marked as likely transitive; its severity doesn't change, because it is still reachable through its parent.
+- Language-aware semgrep: registry rulesets for the repository's main languages (up to 3) run alongside `p/security-audit`. The report records which ran.
+- OpenSSF Scorecard: checks a shallow clone can't see (branch protection, code review, signed releases, binary artifacts, fuzzing, SAST) count toward security on the bounded curve. Checks overlapping DrRepo's own are skipped, and a scan of a different commit is noted. Toggle: `ENABLE_SCORECARD`.
+- Model routing and providers: optional `MODEL_NAME_PLANNER`, `MODEL_NAME_NARRATIVE` and `MODEL_NAME_INVESTIGATION` choose a model per role (sharing one breaker and budget), and the providers `anthropic` and `ollama` (local; code never leaves the machine) ship as optional extras. `MODEL_NAME` now defaults per provider, `drrepo health` checks every configured model, and provenance records the model per role.
+- Documentation rubric: with an LLM available, the README is graded against six criteria using the project's real build config as ground truth. Code turns the verdicts into points and moves the documentation score by at most ±25, so a prompt-injected README can't award itself a perfect score. Verdicts citing missing files are downgraded, and heading-based false positives are downgraded, never removed. Toggle: `ENABLE_LLM_JUDGMENT`. The layout collector now reports `build_config` (package names, entry points, lockfiles).
+- Provenance in every report: a hash of each agent instructions file as sent, the provider and model, and each scanner's version. It is also written to the SARIF run properties. `drrepo eval` lists provenance changes since the baseline, treats collector failures (for example GitHub rate limits) as environment problems, and won't baseline a degraded run.
+- A versioned report contract: `schema_version` in every report, plus a JSON Schema (`drrepo/report/report.schema.json`) that ships in the package and is served over MCP as `drrepo://schema/report`. Tests validate every report shape against it.
 - Suppressions and baselines: a `.drrepo.toml` with `[[suppress]]` entries (rule, optional path glob, required reason, optional expiry) excludes reviewed findings from scores while keeping them visible in the report and as native SARIF suppressions. `drrepo baseline` writes one from the current findings. A repository's own file applies only with `TRUST_REPO_SUPPRESSIONS`.
 - CI workflow and container security for analyzed repositories, in a new `infrastructure` collector:
   - zizmor audits GitHub Actions workflows and Dependabot config, catching template injection, dangerous triggers, unpinned actions and broad tokens.

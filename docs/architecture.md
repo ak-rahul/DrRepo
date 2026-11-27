@@ -39,7 +39,7 @@ src/drrepo/
   agents/           llm (chat model, TokenBudget, LLMRuntime), planner, investigator,
                     tools (all investigator tools + build_tools), analysts/ (one per category),
                     prompts (loader) + instructions/*.md (every agent's job, as documents)
-  report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF)
+  report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX)
   interfaces/       cli, streamlit_app, mcp_server, health (checks + FastAPI app)
 ```
 
@@ -50,12 +50,12 @@ Package `__init__.py` files contain only a docstring (`agents/analysts/__init__.
 1. **Compiled once, run many times.** `Workflow` holds no per-run state. Everything run-specific travels in a `RunContext` through LangGraph's runtime context (`StateGraph(State, context_schema=RunContext)`; nodes receive `runtime.context`): the config (with per-run overrides), an `LLMRuntime` with a fresh `TokenBudget`, the dependency cache, and the progress callback. One compiled graph therefore serves concurrent Streamlit sessions and MCP calls (see `test_one_compiled_graph_serves_concurrent_runs`).
 2. **Declarative recon.** `pipeline.COLLECTORS` is a tuple of `CollectorSpec(name, run, progress, needs_clone, after)`. The graph is generated from it: edges come from `after`, `needs_clone` specs are skipped uniformly when there is no clone, and `defer=True` is derived from the topology (see the fan-in section).
 3. **Typed state.** Nodes exchange `CollectorResult` and `CategoryFinding` objects. Only the final `Report` is converted with `to_dict()`, for exporters and interfaces.
-4. **Deterministic first.** Analysts compute issues and scores in code. The LLM narrates, or adds evidence it verified with tools (the analyst contract below).
+4. **Deterministic first, bounded judgment second.** Analysts compute issues and scores in code. The LLM narrates, or adds evidence it verified with tools (the analyst contract below). Where a heuristic is weak, an analyst's optional `judge()` may add bounded LLM judgment: today that is only the documentation rubric, at most ±25 points. Judgment adds issues or downgrades a heuristic's false positive; it never removes a deterministic finding.
 5. **Degrade, don't crash.** Every external dependency (git, GitHub, scanners, OSV, deps.dev, the LLM) can fail. When one does, only the signals that need it degrade, with a recorded reason.
 
 ## Stage 1: recon (`recon/`)
 
-Each collector is a plain function returning `CollectorResult(name, status, data, detail)`. A collector never raises for an expected failure: it returns `skipped` or `error` with a reason. Consumers read data through `collector_data(recon, name)`, which returns None unless the status is `ok`.
+Each collector is a plain function returning `CollectorResult(name, status, data, detail)`. A collector never raises for an expected failure: it returns `skipped` or `error` with a reason. As a safety net, the collector node turns any *unexpected* exception into an `error` result, so one broken signal can never fail the analysis. Consumers read data through `collector_data(recon, name)`, which returns None unless the status is `ok`.
 
 | Collector | Module | Produces |
 |---|---|---|
@@ -64,13 +64,14 @@ Each collector is a plain function returning `CollectorResult(name, status, data
 | `github_metadata` | `recon/github.py` | stars, license SPDX id, activity, archived flag, README, root structure |
 | `readme` | `pipeline._readme` → `recon/readme.py` | heading-based sections, examples, badges, 0–100 score; reads the API README first, then the clone |
 | `static_analysis` | `recon/scanners.py` | `ruff --isolated --select E4,E7,E9,F,B,PLE`, tests excluded |
-| `security` | `recon/scanners.py` + `recon/secrets.py` | bandit (tests and asserts excluded), semgrep `p/security-audit` (metrics off), secret scanner |
+| `security` | `recon/scanners.py` + `recon/secrets.py` | bandit (tests and asserts excluded), semgrep `p/security-audit` plus registry rulesets for the repository's main languages (up to 3 of `p/python`, `p/javascript`, `p/typescript`, `p/golang`, `p/java`, …; metrics off), secret scanner |
+| `scorecard` | `recon/scorecard.py` | OpenSSF Scorecard checks a shallow clone can't see (branch protection, code review, signed releases, binary artifacts, fuzzing, SAST). Checks that overlap DrRepo's own are skipped, and a scan of a different commit is noted |
 | `infrastructure` | `recon/infrastructure.py` | zizmor over GitHub Actions workflows and Dependabot config (offline; the repo's own config and ignore comments are disabled), hadolint over Dockerfiles (run from a neutral directory with ignore pragmas disabled), and a built-in check for containers that never drop root |
 | `dependency_audit` | `recon/dependencies.py` + `recon/manifests.py` | OSV `querybatch` → advisory details → deps.dev licenses, all bounded and cached |
 
 Scanners run with `cwd` set to the clone, and every path is rewritten repo-relative by `recon.files.relative_posix`.
 
-**Dependencies: exact versions only.** `manifests.py` parses `requirements*.txt`, `pyproject.toml` (PEP 621, dependency groups, Poetry), `package.json`, `uv.lock`, `poetry.lock` and `package-lock.json`. Only `==` pins and lockfile entries are audited, because a range's lower bound says nothing about what gets installed. Ranges go to `unpinned`. A lockfile replaces its own ecosystem's manifests in the same directory. Packages are classified dev-only or runtime (for `uv.lock`, by the transitive closure of the project's runtime dependencies), and the analyst lowers dev-only advisories by two severity levels. License lookups cover runtime packages only.
+**Dependencies: exact versions only.** `manifests.py` parses `requirements*.txt`, `pyproject.toml` (PEP 621, dependency groups, Poetry), `package.json`, `uv.lock`, `poetry.lock` and `package-lock.json`. Only `==` pins and lockfile entries are audited, because a range's lower bound says nothing about what gets installed. Ranges go to `unpinned`. A lockfile replaces its own ecosystem's manifests in the same directory. Packages are classified dev-only or runtime (for `uv.lock`, by the transitive closure of the project's runtime dependencies), and the analyst lowers dev-only advisories by two severity levels. License lookups cover runtime packages only. For each vulnerable runtime package the collector counts the source files that import it directly (Python and JavaScript/TypeScript, one pass over the tree). The count annotates the finding and never changes its severity: zero usually means a transitive dependency, which is still reachable.
 
 **Secrets.** Provider-specific patterns, plus a generic assignment rule with an entropy floor and placeholder filter. Values are never reported. Hits under `tests/`, `fixtures/`, `examples/` and similar directories are LOW, since test suites routinely commit throwaway keys.
 
@@ -128,7 +129,7 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 ## Security model
 
-**CI and container findings are bounded.** In the security score, zizmor, hadolint and container findings count on a gentler curve and can remove at most 40% (`INFRA_MAX_IMPACT`), so hardening gaps never outweigh flaws in the code itself. zizmor keeps its own severity only for directly exploitable audits (template injection, dangerous triggers, known-vulnerable actions and the like). Hardening advice such as unpinned actions is scored one level lower.
+**CI, container and process findings are bounded.** In the security score, zizmor, hadolint, container and OpenSSF Scorecard findings count on a gentler curve and can remove at most 40% (`INFRA_MAX_IMPACT`), so hardening gaps never outweigh flaws in the code itself. zizmor keeps its own severity only for directly exploitable audits (template injection, dangerous triggers, known-vulnerable actions and the like). Hardening advice such as unpinned actions is scored one level lower.
 
 **The analyzed code is never executed.** Nothing from the clone is installed, built, imported or run. ruff, bandit and semgrep only parse source, and ruff runs `--isolated` so repository config can't disable rules. Manifests are parsed as text.
 

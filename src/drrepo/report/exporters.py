@@ -1,12 +1,16 @@
-"""Serialize a report dict (`Report.to_dict()` shape) to JSON, Markdown, or SARIF 2.1.0.
+"""Serialize a report dict (`Report.to_dict()` shape) to JSON, Markdown, SARIF 2.1.0,
+a CycloneDX 1.6 SBOM, or a compact Markdown summary (PR comments, CI step summaries).
 
-All three take the dict form -- never round-trip dict -> dataclass -> dict here.
+Every exporter takes the dict form -- never round-trip dict -> dataclass -> dict here.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from typing import Any
+from urllib.parse import quote
 
 from drrepo.models import rule_key
 from drrepo.report.synthesis import grade
@@ -15,7 +19,7 @@ SARIF_SCHEMA_URL = "https://json.schemastore.org/sarif-2.1.0.json"
 _SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note"}
 _SARIF_SECURITY_SEVERITY = {"critical": "9.5", "high": "7.5", "medium": "5.0", "low": "2.0"}
 _SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
-FORMATS = ("json", "md", "sarif")
+FORMATS = ("json", "md", "sarif", "cdx", "summary")
 
 
 def to_json(report: dict[str, Any]) -> str:
@@ -30,6 +34,12 @@ def _location(issue: dict[str, Any]) -> str:
     if not issue.get("file"):
         return ""
     return f"`{issue['file']}:{issue['line']}`" if issue.get("line") else f"`{issue['file']}`"
+
+
+def _count(issue: dict[str, Any]) -> str:
+    """` ×N` for an aggregated issue, unless its title already states the count."""
+    n = issue.get("occurrences", 1)
+    return f" ×{n}" if n > 1 and "occurrence" not in issue["title"] else ""
 
 
 def to_markdown(report: dict[str, Any]) -> str:
@@ -70,9 +80,8 @@ def to_markdown(report: dict[str, Any]) -> str:
         lines.append("No issues found.")
     for issue in issues:
         sev = issue["severity"]
-        occurrences = f" ×{issue['occurrences']}" if issue.get("occurrences", 1) > 1 else ""
         lines.append(
-            f"### {_SEVERITY_ICON.get(sev, '')} [{sev.upper()}] {issue['title']}{occurrences}"
+            f"### {_SEVERITY_ICON.get(sev, '')} [{sev.upper()}] {issue['title']}{_count(issue)}"
         )
         lines.append("")
         meta = [f"category: {issue['category']}", f"source: {issue.get('source')}"]
@@ -135,6 +144,60 @@ def to_markdown(report: dict[str, Any]) -> str:
                 f"| {_cell(issue['title'])} | {_location(issue) or '-'} | {_cell(s['reason'])} "
                 f"| {s['origin']} | {s.get('expires') or '-'} |"
             )
+    return "\n".join(lines) + "\n"
+
+
+# Text in a summary comes from the analyzed repository (scanner messages, file names,
+# agent output). Where it is posted as a PR comment, it must not ping people or load
+# remote content: mentions get a zero-width space, and HTML and images are inert.
+_MENTION = re.compile(r"(?<![A-Za-z0-9_.`-])@(?=[A-Za-z0-9])")
+
+
+def _inert(text: str) -> str:
+    text = _cell(text).replace("<", "&lt;").replace(">", "&gt;").replace("![", "!\\[")
+    return _MENTION.sub("@\u200b", text)
+
+
+def to_summary(report: dict[str, Any], max_issues: int = 10) -> str:
+    """Score, category table and the most severe issues: short enough for a PR comment."""
+    repo = report.get("repository", {})
+    score = float(report.get("overall_score", 0))
+    counts = report.get("issue_counts", {})
+    name = _inert(repo.get("full_name") or repo.get("name", "repository"))
+    lines = [f"### DrRepo: {name}: {score:.0f}/100 (grade {grade(score)})", ""]
+    facts = []
+    if repo.get("commit_sha"):
+        facts.append(f"commit `{repo['commit_sha'][:12]}`")
+    if counts:
+        facts.append(", ".join(f"{n} {sev}" for sev, n in counts.items()))
+    delta = (report.get("score_history") or {}).get("overall_score_delta")
+    if delta:
+        facts.append(f"{delta:+.1f} since the previous run")
+    if facts:
+        lines += [" · ".join(facts), ""]
+
+    lines += ["| Category | Score |", "|---|---|"]
+    for key, cs in report.get("category_scores", {}).items():
+        shown = f"{cs['score']:.0f}" if cs.get("assessed", True) else "n/a"
+        lines.append(f"| {key.replace('_', ' ').title()} | {shown} |")
+
+    issues = report.get("issues", [])
+    if issues:
+        lines += ["", "| Severity | Issue | Location |", "|---|---|---|"]
+        for issue in issues[:max_issues]:
+            sev = issue["severity"]
+            lines.append(
+                f"| {_SEVERITY_ICON.get(sev, '')} {sev} | {_inert(issue['title'])}{_count(issue)} "
+                f"| {_inert(_location(issue)) or '-'} |"
+            )
+        if len(issues) > max_issues:
+            lines += ["", f"…and {len(issues) - max_issues} more in the full report."]
+    else:
+        lines += ["", "No issues found."]
+    suppressed = len(report.get("suppressed", []))
+    if suppressed:
+        lines += ["", f"{suppressed} suppressed finding(s) excluded from the score."]
+    lines += ["", f"<sub>DrRepo {_inert(report.get('drrepo_version', ''))}</sub>"]
     return "\n".join(lines) + "\n"
 
 
@@ -245,8 +308,156 @@ def to_sarif(report: dict[str, Any]) -> str:
         if repo.get("ref"):
             provenance["branch"] = repo["ref"]
         run["versionControlProvenance"] = [provenance]
+    provenance = report.get("provenance") or {}
+    if provenance:
+        run["properties"] = {"drrepo": provenance}  # SARIF property bag: what produced this run
     sarif = {"$schema": SARIF_SCHEMA_URL, "version": "2.1.0", "runs": [run]}
     return json.dumps(sarif, indent=2, ensure_ascii=False)
 
 
-EXPORTERS = {"json": to_json, "md": to_markdown, "sarif": to_sarif}
+# Package URL types (https://github.com/package-url/purl-spec) per OSV ecosystem.
+_PURL_TYPES = {
+    "PyPI": "pypi",
+    "npm": "npm",
+    "Go": "golang",
+    "crates.io": "cargo",
+    "RubyGems": "gem",
+    "NuGet": "nuget",
+    "Packagist": "composer",
+    "Maven": "maven",
+}
+
+
+def purl(ecosystem: str, name: str, version: str) -> str | None:
+    kind = _PURL_TYPES.get(ecosystem)
+    if kind is None:
+        return None
+    if kind == "pypi":
+        name = name.lower().replace("_", "-")
+    if kind == "maven" and ":" in name:
+        group, artifact = name.split(":", 1)
+        path = f"{quote(group, safe='.')}/{quote(artifact, safe='.')}"
+    elif kind in ("npm", "golang", "composer") and "/" in name:
+        namespace, short = name.rsplit("/", 1)
+        path = (
+            "/".join(quote(p, safe=".") for p in namespace.split("/"))
+            + f"/{quote(short, safe='.')}"
+        )
+    else:
+        path = quote(name, safe=".")
+    return f"pkg:{kind}/{path}@{quote(version, safe='.')}"
+
+
+_SPDX_EXPRESSION = re.compile(
+    r"^\(?[A-Za-z0-9.+-]+(?:\s+(?:AND|OR|WITH)\s+\(?[A-Za-z0-9.+-]+\)?)*\)?$"
+)
+
+
+def _cyclonedx_license(license_text: str) -> dict[str, Any]:
+    """An SPDX-shaped license as an `expression` (valid for a single id too), else a `name`.
+
+    `license.id` would have to be in CycloneDX's SPDX enum, which registry metadata
+    doesn't guarantee, so ids are never emitted bare.
+    """
+    if _SPDX_EXPRESSION.match(license_text.strip()):
+        return {"expression": license_text.strip()}
+    return {"license": {"name": license_text}}
+
+
+def to_cyclonedx(report: dict[str, Any]) -> str:
+    """CycloneDX 1.6 SBOM of the analyzed repository's dependencies, with OSV advisories.
+
+    Built from `report["dependencies"]` (manifests and lockfiles, never an install),
+    so it lists what the repository declares at the analyzed commit.
+    """
+    from drrepo import __version__
+
+    repo = report.get("repository", {})
+    components = []
+    refs: dict[tuple[str, str, str], str] = {}
+    for dep in report.get("dependencies", []):
+        ref = purl(dep["ecosystem"], dep["name"], dep["version"]) or (
+            f"{dep['ecosystem']}:{dep['name']}@{dep['version']}"
+        )
+        refs[(dep["ecosystem"], dep["name"], dep["version"])] = ref
+        component: dict[str, Any] = {
+            "type": "library",
+            "bom-ref": ref,
+            "name": dep["name"],
+            "version": dep["version"],
+            "scope": "required" if dep["scope"] == "runtime" else "optional",
+        }
+        if ref.startswith("pkg:"):
+            component["purl"] = ref
+        if dep.get("license"):
+            component["licenses"] = [_cyclonedx_license(dep["license"])]
+        components.append(component)
+
+    vulnerabilities = []
+    issues_by_rule = {
+        i.get("rule_id"): i for i in report.get("issues", []) if i.get("source") == "osv.dev"
+    }
+    advisories: dict[str, list[str]] = {}
+    for dep in report.get("dependencies", []):
+        for vuln_id in dep.get("vulnerabilities", []):
+            advisories.setdefault(vuln_id, []).append(
+                refs[(dep["ecosystem"], dep["name"], dep["version"])]
+            )
+    for vuln_id, affected in sorted(advisories.items()):
+        entry: dict[str, Any] = {
+            "bom-ref": f"vuln:{vuln_id}",
+            "id": vuln_id,
+            "source": {"name": "OSV", "url": f"https://osv.dev/vulnerability/{vuln_id}"},
+            "affects": [{"ref": ref} for ref in sorted(set(affected))],
+        }
+        issue = issues_by_rule.get(vuln_id)
+        if issue:
+            entry["ratings"] = [{"source": {"name": "DrRepo"}, "severity": issue["severity"]}]
+            entry["recommendation"] = issue.get("recommendation", "")
+        vulnerabilities.append(entry)
+
+    sha = repo.get("commit_sha")
+    # Deterministic: the same repository at the same commit yields the same serial number.
+    seed = f"{repo.get('url', '')}@{sha or report.get('generated_at', '')}"
+    bom: dict[str, Any] = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, seed)}",
+        "version": 1,
+        "metadata": {
+            "timestamp": report.get("generated_at") or None,
+            "tools": {
+                "components": [{"type": "application", "name": "DrRepo", "version": __version__}]
+            },
+            "component": {
+                "type": "application",
+                "bom-ref": "repository",
+                "name": repo.get("full_name") or repo.get("name", "repository"),
+                **({"version": sha} if sha else {}),
+                "externalReferences": [{"type": "vcs", "url": repo.get("url", "")}],
+            },
+        },
+        "components": components,
+    }
+    if not bom["metadata"]["timestamp"]:
+        del bom["metadata"]["timestamp"]
+    if vulnerabilities:
+        bom["vulnerabilities"] = vulnerabilities
+    return json.dumps(bom, indent=2, ensure_ascii=False)
+
+
+EXPORTERS = {
+    "json": to_json,
+    "md": to_markdown,
+    "sarif": to_sarif,
+    "cdx": to_cyclonedx,
+    "summary": to_summary,
+}
+# File extension per format; CycloneDX's convention is `.cdx.json`.
+EXTENSIONS = {
+    "json": "json",
+    "md": "md",
+    "sarif": "sarif",
+    "cdx": "cdx.json",
+    "summary": "summary.md",
+}

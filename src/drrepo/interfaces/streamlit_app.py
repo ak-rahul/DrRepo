@@ -26,7 +26,7 @@ from drrepo.interfaces.health import check_all
 from drrepo.log import configure_logging, logger
 from drrepo.models import RepoRef
 from drrepo.recon.clone import validate_ref
-from drrepo.report.exporters import to_json, to_markdown, to_sarif
+from drrepo.report.exporters import to_cyclonedx, to_json, to_markdown, to_sarif
 from drrepo.report.synthesis import grade
 from drrepo.service import AnalysisService
 
@@ -74,7 +74,7 @@ def render_sidebar(service: AnalysisService) -> bool:
     config = service.config
     with st.sidebar:
         st.markdown("### DrRepo")
-        st.caption(f"v{__version__} · {config.model_provider} · `{config.model_name}`")
+        st.caption(f"v{__version__} · {config.model_provider} · `{config.model_for()}`")
         deep = st.toggle(
             "Deep investigation",
             value=config.enable_deep_investigation,
@@ -243,7 +243,7 @@ def render_report(result: dict[str, Any]) -> None:
         st.json(result, expanded=False)
 
     slug = (repo.get("full_name") or repo.get("name") or "report").replace("/", "__")
-    d1, d2, d3 = st.columns(3)
+    d1, d2, d3, d4 = st.columns(4)
     d1.download_button(
         "Download JSON", to_json(result), f"drrepo_{slug}.json", "application/json", width="stretch"
     )
@@ -259,6 +259,13 @@ def render_report(result: dict[str, Any]) -> None:
         to_sarif(result),
         f"drrepo_{slug}.sarif",
         "application/sarif+json",
+        width="stretch",
+    )
+    d4.download_button(
+        "Download SBOM",
+        to_cyclonedx(result),
+        f"drrepo_{slug}.cdx.json",
+        "application/vnd.cyclonedx+json",
         width="stretch",
     )
 

@@ -17,14 +17,20 @@ code-quality findings.
     test_file_count, source_file_count, total_files,
     lines_by_language: {"Python": 1234, ...}, python_lines,
     readme_path: str | None, readme_content: str (capped)
+    build_config: {python?: {name, requires_python, scripts}, node?: {name, bin, scripts,
+                   engines}, rust?: {name, bins}, go?: {module}, lockfiles: [str]}
+                  (facts the documentation rubric checks the README against)
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from drrepo.models import CollectorResult, CollectorStatus
 from drrepo.recon.readme import MAX_README_CHARS
@@ -162,6 +168,95 @@ _TYPE_CONFIGS = {"mypy.ini", "tsconfig.json", "pyrightconfig.json", ".mypy.ini"}
 _README_NAMES = ("readme.md", "readme.rst", "readme.txt", "readme")
 
 
+_MAX_LISTED = 20
+
+
+def _load_toml(path: Path) -> dict[str, Any]:
+    try:
+        data = tomllib.loads(read_text_file(path) or "")
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def build_config(root: Path) -> dict[str, Any]:
+    """Package names, entry points, and toolchain facts from the root build files.
+
+    Parsed as data (TOML/JSON); nothing is executed. Missing or malformed files
+    are simply absent from the result.
+    """
+    config: dict[str, Any] = {
+        "lockfiles": sorted(n for n in _LOCKFILES if (root / n).is_file()),
+    }
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        data = _load_toml(pyproject)
+        project = data.get("project") or {}
+        poetry = (data.get("tool") or {}).get("poetry") or {}
+        scripts = {**(poetry.get("scripts") or {}), **(project.get("scripts") or {})}
+        config["python"] = {
+            "name": project.get("name") or poetry.get("name"),
+            "requires_python": project.get("requires-python"),
+            "scripts": sorted(scripts)[:_MAX_LISTED],
+        }
+    package_json = root / "package.json"
+    if package_json.is_file():
+        try:
+            pkg = json.loads(read_text_file(package_json) or "{}")
+        except json.JSONDecodeError:
+            pkg = {}
+        if isinstance(pkg, dict):
+            bin_field = pkg.get("bin")
+            bins = (
+                sorted(bin_field)
+                if isinstance(bin_field, dict)
+                else ([pkg.get("name")] if isinstance(bin_field, str) else [])
+            )
+            config["node"] = {
+                "name": pkg.get("name"),
+                "bin": bins[:_MAX_LISTED],
+                "scripts": sorted(pkg.get("scripts") or {})[:_MAX_LISTED],
+                "engines": pkg.get("engines") if isinstance(pkg.get("engines"), dict) else None,
+            }
+    cargo = root / "Cargo.toml"
+    if cargo.is_file():
+        data = _load_toml(cargo)
+        config["rust"] = {
+            "name": (data.get("package") or {}).get("name"),
+            "bins": [b.get("name") for b in data.get("bin", []) if isinstance(b, dict)][
+                :_MAX_LISTED
+            ],
+        }
+    go_mod = root / "go.mod"
+    if go_mod.is_file():
+        first = next(
+            (
+                line.split(None, 1)[1].strip()
+                for line in (read_text_file(go_mod) or "").splitlines()
+                if line.startswith("module ") and " " in line.strip()
+            ),
+            None,
+        )
+        config["go"] = {"module": first}
+    return config
+
+
+def language_of(path: Path) -> str | None:
+    """The source language of a file by extension, or None."""
+    return _LANGUAGES.get(path.suffix.lower())
+
+
+def language_file_counts(root: str | Path) -> dict[str, int]:
+    """Number of (non-skipped) source files per language, most common first. Cheap:
+    no file is read."""
+    counts: dict[str, int] = {}
+    for path in iter_repo_files(root):
+        language = language_of(path)
+        if language:
+            counts[language] = counts.get(language, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
 def _count_lines(path: Path) -> int:
     text = read_text_file(path)
     if text is None:
@@ -253,5 +348,6 @@ def collect_repo_layout(clone_path: str) -> CollectorResult:
             "python_lines": lines_by_language.get("Python", 0),
             "readme_path": readme_path,
             "readme_content": readme_content,
+            "build_config": build_config(root),
         },
     )

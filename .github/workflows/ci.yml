@@ -51,6 +51,7 @@ jobs:
           /tmp/wheel-env/bin/python -c "import drrepo.interfaces.mcp_server, drrepo.pipeline"
           # Agent instructions are package data; make sure they shipped.
           /tmp/wheel-env/bin/python -c "from drrepo.agents.prompts import validate_all; validate_all()"
+          /tmp/wheel-env/bin/python -c "from drrepo.report.schema import load_schema; load_schema()"
 
   test:
     runs-on: ${{ matrix.os }}
@@ -71,7 +72,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras  # optional providers too, so their tests run
       # Hermetic: no secrets, no network (an autouse fixture blocks real HTTP).
       - run: uv run pytest --cov --cov-report=term --cov-report=xml
 
@@ -83,7 +84,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
-      - run: uv export --frozen --no-dev --no-emit-project -o requirements.audit.txt
+      - run: uv export --frozen --no-dev --all-extras --no-emit-project -o requirements.audit.txt
       - run: uvx pip-audit -r requirements.audit.txt --disable-pip
 
   integration:
@@ -115,6 +116,37 @@ jobs:
       - name: Publish evaluation table
         if: always()
         run: test -f eval.md && cat eval.md >> "$GITHUB_STEP_SUMMARY" || true
+
+  # The composite action in action.yml, run from this checkout on a pinned public repository.
+  action:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Run the action
+        id: drrepo
+        # Deliberately the checkout, not `$/`: this job tests the action as changed by the push or PR.
+        uses: ./ # zizmor: ignore[self-repository]
+        with:
+          repository: pallets/itsdangerous
+          ref: 096c8d42545d3b68ea21a4f890fb2b2d8979c0bd # 2.2.0, also in evals/repos.toml
+          formats: json,cdx
+          upload-sarif: "false"
+          fail-under: "1"
+          github-token: ${{ secrets.GH_TOKEN || github.token }}
+      - name: Check the outputs
+        env:
+          SCORE: ${{ steps.drrepo.outputs.score }}
+          GRADE: ${{ steps.drrepo.outputs.grade }}
+          REPORT: ${{ steps.drrepo.outputs.report }}
+        run: |
+          test -n "${SCORE}" && test -n "${GRADE}" && test -s "${REPORT}"
+          ls drrepo-report/*.cdx.json drrepo-report/*.summary.md
+          echo "score ${SCORE} (${GRADE})"
 
   docker:
     runs-on: ubuntu-latest

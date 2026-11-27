@@ -19,10 +19,12 @@ from langchain_core.runnables import RunnableLambda
 from drrepo.agents.investigator import InvestigationOutput, investigate
 from drrepo.agents.llm import LLMRuntime, TokenBudget
 from drrepo.agents.planner import CategoryPlanOutput, InvestigationPlanOutput
+from drrepo.agents.rubric import DocumentationRubricOutput, RubricItem
 from drrepo.agents.tools import build_tools
 from drrepo.config import Config
 from drrepo.models import Category, RepoRef
 from drrepo.pipeline import RunContext, Workflow
+from drrepo.report.schema import validate
 from tests.conftest import ok
 
 FINDING = {
@@ -46,10 +48,11 @@ class ScriptedChatModel(BaseChatModel):
     - without tools bound: answers with a short narrative (shallow summaries);
     - with tools bound (the investigator): first calls `read_file`, then, once
       it has seen the tool result, submits `InvestigationOutput`;
-    - `with_structured_output` (the planner): returns `plan`.
+    - `with_structured_output`: returns `plan` (planner) or `rubric` (documentation).
     """
 
     plan: Any = None
+    rubric: Any = None
     tools_bound: bool = False
 
     @property
@@ -60,7 +63,8 @@ class ScriptedChatModel(BaseChatModel):
         return self.model_copy(update={"tools_bound": True})
 
     def with_structured_output(self, schema: Any, **_kwargs: Any) -> Any:
-        return RunnableLambda(lambda _messages: self.plan)
+        answer = self.rubric if schema is DocumentationRubricOutput else self.plan
+        return RunnableLambda(lambda _messages: answer)
 
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **_: Any
@@ -126,9 +130,10 @@ def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch
             pass
 
     monkeypatch.setattr("drrepo.pipeline.clone_repo", lambda *_a: (Cloned(), ok(name="repo_clone")))
+    readme_layout = ok({"readme_content": "# Demo\n\nA tool.\n", "readme_path": "README.md"})
+    monkeypatch.setattr("drrepo.pipeline.collect_repo_layout", lambda *_a, **_k: readme_layout)
     for name in (
         "collect_github_metadata",
-        "collect_repo_layout",
         "collect_static_analysis",
         "collect_security",
         "collect_dependency_audit",
@@ -145,11 +150,17 @@ def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch
             for c in Category
         ]
     )
+    rubric = DocumentationRubricOutput(
+        items=[RubricItem(criterion="purpose", verdict="met", reason="states its purpose")]
+    )
     ctx = RunContext(
         config=Config(groq_api_key="k"),
-        llm=LLMRuntime(client=ScriptedChatModel(plan=plan), budget=TokenBudget(1_000_000)),
+        llm=LLMRuntime(
+            client=ScriptedChatModel(plan=plan, rubric=rubric), budget=TokenBudget(1_000_000)
+        ),
     )
     report = Workflow().run(RepoRef("octo", "demo"), ctx)
+    validate(report)  # deep reports (traces, agent issues) satisfy the schema too
 
     security = report["category_scores"]["security"]
     assert security["investigation_depth"] == "deep"
@@ -159,3 +170,6 @@ def test_full_pipeline_with_planner_and_deep_investigation(tmp_path, monkeypatch
     others = [c for name, c in report["category_scores"].items() if name != "security"]
     assert all(c["investigation_depth"] == "shallow" for c in others)
     assert report["llm_usage"]["used_tokens"] > 0
+    # The documentation rubric ran through the real structured-output path.
+    doc_notes = report["category_scores"]["documentation"]["notes"]
+    assert any(n.startswith("Documentation rubric (1 met)") for n in doc_notes)

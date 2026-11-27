@@ -7,6 +7,7 @@ from drrepo.recon.dependencies import (
     DependencyLookupCache,
     build_vulnerabilities,
     collect_dependency_audit,
+    import_evidence,
     query_licenses,
     query_osv_ids,
 )
@@ -137,6 +138,64 @@ def test_collect_no_manifests_and_disabled(make_repo):
     )
     disabled = collect_dependency_audit(str(root), Config(enable_dependency_audit=False))
     assert disabled.status.value == "skipped"
+
+
+def test_import_evidence_counts_files_per_package(make_repo):
+    root = make_repo(
+        {
+            "app/main.py": "import requests\nfrom yaml import safe_load\n",
+            "app/util.py": "from requests.adapters import HTTPAdapter\nimport requests_toolbelt\n",
+            "app/notes.md": "import requests\n",  # not source
+            "web/index.ts": "import express from 'express';\nconst x = require(\"@scope/pkg/sub\");\n",
+            "web/other.js": "// express is mentioned, never imported\n",
+        }
+    )
+    counts = import_evidence(
+        root,
+        [
+            ("PyPI", "requests"),
+            ("PyPI", "pyyaml"),
+            ("PyPI", "requests-toolbelt"),
+            ("PyPI", "flask"),
+            ("npm", "express"),
+            ("npm", "@scope/pkg"),
+            ("Go", "golang.org/x/net"),  # no detection: absent, never a false zero
+        ],
+    )
+    assert counts == {
+        ("PyPI", "requests"): 2,  # `requests_toolbelt` is not `requests`
+        ("PyPI", "pyyaml"): 1,  # via the import alias
+        ("PyPI", "requests-toolbelt"): 1,
+        ("PyPI", "flask"): 0,
+        ("npm", "express"): 1,
+        ("npm", "@scope/pkg"): 1,
+    }
+
+
+def test_collect_reports_inventory_policy_and_reachability(make_repo):
+    root = make_repo(
+        {
+            "requirements.txt": "requests==2.0.0\n",
+            "requirements-dev.txt": "pytest==8.0.0\n",
+            "src/app.py": "import requests\n",
+        }
+    )
+    client = mock_http(
+        {
+            "POST querybatch": _batch_handler,
+            "GET /v1/vulns/GHSA-aaaa": VULN_RECORD,
+            "GET /packages/requests/": {"licenses": ["Apache-2.0"]},
+        }
+    )
+    config = Config(license_deny=("GPL-3.0",), license_allow=("MIT", "Apache-2.0"))
+    data = collect_dependency_audit(str(root), config, http_client=client).data
+    assert sorted((p["name"], p["scope"]) for p in data["packages"]) == [
+        ("pytest", "dev"),
+        ("requests", "runtime"),
+    ]
+    assert data["license_policy"] == {"deny": ["GPL-3.0"], "allow": ["MIT", "Apache-2.0"]}
+    [vuln] = data["vulnerabilities"]
+    assert vuln["imported_in"] == 1
 
 
 class TestCache:

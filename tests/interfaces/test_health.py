@@ -88,3 +88,30 @@ def test_health_exception_is_503(api, monkeypatch):
     monkeypatch.setattr(health_api, "check_all", boom)
     response = api.get("/health")
     assert response.status_code == 503 and "RuntimeError" in response.json()["error"]
+
+
+def test_anthropic_uses_its_own_auth_header_and_checks_every_role_model():
+    seen = {}
+
+    def models(request):
+        seen.update(request.headers)
+        return httpx.Response(200, json={"data": [{"id": "claude-sonnet-5-5"}]})
+
+    client = mock_http({"GET api.anthropic.com/v1/models": models})
+    config = Config(model_provider="anthropic", anthropic_api_key="k")
+    assert check_llm(config, client).status == "up"
+    assert seen["x-api-key"] == "k" and "anthropic-version" in seen
+    routed = Config(
+        model_provider="anthropic",
+        anthropic_api_key="k",
+        model_name_investigation="claude-opus-5-5",
+    )
+    result = check_llm(routed, client)
+    assert result.status == "degraded" and "claude-opus-5-5" in result.detail
+
+
+def test_ollama_needs_no_key_and_matches_latest_tags():
+    client = mock_http({"GET localhost:11434/api/tags": {"models": [{"name": "llama3.1:latest"}]}})
+    assert check_llm(Config(model_provider="ollama"), client).status == "up"
+    down = check_llm(Config(model_provider="ollama"), mock_http({}))
+    assert down.status == "down" and "HTTP 404" in down.detail

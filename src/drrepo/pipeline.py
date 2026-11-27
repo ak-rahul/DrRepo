@@ -65,6 +65,8 @@ from drrepo.recon.github import collect_github_metadata
 from drrepo.recon.infrastructure import collect_infrastructure
 from drrepo.recon.readme import analyze_readme
 from drrepo.recon.scanners import collect_security, collect_static_analysis
+from drrepo.recon.scorecard import collect_scorecard
+from drrepo.report.provenance import build_provenance
 from drrepo.report.suppressions import (
     REPOSITORY_FILE,
     Suppression,
@@ -73,7 +75,7 @@ from drrepo.report.suppressions import (
 )
 from drrepo.report.suppressions import apply as apply_suppressions
 from drrepo.report.suppressions import load_file as load_suppression_file
-from drrepo.report.synthesis import synthesize_report
+from drrepo.report.synthesis import dependency_inventory, synthesize_report
 
 ProgressCallback = Callable[[str], None]
 
@@ -185,6 +187,11 @@ COLLECTORS: tuple[CollectorSpec, ...] = (
         "Auditing CI workflows and Dockerfiles",
         needs_clone=True,
     ),
+    CollectorSpec(
+        "scorecard",
+        lambda s, c: collect_scorecard(s["repo"].html_url, c.config),
+        "Fetching OpenSSF Scorecard",
+    ),
     CollectorSpec("readme", _readme, after=("github_metadata", "repo_layout")),
 )
 
@@ -235,7 +242,18 @@ class Workflow:
             else:
                 if spec.progress:
                     ctx.emit(spec.progress)
-                result = spec.run(state, ctx)
+                try:
+                    result = spec.run(state, ctx)
+                except Exception as e:
+                    # Collectors report expected failures as skipped/error results; this
+                    # is the safety net for unexpected ones, so one bad signal can never
+                    # take the whole analysis down.
+                    logger.exception(f"collector {spec.name} crashed")
+                    result = CollectorResult(
+                        spec.name,
+                        CollectorStatus.ERROR,
+                        detail=f"unexpected error: {type(e).__name__}: {str(e)[:200]}",
+                    )
             return {"collector_results": {spec.name: result}}
 
         return node
@@ -263,7 +281,7 @@ class Workflow:
             )
 
         ctx.emit("Lead Investigator is planning the investigation")
-        plan = LeadInvestigator(ctx.llm).plan(
+        plan = LeadInvestigator(ctx.llm.for_role("planner")).plan(
             recon_summary(state["collector_results"]), max_deep, state["description"]
         )
         for name, p in plan.plans.items():
@@ -287,6 +305,11 @@ class Workflow:
         recon = state["collector_results"]
         today = datetime.now(UTC).date()
         assessment = analyst.assess(recon)
+        if ctx.config.enable_llm_judgment and ctx.llm.available:
+            # Structured judgment shares the planner's model (both are structured outputs).
+            assessment = analyst.judge(
+                recon, assessment, ctx.llm.for_role("planner"), state["clone_path"]
+            )
         recon_supp = apply_suppressions(assessment.issues, state["suppressions"], today)
         if recon_supp.suppressed or recon_supp.expired:
             rescored = (
@@ -300,7 +323,7 @@ class Workflow:
                 score=assessment.score if rescored is None else rescored,
                 notes=[*assessment.notes, *recon_supp.notes()],
             )
-        shallow = analyst.narrate(assessment, ctx.llm)
+        shallow = analyst.narrate(assessment, ctx.llm.for_role("narrative"))
         shallow.suppressed = _suppressed_entries(recon_supp)
 
         if (
@@ -323,7 +346,7 @@ class Workflow:
                 category=category,
                 system_prompt=analyst.investigation_prompt,
                 tools=tools,
-                llm=ctx.llm,
+                llm=ctx.llm.for_role("investigation"),
                 recon_data={name: r.data for name, r in recon.items()},
                 known_issues=shallow.issues,
                 max_tool_calls=ctx.config.max_tool_calls_per_investigator,
@@ -427,6 +450,7 @@ class Workflow:
             investigation_plan=state["investigation_plan"],
             generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
             drrepo_version=__version__,
+            dependencies=dependency_inventory(collector_data(results, "dependency_audit")),
         )
         return {"report": report}
 
@@ -498,6 +522,7 @@ class Workflow:
             if cloned:
                 cloned.cleanup()
         report: dict[str, Any] = final["report"].to_dict()
+        report["provenance"] = build_provenance(ctx.config, llm_used=ctx.llm.available)
         if ctx.llm.budget is not None:
             report["llm_usage"] = ctx.llm.budget.usage()
         ctx.emit("Analysis complete")

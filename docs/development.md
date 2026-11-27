@@ -33,7 +33,7 @@ mypy runs in `strict` mode over `src/` and `examples/`. Supported Python version
 ## Tests
 
 - `tests/` mirrors `src/drrepo/`: top-level modules map to `tests/test_<module>.py`, and packages to `tests/recon/`, `tests/agents/`, `tests/report/`, `tests/interfaces/`. Live tests are in `tests/integration/`.
-- Unit tests are hermetic. Autouse fixtures in `tests/conftest.py` fail any real HTTP request and any real clone started by the pipeline. Use `mock_http({...})` (an `httpx.MockTransport`) or inject `http_client=`.
+- Unit tests are hermetic. Autouse fixtures in `tests/conftest.py` fail any real HTTP request (recorded and failed at teardown, so a broad `except` in production code can't swallow it) and any real clone started by the pipeline, and they stub the pipeline's Scorecard collector. Use `mock_http({...})` (an `httpx.MockTransport`) or inject `http_client=`.
 - Helpers: `ok(data)`, `skipped()` and `failed(detail)` build `CollectorResult`s. `make_repo({...})` creates a fake clone. Build `Config(...)` directly; nothing reads `.env`.
 - Pipeline tests patch the collector functions as module attributes (`drrepo.pipeline.collect_security`, ...) and pass their own `RunContext`.
 - The investigator is tested by mocking `create_agent` with real `AIMessage`/`ToolMessage` objects (`GenericFakeChatModel` has no `bind_tools`). `tests/agents/test_agent_loop.py` additionally runs the *real* `create_agent` loop, real tools on a temporary clone, and the real planner, using `ScriptedChatModel`, a `BaseChatModel` that calls `read_file` and then submits `InvestigationOutput`. Extend it when changing the investigator or planner. The live provider check is in `tests/integration/test_live.py`.
@@ -56,6 +56,8 @@ It prints a Markdown table of scores per category (with deltas), findings added 
 - **Regressions:** a score drop beyond `--tolerance` (default 5 points), a category that is no longer assessed, or a failed case is a regression. It is listed under the table and gives exit code 3.
 - **Why a tolerance:** even at a pinned commit, OSV advisories and GitHub metadata are live, so some drift is expected over time.
 - **Precision:** to measure how often agent findings are right, record verdicts in `evals/labels.toml`, using the keys the table prints. Unlabeled findings are counted, never guessed.
+- **What changed:** each result records the report's `provenance` (prompt hashes, model, scanner versions), and the table lists any change since the baseline, such as "instructions changed: security" or "ruff 0.17.6 -> 0.18.0", so drift can be traced to its cause.
+- **Environment problems:** a collector that failed (most often an unauthenticated GitHub API rate limit) makes a case "not comparable" instead of producing misleading score deltas. `--update-baseline` refuses to record a degraded run. Set `GH_TOKEN` when running the eval.
 
 When to use it:
 - **Prompt edits:** run `drrepo eval --deep` before and after any change to `agents/instructions/`, and paste both tables into the pull request.
@@ -72,8 +74,10 @@ When to use it:
 
 **An investigator tool.** Add a `make_<x>_tools(...)` factory to `agents/tools.py`, register its family in `TOOL_FAMILIES`/`build_tools`, and list the family in the relevant analysts' `tool_families`. Treat every argument as hostile, and cap the output.
 
+**The GitHub Action.** `action.yml` is a composite action over the CLI. Its scripts read inputs through `env`, never `${{ }}` inline (template injection), and `tests/test_action.py` checks that inputs, outputs, formats and the example workflow agree. CI's `action` job runs it from the checkout on a pinned repository, and pre-commit lints it with zizmor and the actions schema.
+
 **An interface.** Call `AnalysisService`, never `Workflow` directly. The service owns the shared breaker, cache and client, builds a per-run `RunContext`, and records history.
 
 ## Releasing
 
-Bump `version` in `pyproject.toml` (`drrepo.__version__` reads the installed metadata) and move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version. Then run `uv lock`, run the checks above, and tag `vX.Y.Z`.
+Bump `version` in `pyproject.toml` (`drrepo.__version__` reads the installed metadata) and move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version. Then run `uv lock`, run the checks above, and tag `vX.Y.Z`. The tag is also the action's version: users pin `ak-rahul/DrRepo@<commit SHA of the tag>`, and the action runs the DrRepo code at that commit.
