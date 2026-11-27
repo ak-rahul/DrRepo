@@ -15,6 +15,7 @@ Exit codes: 0 success, 1 runtime error, 2 usage/config error, 3 score below --fa
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib
 import json
 import os
@@ -27,8 +28,8 @@ from typing import Any
 from drrepo import __version__
 from drrepo.config import Config
 from drrepo.errors import ConfigurationError
-from drrepo.exporters import FORMATS
 from drrepo.log import configure_logging, logger
+from drrepo.report.exporters import FORMATS
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_FAIL_UNDER = 0, 1, 2, 3
 SUBCOMMANDS = {"analyze", "ui", "mcp", "health", "doctor", "health-api"}
@@ -42,7 +43,7 @@ def _load_config(env_file: str | None) -> Config:
 
 
 def print_summary(report: dict[str, Any], top: int = 10) -> None:
-    from drrepo.reporting import grade
+    from drrepo.report.synthesis import grade
 
     repo = report.get("repository", {})
     score = float(report.get("overall_score", 0))
@@ -103,9 +104,9 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     config = _load_config(args.env_file)
     if args.shallow:
-        config.enable_deep_investigation = False
+        config = dataclasses.replace(config, enable_deep_investigation=False)
     if args.no_history:
-        config.enable_score_history = False
+        config = dataclasses.replace(config, enable_score_history=False)
     configure_logging(
         config.log_level,
         log_file=args.log_file,
@@ -222,6 +223,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         path = find_executable(tool)
         not_found = "not found (that signal will be skipped)" + install_hint.get(tool, "")
         line(True if path else None, tool, path or not_found)
+
+    from drrepo.agents.prompts import InstructionsError, validate_all
+
+    try:
+        validate_all()
+        line(True, "agent instructions")
+    except InstructionsError as e:
+        line(False, "agent instructions", str(e))
 
     for module in (
         "langgraph",

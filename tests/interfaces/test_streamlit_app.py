@@ -104,7 +104,7 @@ REPORT = {
         "previous_timestamp": "2026-11-01T10:00:00+00:00",
         "category_score_deltas": {"security": -5.0},
     },
-    "llm_usage": {"used": 1200, "budget": 50000},
+    "llm_usage": {"used_tokens": 1200, "max_tokens": 50000, "remaining_tokens": 48800},
 }
 
 

@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+from drrepo.agents import prompts
 from drrepo.agents.llm import LLMRuntime
 from drrepo.log import logger
 from drrepo.models import (
@@ -144,11 +145,14 @@ class Assessment:
 
 
 class Analyst(ABC):
+    """One report category: deterministic assessment in code, prompts in markdown.
+
+    The category's prompts live in `agents/instructions/<category>.md` (see
+    `agents/prompts.py`), so an analyst's job description is a document a
+    reviewer can read, not strings scattered through code.
+    """
+
     category: ClassVar[Category]
-    # System prompt for the shallow path's single narrative call.
-    narrative_prompt: ClassVar[str]
-    # System prompt for the deep path's tool-calling investigator.
-    investigation_prompt: ClassVar[str]
     # Tool families the deep investigator gets: files, scanners, dependencies, git_history.
     tool_families: ClassVar[tuple[str, ...]] = ("files",)
     # Penalty that maps to ~37% when re-scoring investigator-added issues.
@@ -157,6 +161,16 @@ class Analyst(ABC):
     @abstractmethod
     def assess(self, recon: Recon) -> Assessment:
         """Deterministic issues + score from recon data. Must never raise on bad input."""
+
+    @property
+    def narrative_prompt(self) -> str:
+        """System prompt for the shallow path's single narrative call."""
+        return prompts.narrative_prompt(self.category)
+
+    @property
+    def investigation_prompt(self) -> str:
+        """System prompt for the deep path's tool-calling investigator."""
+        return prompts.investigation_prompt(self.category)
 
     def rescore(self, recon: Recon, assessment: Assessment, extra_issues: list[Issue]) -> float:
         """Score after a deep investigation added `extra_issues` (already deduplicated)."""
@@ -192,9 +206,3 @@ class Analyst(ABC):
             investigation_depth=InvestigationDepth.SHALLOW,
             notes=notes,
         )
-
-
-NARRATIVE_RULES = (
-    "Write 3-5 plain sentences (no headings, no bullet lists, no score). Use only the facts "
-    "given; never invent findings, files, or numbers. Name the single highest-impact fix."
-)

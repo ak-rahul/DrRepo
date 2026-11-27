@@ -26,15 +26,17 @@ uv run ruff format src tests examples           # format
 uv run mypy src examples                        # types
 ```
 
-Before pushing, run the same checks as CI: `uv run ruff check src tests examples && uv run ruff format --check src tests examples && uv run mypy src examples && uv run pytest`.
+Before pushing, run `uv run pre-commit run --all-files` (ruff, strict mypy, uv.lock sync, zizmor/actionlint for workflows, hadolint for the Dockerfile, schema checks for workflows, Dependabot and compose) and `uv run pytest`. That is what CI's lint and test jobs run. CI also builds the wheel and sdist, checks them with `twine`, installs the wheel into a clean venv, and builds and smoke-tests the Docker image.
+
+mypy runs in `strict` mode over `src/` and `examples/`. Supported Python versions are 3.11 to 3.14, and all of them are in the CI matrix.
 
 ## Tests
 
-- `tests/` mirrors `src/drrepo/`: top-level modules map to `tests/test_<module>.py`, and packages to `tests/recon/`, `tests/agents/`, `tests/interfaces/`. Live tests are in `tests/integration/`.
+- `tests/` mirrors `src/drrepo/`: top-level modules map to `tests/test_<module>.py`, and packages to `tests/recon/`, `tests/agents/`, `tests/report/`, `tests/interfaces/`. Live tests are in `tests/integration/`.
 - Unit tests are hermetic. Autouse fixtures in `tests/conftest.py` fail any real HTTP request and any real clone started by the pipeline. Use `mock_http({...})` (an `httpx.MockTransport`) or inject `http_client=`.
 - Helpers: `ok(data)`, `skipped()` and `failed(detail)` build `CollectorResult`s. `make_repo({...})` creates a fake clone. Build `Config(...)` directly; nothing reads `.env`.
 - Pipeline tests patch the collector functions as module attributes (`drrepo.pipeline.collect_security`, ...) and pass their own `RunContext`.
-- The investigator is tested by mocking `create_agent` with real `AIMessage`/`ToolMessage` objects (`GenericFakeChatModel` has no `bind_tools`). The live check is in `tests/integration/test_live.py`.
+- The investigator is tested by mocking `create_agent` with real `AIMessage`/`ToolMessage` objects (`GenericFakeChatModel` has no `bind_tools`). `tests/agents/test_agent_loop.py` additionally runs the *real* `create_agent` loop, real tools on a temporary clone, and the real planner, using `ScriptedChatModel`, a `BaseChatModel` that calls `read_file` and then submits `InvestigationOutput`. Extend it when changing the investigator or planner. The live provider check is in `tests/integration/test_live.py`.
 - A plain `Mock()` auto-vivifies `usage_metadata`. Keep the `isinstance(..., dict)` guards in `extract_actual_tokens`.
 - The Streamlit UI is smoke-tested with `streamlit.testing.v1.AppTest`.
 - `tests/test_examples.py` imports every script in `examples/` and tests its logic. Examples are linted and type-checked like `src/`.
@@ -42,6 +44,8 @@ Before pushing, run the same checks as CI: `uv run ruff check src tests examples
 ## Extending
 
 **A collector.** Write `collect_<name>(...) -> CollectorResult` in `recon/`, documenting the `data` schema in its docstring and returning `skipped`/`error` with a `detail` rather than raising. Add a `CollectorSpec` to `pipeline.COLLECTORS` (set `needs_clone`, and `after` if it consumes another collector's output). The graph wiring and `defer` are derived automatically. Read its output in an analyst with `collector_data(recon, "<name>")`. [examples/custom_collector.py](../examples/custom_collector.py) is a complete, tested walk-through.
+
+**An agent's behaviour.** Edit its markdown in `src/drrepo/agents/instructions/` (format and guidelines in [agents.md](agents.md#the-instruction-files)); no Python change is needed. Rules for every category go in `shared.md`.
 
 **A check in a category.** Add it to that analyst's `assess()`. Give each issue a stable `source` and `rule_id`: SARIF rule ids are `source/rule_id`, so a new source must not collide with an existing one.
 

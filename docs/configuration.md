@@ -1,6 +1,6 @@
 # Configuration
 
-All settings come from environment variables, optionally loaded from a `.env` file (`--env-file` changes which file is read). `Config.from_env()` is the only code that reads the environment. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`.
+All settings come from environment variables, optionally loaded from a `.env` file (`--env-file` changes which file is read). `Config.from_env()` is the only code that reads the environment. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`. Values are also range-checked however `Config` is built (from the environment or in code): timeouts, limits and the breaker threshold must be at least 1, the token budget and breaker timeout must not be negative, `TEMPERATURE` must be 0–2, and `LOG_LEVEL` must be a standard level name. `Config` is immutable; derive variants with `dataclasses.replace`.
 
 ## LLM provider
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from drrepo.agents.analysts.base import (
-    NARRATIVE_RULES,
     Analyst,
     Assessment,
     Recon,
@@ -38,7 +37,7 @@ def days_since(iso_timestamp: str | None, now: datetime | None = None) -> int | 
     if not iso_timestamp:
         return None
     try:
-        then = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+        then = datetime.fromisoformat(iso_timestamp)  # 3.11+ parses a trailing Z
     except ValueError:
         return None
     if then.tzinfo is None:
@@ -48,14 +47,6 @@ def days_since(iso_timestamp: str | None, now: datetime | None = None) -> int | 
 
 class MaintainabilityAnalyst(Analyst):
     category = Category.MAINTAINABILITY
-    narrative_prompt = (
-        "You are a senior engineer assessing long-term maintainability. " + NARRATIVE_RULES
-    )
-    investigation_prompt = (
-        "You are investigating maintainability. Look at project structure (list_directory), test "
-        "layout versus source layout, CI workflow contents (do they actually run tests and lint?), "
-        "and change history of core files (get_file_git_history) for bus-factor and churn signals."
-    )
     tool_families = ("files", "git_history")
     rescore_scale = _SCALE
 

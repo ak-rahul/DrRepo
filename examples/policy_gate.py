@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from drrepo.config import Config
-from drrepo.exporters import to_sarif
 from drrepo.log import configure_logging
+from drrepo.report.exporters import to_sarif
 from drrepo.service import AnalysisService
 
 

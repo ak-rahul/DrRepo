@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,10 +43,10 @@ class ClonedRepo:
 
 
 def _rmtree(path: Path) -> None:
-    def _on_error(func, p, _exc):
+    def _on_error(func: Callable[[str], object], p: str, _exc: object) -> None:
         # Git marks pack files read-only; Windows refuses to delete those.
         try:
-            os.chmod(p, 0o700)
+            Path(p).chmod(0o700)
             func(p)
         except OSError:
             pass
@@ -63,7 +64,7 @@ def _dir_size_mb(path: Path) -> float:
     for dirpath, _dirnames, filenames in os.walk(path):
         for name in filenames:
             try:
-                total += os.lstat(os.path.join(dirpath, name)).st_size
+                total += (Path(dirpath) / name).lstat().st_size
             except OSError:
                 continue
     return total / (1024 * 1024)
@@ -127,6 +128,7 @@ def clone_repo(repo_url: str, config: Config) -> tuple[ClonedRepo | None, Collec
             timeout=config.clone_timeout_seconds,
             env=_git_env(),
             stdin=subprocess.DEVNULL,
+            check=False,  # the return code is inspected below
         )
     except subprocess.TimeoutExpired:
         _rmtree(dest)

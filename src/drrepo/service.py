@@ -17,17 +17,17 @@ from __future__ import annotations
 import dataclasses
 import threading
 from collections import OrderedDict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from drrepo.agents.llm import LLMRuntime, TokenBudget, build_chat_model
 from drrepo.config import Config
-from drrepo.exporters import EXPORTERS
 from drrepo.models import RepoRef
 from drrepo.pipeline import ProgressCallback, RunContext, Workflow
 from drrepo.recon.dependencies import DependencyLookupCache
-from drrepo.reporting import DEFAULT_HISTORY_PATH, attach_and_record_history
+from drrepo.report.exporters import EXPORTERS
+from drrepo.report.history import DEFAULT_HISTORY_PATH, attach_and_record_history
 from drrepo.resilience import CircuitBreaker
 
 MAX_REPORTS_IN_MEMORY = 20
@@ -145,7 +145,7 @@ def save_report(
     output_dir.mkdir(parents=True, exist_ok=True)
     repo = report.get("repository", {})
     slug = (repo.get("full_name") or repo.get("name") or "repository").replace("/", "__")
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%SZ")
     paths = []
     for fmt in formats:
         path = output_dir / f"{slug}_{stamp}.{fmt}"

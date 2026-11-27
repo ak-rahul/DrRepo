@@ -84,8 +84,8 @@ class TokenBudget:
             self._used += tokens
 
     def reset(self) -> None:
-        """Zero the running total. `Workflow.execute` calls this at the start of
-        every run, since the cap is per run, not per tracker lifetime."""
+        """Zero the running total. Runs never share a budget (`AnalysisService`
+        builds a fresh one per run), so this is only for reusing an instance."""
         with self._lock:
             self._used = 0
 
@@ -127,7 +127,8 @@ def build_chat_model(config: Config) -> Any:
             max_retries=0,
             api_key=SecretStr(config.openai_api_key),
         )
-    raise ValueError(f"Unsupported model provider: {config.model_provider!r}")
+    # Unreachable: Config.__post_init__ rejects unknown providers.
+    raise ValueError(f"Unsupported model provider: {config.model_provider!r}")  # pragma: no cover
 
 
 @retry_with_backoff(

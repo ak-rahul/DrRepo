@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from drrepo.reporting import grade
+from drrepo.report.synthesis import grade
 
 SARIF_SCHEMA_URL = "https://json.schemastore.org/sarif-2.1.0.json"
 _SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note"}
@@ -148,20 +148,20 @@ def to_sarif(report: dict[str, Any]) -> str:
         )
         if not locations:
             results.append(base)
-        for loc in locations:
-            results.append(
-                {
-                    **base,
-                    "locations": [
-                        {
-                            "physicalLocation": {
-                                "artifactLocation": {"uri": loc["file"], "uriBaseId": "%SRCROOT%"},
-                                "region": {"startLine": max(1, int(loc.get("line") or 1))},
-                            }
+        results.extend(
+            {
+                **base,
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": loc["file"], "uriBaseId": "%SRCROOT%"},
+                            "region": {"startLine": max(1, int(loc.get("line") or 1))},
                         }
-                    ],
-                }
-            )
+                    }
+                ],
+            }
+            for loc in locations
+        )
 
     sarif = {
         "$schema": SARIF_SCHEMA_URL,

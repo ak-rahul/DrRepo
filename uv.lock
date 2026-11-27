@@ -703,6 +703,7 @@ source = { editable = "." }
 dependencies = [
     { name = "bandit" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-core" },
@@ -713,6 +714,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pygithub" },
     { name = "python-dotenv" },
+    { name = "regex" },
     { name = "ruff" },
     { name = "streamlit" },
     { name = "uvicorn", extra = ["standard"] },
@@ -732,6 +734,7 @@ dev = [
 requires-dist = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "fastapi", specifier = ">=0.165,<1" },
+    { name = "filelock", specifier = ">=3.16,<5" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "langchain", specifier = ">=1.3.11,<2" },
     { name = "langchain-core", specifier = ">=1.4.8,<2" },
@@ -742,6 +745,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13,<3" },
     { name = "pygithub", specifier = ">=2.9.1,<3" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2" },
+    { name = "regex", specifier = ">=2024.11.6" },
     { name = "ruff", specifier = ">=0.15.20" },
     { name = "streamlit", specifier = ">=1.58,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.49,<1" },

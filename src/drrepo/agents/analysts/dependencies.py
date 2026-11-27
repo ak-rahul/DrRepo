@@ -7,7 +7,6 @@ from collections import defaultdict
 from typing import Any
 
 from drrepo.agents.analysts.base import (
-    NARRATIVE_RULES,
     Analyst,
     Assessment,
     Recon,
@@ -70,7 +69,7 @@ def _max_version(versions: list[str]) -> str | None:
     try:
         return max(versions, key=_version_key) if versions else None
     except TypeError:  # mixed int/str segments that don't compare cleanly
-        return sorted(versions)[-1]
+        return max(versions)
 
 
 DEV_DOWNGRADE = {
@@ -176,16 +175,6 @@ def license_issues(licenses: list[dict[str, Any]], repo_license_spdx: str | None
 
 class DependencyAnalyst(Analyst):
     category = Category.DEPENDENCIES
-    narrative_prompt = (
-        "You are a dependency-security specialist summarizing an audit of declared packages. "
-        + NARRATIVE_RULES
-    )
-    investigation_prompt = (
-        "You are investigating dependency health. Read the manifests and lockfiles directly. "
-        "Look for: packages pinned to old majors, dependencies declared but apparently unused "
-        "(search_code for their imports), duplicated or conflicting declarations, and "
-        "vulnerable versions the bulk scan could not check (use query_osv with an exact version)."
-    )
     tool_families = ("files", "dependencies")
     rescore_scale = _SCALE
 

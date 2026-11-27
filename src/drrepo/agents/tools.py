@@ -17,12 +17,13 @@ time (`core.symlinks=false`) and resolution follows any that remain.
 from __future__ import annotations
 
 import fnmatch
-import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+import regex
 from github import GithubException
 from langchain_core.tools import tool
 
@@ -40,6 +41,9 @@ MAX_READ_FILE_BYTES = 2_000_000
 MAX_LIST_ENTRIES = 200
 MAX_SEARCH_MATCHES = 80
 MAX_PATTERN_LENGTH = 300
+MAX_SEARCH_LINE_CHARS = 2000
+SEARCH_LINE_TIMEOUT_SECONDS = 0.05
+SEARCH_TIME_BUDGET_SECONDS = 15.0
 
 
 class PathEscapesSandboxError(ValueError):
@@ -192,13 +196,18 @@ def make_file_tools(clone_root: str) -> list[Any]:
         if len(pattern) > MAX_PATTERN_LENGTH:
             return f"ERROR: pattern longer than {MAX_PATTERN_LENGTH} characters"
         try:
-            regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
+            compiled = regex.compile(pattern, regex.IGNORECASE if ignore_case else 0)
             file_glob = _safe_glob(glob)
-        except re.error as e:
+        except regex.error as e:
             return f"ERROR: invalid regex: {e}"
         except PathEscapesSandboxError as e:
             return f"ERROR: {e}"
 
+        # The pattern is LLM-chosen (and so steerable by prompt injection in the
+        # analyzed repo). Stdlib `re` can't be interrupted, so a catastrophic-
+        # backtracking pattern would spin a thread forever; `regex` matches with
+        # a timeout, and the whole search has a wall-clock budget.
+        deadline = time.monotonic() + SEARCH_TIME_BUDGET_SECONDS
         matches: list[str] = []
         for path in iter_repo_files(root):
             rel = relative_posix(path, root)
@@ -208,10 +217,19 @@ def make_file_tools(clone_root: str) -> list[Any]:
             if text is None:
                 continue
             for line_no, line in enumerate(text.splitlines(), start=1):
-                if len(line) <= 2000 and regex.search(line):
+                if len(line) > MAX_SEARCH_LINE_CHARS:
+                    continue
+                try:
+                    hit = compiled.search(line, timeout=SEARCH_LINE_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    return "ERROR: pattern is too slow (catastrophic backtracking); simplify it"
+                if hit:
                     matches.append(f"{rel}:{line_no}: {line.strip()[:200]}")
                     if len(matches) >= MAX_SEARCH_MATCHES:
                         return "\n".join(matches) + "\n... [truncated: narrow the pattern or glob]"
+            if time.monotonic() > deadline:
+                partial = "\n".join(matches) or "No matches so far"
+                return partial + "\n... [stopped: search time budget used; narrow the glob]"
         return "\n".join(matches) or "No matches found"
 
     return [read_file, list_directory, find_files, search_code]

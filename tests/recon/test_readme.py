@@ -1,4 +1,8 @@
-from drrepo.recon.readme import analyze_readme
+import time
+
+import pytest
+
+from drrepo.recon.readme import MAX_README_CHARS, analyze_readme
 
 FULL_README = """# Awesome
 
@@ -80,3 +84,17 @@ def test_empty_readme():
 def test_score_is_bounded():
     assert 0 <= analyze_readme("x").data["quality_score"] <= 100
     assert analyze_readme(FULL_README * 5).data["quality_score"] <= 100
+
+
+@pytest.mark.parametrize("unit", ["[", "![", "\n\n", "<img ", "[a](", "- [", "```\n", "# a\n"])
+def test_adversarial_readme_is_linear_time(unit):
+    """README text is attacker-controlled; the earlier link/TOC patterns were quadratic."""
+    started = time.perf_counter()
+    analyze_readme(unit * (MAX_README_CHARS // len(unit)))
+    assert time.perf_counter() - started < 2.0
+
+
+def test_oversized_readme_is_truncated_with_a_note():
+    result = analyze_readme("# Title\n\n" + "word " * MAX_README_CHARS)
+    assert result.detail is not None and "truncated" in result.detail
+    assert result.data["word_count"] <= MAX_README_CHARS // 5 + 1

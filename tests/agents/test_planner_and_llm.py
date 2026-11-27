@@ -28,7 +28,7 @@ def _output(**depths: str) -> InvestigationPlanOutput:
         plans=[
             CategoryPlanOutput(category=c, depth=d, rationale=f"{c} because")
             for c, d in depths.items()
-        ]  # type: ignore[arg-type]
+        ]
     )
 
 
@@ -78,7 +78,7 @@ class TestPlanner:
 
     def test_output_schema_rejects_bad_values(self):
         with pytest.raises(ValueError):
-            CategoryPlanOutput(category="security", depth="medium", rationale="x")  # type: ignore[arg-type]
+            CategoryPlanOutput(category="security", depth="medium", rationale="x")
 
 
 class TestLLMRuntime:
@@ -126,9 +126,11 @@ class TestBuildChatModel:
         )
         assert type(model).__name__ == "ChatOpenAI" and model.max_retries == 0
 
-    def test_unknown_provider(self):
-        with pytest.raises(ValueError):
-            build_chat_model(Config(model_provider="nope"))
+    def test_unknown_provider_is_rejected_by_config(self):
+        from drrepo.errors import ConfigurationError
+
+        with pytest.raises(ConfigurationError, match="MODEL_PROVIDER"):
+            Config(model_provider="nope")
 
 
 class TestBudget:

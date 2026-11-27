@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep in step with SEMGREP_VERSION in the Dockerfile.
+  SEMGREP_VERSION: "1.187.0"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -16,29 +20,54 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run ruff check src tests examples
-      - run: uv run ruff format --check src tests examples
-      - run: uv run mypy src examples
+      # One source of truth with local development: ruff, strict mypy, uv.lock
+      # sync, zizmor/actionlint (workflows), hadolint, and schema validation.
+      - run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+      # Install the wheel alone (no repo checkout on the path) and run the entry point.
+      - run: |
+          uv venv /tmp/wheel-env
+          uv pip install --python /tmp/wheel-env dist/*.whl
+          /tmp/wheel-env/bin/drrepo --version
+          /tmp/wheel-env/bin/python -c "import drrepo.interfaces.mcp_server, drrepo.pipeline"
+          # Agent instructions are package data; make sure they shipped.
+          /tmp/wheel-env/bin/python -c "from drrepo.agents.prompts import validate_all; validate_all()"
 
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
         include:
           - os: windows-latest
             python: "3.12"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
@@ -48,9 +77,12 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: uv export --frozen --no-dev --no-emit-project -o requirements.audit.txt
       - run: uvx pip-audit -r requirements.audit.txt --disable-pip
 
@@ -58,14 +90,17 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
       - run: uv sync --locked
       # Isolated tool env: as a project dependency semgrep pins vulnerable mcp/otel.
-      - run: uv tool install semgrep
+      - run: uv tool install "semgrep==${SEMGREP_VERSION}"
       - run: uv run pytest -m integration -v
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -73,14 +108,18 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: false
           load: true
+          build-args: SEMGREP_VERSION=${{ env.SEMGREP_VERSION }}
           tags: drrepo:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -22,11 +22,11 @@ import streamlit as st
 
 from drrepo import __version__
 from drrepo.config import Config
-from drrepo.exporters import to_json, to_markdown, to_sarif
 from drrepo.interfaces.health import check_all
 from drrepo.log import configure_logging, logger
 from drrepo.models import RepoRef
-from drrepo.reporting import grade
+from drrepo.report.exporters import to_json, to_markdown, to_sarif
+from drrepo.report.synthesis import grade
 from drrepo.service import AnalysisService
 
 SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}

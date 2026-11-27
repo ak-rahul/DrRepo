@@ -1,5 +1,12 @@
 # 🩺 DrRepo
 
+[![CI](https://github.com/ak-rahul/DrRepo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ak-rahul/DrRepo/actions/workflows/ci.yml)
+![Python 3.11–3.14](https://img.shields.io/badge/python-3.11%E2%80%933.14-blue)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+![mypy: strict](https://img.shields.io/badge/mypy-strict-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE.md)
+
 **Agentic health check for public GitHub repositories.**
 
 DrRepo clones a repository, runs real scanners over it (ruff, bandit, semgrep, a secret scanner, OSV.dev and deps.dev lookups), and gives the results to a *Lead Investigator* LLM agent. That agent decides which categories need a deep, tool-calling investigation. Everything ends up in one scored report: JSON, Markdown, or SARIF for GitHub code scanning.
@@ -58,7 +65,8 @@ Findings and scores come from deterministic code; the LLM only writes summaries 
 |---|---|
 | [Usage](docs/usage.md) | CLI, UI, Python API, Docker, CI/SARIF, MCP server, troubleshooting |
 | [Configuration](docs/configuration.md) | every environment variable |
-| [Architecture](docs/architecture.md) | design, pipeline, agents, resilience, security model |
+| [Architecture](docs/architecture.md) | design, pipeline, resilience, security model |
+| [Agents](docs/agents.md) | every agent's job, tools, bounds, and how to edit its instructions |
 | [Report format](docs/report-format.md) | JSON schema, scoring math, SARIF mapping |
 | [Development](docs/development.md) | setup, tests, extending DrRepo |
 | [Changelog](CHANGELOG.md) · [Security](SECURITY.md) | release notes · reporting vulnerabilities |

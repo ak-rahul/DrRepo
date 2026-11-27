@@ -33,7 +33,7 @@ REPO = RepoRef("octo", "demo")
 @pytest.fixture
 def collectors(github_data, tmp_path):
     """Patch clone + every collector; yields call counts and the fake clone."""
-    calls: Counter = Counter()
+    calls: Counter[str] = Counter()
     clone_dir = tmp_path / "clone"
     clone_dir.mkdir()
     cloned = MagicMock(path=clone_dir)

@@ -18,7 +18,7 @@ class TestClone:
         assert cloned is None and result.status.value == "error"
 
     def test_hardened_command_and_cleanup(self, config, monkeypatch):
-        captured = {}
+        captured: dict[str, object] = {}
 
         def fake_run(cmd, **kwargs):
             captured.update(cmd=cmd, **kwargs)

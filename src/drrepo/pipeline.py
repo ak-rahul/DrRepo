@@ -60,7 +60,7 @@ from drrepo.recon.files import collect_repo_layout
 from drrepo.recon.github import collect_github_metadata
 from drrepo.recon.readme import analyze_readme
 from drrepo.recon.scanners import collect_security, collect_static_analysis
-from drrepo.reporting import synthesize_report
+from drrepo.report.synthesis import synthesize_report
 
 ProgressCallback = Callable[[str], None]
 

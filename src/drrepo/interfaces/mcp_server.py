@@ -37,12 +37,12 @@ from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from drrepo import __version__
 from drrepo.agents.tools import lookup_package
 from drrepo.config import Config
-from drrepo.exporters import to_json, to_markdown, to_sarif
 from drrepo.interfaces.health import check_all
 from drrepo.log import logger
 from drrepo.models import RepoRef, Severity
 from drrepo.recon.readme import analyze_readme
-from drrepo.reporting import load_history
+from drrepo.report.exporters import to_json, to_markdown, to_sarif
+from drrepo.report.history import load_history
 from drrepo.service import AnalysisService
 
 mcp = MCPServer(

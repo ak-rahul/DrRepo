@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from drrepo.agents.analysts.base import NARRATIVE_RULES, Analyst, Assessment, Recon, collector_data
+from drrepo.agents.analysts.base import Analyst, Assessment, Recon, collector_data
 from drrepo.models import Category, Issue, Location, Severity
 
 _CRITICAL_SECTIONS = {"Installation", "Usage"}
@@ -10,15 +10,6 @@ _CRITICAL_SECTIONS = {"Installation", "Usage"}
 
 class DocumentationAnalyst(Analyst):
     category = Category.DOCUMENTATION
-    narrative_prompt = (
-        "You are a technical writing expert assessing a repository's README. " + NARRATIVE_RULES
-    )
-    investigation_prompt = (
-        "You are investigating documentation quality. Read the README and any docs/ "
-        "directory; check that installation and usage instructions match the actual project "
-        "(entry points, package manager, config files). Report documentation that is missing, "
-        "wrong, or out of date -- with the file you found it in."
-    )
     tool_families = ("files",)
     rescore_scale = 60.0
 

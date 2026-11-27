@@ -4,16 +4,21 @@ Deliberately NOT a module-level singleton. Every collector/agent takes a
 `Config` instance via constructor injection, so tests can build one with fake
 values and never touch `os.environ` or real credentials. Call `Config.from_env()`
 exactly once at a real entrypoint (CLI, Streamlit app, health API).
+
+`Config` is frozen (one instance is shared by concurrent runs) and validated on
+construction, however it is built. Derive per-run variants with
+`dataclasses.replace(config, ...)`, which validates again.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from drrepo.errors import ConfigurationError
 
 SUPPORTED_PROVIDERS = ("groq", "openai")
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
@@ -55,7 +60,7 @@ def _env_float(name: str, default: float) -> float:
         raise ConfigurationError(f"{name}={raw!r} is not a number") from e
 
 
-@dataclass
+@dataclass(frozen=True)
 class Config:
     """Application configuration. Build via `Config.from_env()` or directly for tests."""
 
@@ -113,6 +118,31 @@ class Config:
     # later run can report a delta against the previous analysis.
     enable_score_history: bool = True
 
+    def __post_init__(self) -> None:
+        """Reject values that would only fail later, deep inside a run.
+
+        Raises:
+            ConfigurationError: naming the offending setting by its env var.
+        """
+        problems: list[str] = []
+        if self.model_provider not in SUPPORTED_PROVIDERS:
+            problems.append(
+                f"MODEL_PROVIDER={self.model_provider!r} is not supported "
+                f"(choose one of: {', '.join(SUPPORTED_PROVIDERS)})"
+            )
+        if self.log_level not in LOG_LEVELS:
+            problems.append(f"LOG_LEVEL={self.log_level!r} is not one of {', '.join(LOG_LEVELS)}")
+        if not 0.0 <= self.temperature <= 2.0:
+            problems.append(f"TEMPERATURE={self.temperature} must be between 0 and 2")
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.name in _MUST_BE_POSITIVE and value < 1:
+                problems.append(f"{f.name.upper()}={value} must be at least 1")
+            elif f.name in _MUST_BE_NON_NEGATIVE and value < 0:
+                problems.append(f"{f.name.upper()}={value} must not be negative")
+        if problems:
+            raise ConfigurationError("; ".join(problems))
+
     @classmethod
     def from_env(cls, env_file: str | None = ".env") -> Config:
         """Load configuration from environment variables (and `env_file` if present).
@@ -121,8 +151,8 @@ class Config:
         real entrypoint, then pass the resulting `Config` down explicitly.
 
         Raises:
-            ConfigurationError: a variable is set but can't be parsed, or
-                `MODEL_PROVIDER` names an unsupported provider.
+            ConfigurationError: a variable is set but can't be parsed, or its
+                value is out of range (see `__post_init__`).
         """
         from dotenv import load_dotenv
 
@@ -183,11 +213,6 @@ class Config:
             ),
             enable_score_history=_env_bool("ENABLE_SCORE_HISTORY", d.enable_score_history),
         )
-        if config.model_provider not in SUPPORTED_PROVIDERS:
-            raise ConfigurationError(
-                f"MODEL_PROVIDER={config.model_provider!r} is not supported "
-                f"(choose one of: {', '.join(SUPPORTED_PROVIDERS)})"
-            )
         return config
 
     def validate_for_llm(self) -> list[str]:
@@ -200,3 +225,22 @@ class Config:
         if self.model_provider == "openai" and not self.openai_api_key:
             return ["OPENAI_API_KEY"]
         return []
+
+
+# Field names double as env var names (upper-cased) in validation messages.
+_MUST_BE_POSITIVE = frozenset(
+    {
+        "max_tokens",
+        "llm_request_timeout_seconds",
+        "clone_timeout_seconds",
+        "clone_max_size_mb",
+        "collector_timeout_seconds",
+        "max_tool_calls_per_investigator",
+        "investigator_timeout_seconds",
+        "llm_circuit_breaker_threshold",
+        "estimated_tokens_per_deep_investigation",
+    }
+)
+_MUST_BE_NON_NEGATIVE = frozenset(
+    {"llm_circuit_breaker_timeout_seconds", "llm_token_budget_per_run"}
+)

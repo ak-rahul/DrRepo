@@ -33,29 +33,30 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---- runtime stage ------------------------------------------------------------
 FROM python:3.12-slim-trixie
 
-# git: the clone collector shells out to it. curl: container healthcheck only.
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends git curl \
-    && rm -rf /var/lib/apt/lists/*
+LABEL org.opencontainers.image.title="DrRepo"       org.opencontainers.image.description="Agentic health check for public GitHub repositories"       org.opencontainers.image.source="https://github.com/ak-rahul/DrRepo"       org.opencontainers.image.licenses="MIT"
 
-RUN useradd --create-home --uid 1000 drrepo
+# git: the clone collector shells out to it. Versions track the pinned Debian
+# release (security updates via `apt-get upgrade`), so they aren't pinned here.
+# hadolint ignore=DL3008
+RUN apt-get update     && apt-get upgrade -y     && apt-get install -y --no-install-recommends git     && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 1000 --user-group drrepo
 WORKDIR /app
-COPY --from=builder --chown=drrepo:drrepo /app/.venv /app/.venv
+# Code and tools stay root-owned (read-only for the app user); only the output
+# directories are writable.
+COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /opt/uv-tools /opt/uv-tools
-RUN mkdir -p /app/reports /app/logs && chown -R drrepo:drrepo /app
+RUN install -d -o 1000 -g 1000 /app/reports /app/logs
 
-ENV PATH="/app/.venv/bin:/opt/uv-tools/bin:$PATH" \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/app/.venv/bin:/opt/uv-tools/bin:$PATH"     PYTHONUNBUFFERED=1     PYTHONDONTWRITEBYTECODE=1
 
-USER drrepo
+USER 1000:1000
 
 # 8501 Streamlit UI · 8000 health API · 8765 MCP (streamable-http)
 EXPOSE 8501 8000 8765
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl --fail --silent http://localhost:8501/_stcore/health || exit 1
+# Python instead of curl: one less package (and CVE surface) in the image.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)"]
 
 # Credentials are supplied at runtime (--env-file / compose env_file); none are baked in.
 CMD ["drrepo", "ui", "--host", "0.0.0.0", "--port", "8501", "--headless"]

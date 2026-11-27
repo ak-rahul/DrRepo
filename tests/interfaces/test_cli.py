@@ -158,8 +158,13 @@ def test_health_command(monkeypatch, capsys):
 
 
 def test_ui_builds_streamlit_command(monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
+    calls: list[list[str]] = []
+
+    def fake_call(cmd: list[str]) -> int:
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(cli.subprocess, "call", fake_call)
     assert cli.main(["ui", "--port", "9000", "--headless"]) == 0
     cmd = calls[0]
     assert cmd[1:4] == ["-m", "streamlit", "run"] and cmd[4].endswith("streamlit_app.py")

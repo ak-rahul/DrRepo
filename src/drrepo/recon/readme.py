@@ -23,11 +23,22 @@ _SETEXT_HEADING_RE = re.compile(r"^(\S.*)\n(?:=+|-+)\s*$", re.MULTILINE)
 # `=`/`-` underlines are already matched by the setext pattern; only other rST
 # adornments here, or every such heading would be counted twice.
 _RST_HEADING_RE = re.compile(r"^(\S.*)\n([~^\"'`#*+])\2{2,}\s*$", re.MULTILINE)
-_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)|<img\s[^>]*>", re.IGNORECASE)
-_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\([^)]*\)")
-_BADGE_RE = re.compile(r"!\[[^\]]*\]\((https?://[^)]*?(?:badge|shields\.io)[^)]*)\)", re.IGNORECASE)
-_TOC_LINK_RE = re.compile(r"^\s*[-*]\s*\[[^\]]+\]\(#[^)]*\)", re.MULTILINE)
+# README text is attacker-controlled, so every pattern below is linear-time:
+# character classes exclude the opening delimiter and newlines, so a failed
+# match attempt can never rescan text that a later attempt will scan again.
+# (The earlier `\[[^\]]*\]` forms were quadratic: 30k "[" took ~1 s, and a TOC
+# pattern with `^\s*` took 7 s on 30k newlines.)
+_IMAGE_RE = re.compile(r"!\[[^\[\]\n]*\]\([^()\n]*\)|<img\s[^<>]*>", re.IGNORECASE)
+_LINK_RE = re.compile(r"(?<!!)\[[^\[\]\n]*\]\([^()\n]*\)")
+_BADGE_RE = re.compile(
+    r"!\[[^\[\]\n]*\]\((https?://[^()\s]*?(?:badge|shields\.io)[^()\s]*)\)", re.IGNORECASE
+)
+_TOC_LINK_RE = re.compile(r"^[ \t]*[-*][ \t]*\[[^\[\]\n]+\]\(#[^()\n]*\)", re.MULTILINE)
 _TOC_HEADING_RE = re.compile(r"^(table of )?contents$|^toc$", re.IGNORECASE)
+
+# Applied here, not only by callers: the GitHub API, the clone, and the MCP
+# `analyze_readme_text` tool all feed this function.
+MAX_README_CHARS = 100_000
 
 _ESSENTIAL_SECTIONS: dict[str, tuple[str, ...]] = {
     "Installation": ("install", "setup", "getting started", "quick start", "quickstart"),
@@ -82,8 +93,13 @@ def _quality_score(a: dict[str, Any]) -> float:
 
 
 def analyze_readme(content: str) -> CollectorResult:
-    """Analyze README markdown/rST text and return structural metrics."""
-    if not content or not content.strip():
+    """Analyze README markdown/rST text and return structural metrics.
+
+    Content beyond `MAX_README_CHARS` is ignored (and noted in `detail`).
+    """
+    truncated = bool(content) and len(content) > MAX_README_CHARS
+    content = (content or "")[:MAX_README_CHARS]
+    if not content.strip():
         data: dict[str, Any] = {
             "word_count": 0,
             "section_count": 0,
@@ -114,4 +130,5 @@ def analyze_readme(content: str) -> CollectorResult:
         or len(_TOC_LINK_RE.findall(content)) >= 3,
     }
     data["quality_score"] = _quality_score(data)
-    return CollectorResult(name=NAME, status=CollectorStatus.OK, data=data)
+    detail = f"README truncated to the first {MAX_README_CHARS:,} characters" if truncated else None
+    return CollectorResult(name=NAME, status=CollectorStatus.OK, data=data, detail=detail)

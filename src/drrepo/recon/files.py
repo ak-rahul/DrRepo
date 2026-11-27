@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from drrepo.models import CollectorResult, CollectorStatus
+from drrepo.recon.readme import MAX_README_CHARS
 
 # ------------------------------------------------------------ helpers ---
 
@@ -159,7 +160,6 @@ _LOCKFILES = {
 }
 _TYPE_CONFIGS = {"mypy.ini", "tsconfig.json", "pyrightconfig.json", ".mypy.ini"}
 _README_NAMES = ("readme.md", "readme.rst", "readme.txt", "readme")
-_MAX_README_CHARS = 100_000
 
 
 def _count_lines(path: Path) -> int:
@@ -239,7 +239,7 @@ def collect_repo_layout(clone_path: str) -> CollectorResult:
 
     readme_content = ""
     if readme_path:
-        readme_content = (read_text_file(root / readme_path) or "")[:_MAX_README_CHARS]
+        readme_content = (read_text_file(root / readme_path) or "")[:MAX_README_CHARS]
 
     return CollectorResult(
         name=NAME,

@@ -26,20 +26,20 @@ AnalysisService (one per process)
 
 ```
 src/drrepo/
-  config.py         Config; from_env() is the only os.environ reader
+  config.py         Config (frozen, validated); from_env() is the only os.environ reader
   errors.py         DrRepoError, ConfigurationError, CircuitOpenError, InvestigationError
   log.py            logger + configure_logging (no import-time side effects)
   models.py         RepoRef, Issue, CategoryFinding, InvestigationPlan, Report, ...
   resilience.py     CircuitBreaker, retry_with_backoff, is_retryable_llm_error
   pipeline.py       RunContext, COLLECTORS registry, Workflow (the LangGraph graph)
-  reporting.py      synthesize_report (pure) + score history (disk)
-  exporters.py      to_json / to_markdown / to_sarif
   service.py        AnalysisService, save_report
   recon/            deterministic evidence: clone, files (fs helpers + layout), github,
                     readme, scanners (ruff/bandit/semgrep + 2 collectors), secrets,
                     manifests, dependencies (OSV/deps.dev + lookup cache)
   agents/           llm (chat model, TokenBudget, LLMRuntime), planner, investigator,
-                    tools (all investigator tools + build_tools), analysts/ (one per category)
+                    tools (all investigator tools + build_tools), analysts/ (one per category),
+                    prompts (loader) + instructions/*.md (every agent's job, as documents)
+  report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF)
   interfaces/       cli, streamlit_app, mcp_server, health (checks + FastAPI app)
 ```
 
@@ -73,6 +73,8 @@ Scanners run with `cwd` set to the clone, and every path is rewritten repo-relat
 
 **Secrets.** Provider-specific patterns, plus a generic assignment rule with an entropy floor and placeholder filter. Values are never reported. Hits under `tests/`, `fixtures/`, `examples/` and similar directories are LOW, since test suites routinely commit throwaway keys.
 
+Every agent's job, inputs, tools and bounds are documented in [agents.md](agents.md); their prompts are the markdown files in `agents/instructions/`.
+
 ## Stage 2: planner (`agents/planner.py`)
 
 `LeadInvestigator` makes one structured-output call. The output model uses `Literal`-typed fields so the model can't invent categories or depths. The prompt contains recon counts (`pipeline.recon_summary`), the user's context, and a cap: "at most N deep categories".
@@ -102,9 +104,9 @@ The `Analyst` contract (`analysts/base.py`):
 
 **Tools** (`agents/tools.py`) come in four families: `files` (`read_file`, `list_directory`, `find_files`, `search_code`), `scanners` (`run_scanner_on_path`), `dependencies` (`query_osv`), and `git_history` (`get_file_git_history`, via the GitHub API because a shallow clone has one commit). `build_tools` offers only the tools that can work for this run.
 
-## Stage 4: synthesis (`reporting.py`)
+## Stage 4: synthesis (`report/`)
 
-`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records score history (append-only, 20 runs per repository, atomic write). See [report-format.md](report-format.md) for the scoring math and output schema.
+`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records score history: append-only, 20 runs per repository, written to a temp file and renamed into place. A thread lock and a lock file (`history.json.lock`) serialize writers, so the UI, CLI and MCP server can share one `reports/` directory. If history can't be written, the report is still returned and a warning is logged. See [report-format.md](report-format.md) for the scoring math and output schema.
 
 ## Resilience (`resilience.py`, `agents/llm.py`)
 
@@ -139,7 +141,9 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 **Data that leaves the machine:** public repository metadata to GitHub, package names and versions to OSV.dev and deps.dev, and trimmed recon data plus tool outputs to the configured LLM provider. Secrets are never reported by value.
 
-**Exposed services:** the health API and the MCP HTTP transport have no authentication. Bind them to localhost (the default) or put them behind an authenticating proxy.
+**Exposed services:** the web UI, the health API and the MCP HTTP transport have no authentication. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
+
+**Container:** non-root (uid 1000), with code and tools root-owned and read-only to the app user; only `reports/` and `logs/` are writable. No curl in the image (healthchecks use Python), and the build context is an allow-list (`.dockerignore`), so local `.env` files never reach the build.
 
 ## Interfaces (`interfaces/`)
 

@@ -156,7 +156,7 @@ def test_list_reports_and_health(service, monkeypatch):
 
 
 def test_package_lookup_uses_shared_cache(service, monkeypatch):
-    seen = {}
+    seen: dict[str, object] = {}
 
     def lookup(package, ecosystem, version, config, cache):
         seen.update(package=package, cache=cache)

@@ -15,6 +15,7 @@ from github import Auth, Github, GithubException
 from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus, RepoRef
+from drrepo.recon.readme import MAX_README_CHARS
 
 NAME = "github_metadata"
 _TIMEOUT_SECONDS = 15
@@ -74,7 +75,8 @@ def _file_structure(repo: Any) -> dict[str, bool]:
 
 def _readme(repo: Any) -> str:
     try:
-        return str(repo.get_readme().decoded_content.decode("utf-8", errors="replace"))
+        text = repo.get_readme().decoded_content.decode("utf-8", errors="replace")
+        return str(text[:MAX_README_CHARS])
     except GithubException as e:
         if e.status == 404:
             return ""

@@ -27,7 +27,7 @@ uv run drrepo analyze https://github.com/owner/repo \
 | `-d, --description` | context passed to the planner and investigators |
 | `--shallow` | no deep investigations for this run |
 | `--format` | any of `json,md,sarif`; `''` writes nothing |
-| `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<timestamp>.<ext>` |
+| `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<UTC timestamp>.<ext>`, e.g. `psf__requests_20261127-091500Z.json` |
 | `--json` | print the full JSON report to stdout (progress stays on stderr) |
 | `--fail-under N` | exit code 3 if the overall score is below N |
 | `--no-history` | don't compare with or record into `reports/history.json` |
@@ -79,7 +79,9 @@ docker compose --profile api --profile mcp up       # + health API :8000, MCP :8
 docker compose run --rm ui drrepo analyze https://github.com/psf/requests --format md
 ```
 
-The image runs as a non-root user, contains `git`, and reads credentials from `.env` at runtime. None are baked in. `reports/` and `logs/` are mounted volumes.
+The image runs as a non-root user, contains `git` and semgrep, and reads credentials from `.env` at runtime. None are baked in. `reports/` and `logs/` are mounted volumes. On Linux, make them writable by uid 1000 (`sudo chown 1000:1000 reports logs`); if history can't be written, analyses still complete.
+
+Ports are published on `127.0.0.1` only, because none of the services has authentication. To reach them from another machine, put a reverse proxy with authentication in front rather than changing the bind address.
 
 ## In CI: gate and code scanning
 

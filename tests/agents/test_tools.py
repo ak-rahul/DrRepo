@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -76,6 +77,20 @@ class TestFileTools:
         )
         assert "invalid regex" in tools["search_code"].invoke({"pattern": "("})
         assert "longer than" in tools["search_code"].invoke({"pattern": "a" * 400})
+
+    def test_search_code_survives_catastrophic_backtracking(self, make_repo):
+        """An LLM-chosen ReDoS pattern must fail fast, not pin a thread forever."""
+        root = make_repo({"bomb.txt": "a" * 60 + "b\n"})
+        search = {t.name: t for t in make_file_tools(str(root))}["search_code"]
+        started = time.monotonic()
+        out = search.invoke({"pattern": r"(a|aa)+$"})
+        assert "too slow" in out
+        assert time.monotonic() - started < 5
+
+    def test_search_code_stops_at_time_budget(self, repo, monkeypatch):
+        monkeypatch.setattr(tools_module, "SEARCH_TIME_BUDGET_SECONDS", -1.0)
+        search = {t.name: t for t in make_file_tools(str(repo))}["search_code"]
+        assert "time budget" in search.invoke({"pattern": "def"})
 
 
 class TestScanTool:

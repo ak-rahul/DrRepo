@@ -15,6 +15,12 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
 ]
 dependencies = [
     "langgraph>=1.2.7,<2",
@@ -36,6 +42,8 @@ dependencies = [
     # to vulnerable versions. Install it as an isolated tool: `uv tool install semgrep`.
     "ruff>=0.15.20",
     "bandit>=1.9.4",
+    "filelock>=3.16,<5",
+    "regex>=2024.11.6",
 ]
 
 [project.urls]
@@ -64,6 +72,23 @@ build-backend = "hatchling.build"
 # src layout: the importable package is `drrepo`.
 packages = ["src/drrepo"]
 
+[tool.hatch.build.targets.sdist]
+# Allow-list: local files (agent notes, editor settings, logs) never ship.
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/README.md",
+    "/LICENSE.md",
+    "/CHANGELOG.md",
+    "/SECURITY.md",
+    "/CONTRIBUTING.md",
+    "/pyproject.toml",
+    "/uv.lock",
+]
+exclude = ["__pycache__"]
+
 [tool.uv]
 default-groups = ["dev"]
 
@@ -86,6 +111,13 @@ select = [
     "C4",  # comprehensions
     "RUF", # ruff-specific
     "S",   # bandit (security)
+    "PIE", # unnecessary code
+    "PERF",# performance anti-patterns
+    "FURB",# modernizations
+    "LOG", # logging misuse
+    "DTZ", # naive datetimes
+    "PTH", # pathlib over os.path
+    "PLW", # pylint warnings
 ]
 ignore = [
     "E501",   # line length is the formatter's job
@@ -107,10 +139,9 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-warn_unused_ignores = true
+strict = true
 ignore_missing_imports = true
+
 
 # -------------------------------------------------------------- pytest ----
 

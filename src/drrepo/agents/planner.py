@@ -17,22 +17,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from drrepo.agents import prompts
 from drrepo.agents.llm import LLMRuntime
 from drrepo.log import logger
 from drrepo.models import Category, CategoryPlan, InvestigationDepth, InvestigationPlan
-
-SYSTEM_PROMPT = """You are the lead investigator planning a repository audit. From initial recon \
-signals, decide for each of five categories whether it deserves a DEEP tool-calling \
-investigation (reading files, searching code, re-running scanners, querying advisories) or a \
-SHALLOW pass that only summarizes the automated results.
-
-Prefer "deep" when signals suggest real risk or ambiguity: many or severe scanner findings, \
-possible secrets, vulnerable or unpinned dependencies, a category whose automated data is thin \
-or was unavailable, or something the user specifically asked about.
-Prefer "shallow" when automated signals are clean and complete, so time and tokens go where \
-they matter. You may choose at most the stated number of deep categories; rank by risk.
-
-Return all five categories, each with a one-sentence rationale grounded in the recon signals."""
 
 CategoryName = Literal[
     "documentation", "code_quality", "security", "dependencies", "maintainability"
@@ -82,7 +70,7 @@ class LeadInvestigator:
             + f"You may mark at most {max_deep} categories as deep."
         )
         try:
-            result = self._llm.structured(InvestigationPlanOutput, SYSTEM_PROMPT, prompt)
+            result = self._llm.structured(InvestigationPlanOutput, prompts.planner_prompt(), prompt)
         except Exception as e:
             logger.error(f"Lead Investigator planning failed, defaulting to all-shallow: {e}")
             return InvestigationPlan.all_shallow(

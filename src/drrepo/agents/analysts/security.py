@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from drrepo.agents.analysts.base import (
-    NARRATIVE_RULES,
     Analyst,
     Assessment,
     Recon,
@@ -71,17 +70,6 @@ def _recommendation(finding: dict[str, Any]) -> str:
 
 class SecurityAnalyst(Analyst):
     category = Category.SECURITY
-    narrative_prompt = (
-        "You are a security engineer summarizing scanner results. Don't be alarmist about "
-        "low-severity findings. " + NARRATIVE_RULES
-    )
-    investigation_prompt = (
-        "You are investigating security. Scanner findings listed are already reported -- verify "
-        "the most severe ones by reading the code (say so if one is a false positive) and look "
-        "for what scanners miss: injection (SQL, shell, template), unsafe deserialization, "
-        "path traversal, missing authn/authz checks, SSRF, weak crypto, secrets in config or "
-        "history. Use get_file_git_history on files that handle credentials."
-    )
     tool_families = ("files", "scanners", "git_history")
     rescore_scale = _SCALE
 

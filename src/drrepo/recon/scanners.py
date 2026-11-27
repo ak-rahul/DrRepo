@@ -66,6 +66,7 @@ def _run(tool: str, args: list[str], cwd: Path, timeout: int) -> tuple[str | Non
     try:
         proc = subprocess.run(
             [exe, *args],
+            check=False,  # scanners exit non-zero when they find something
             cwd=cwd,
             capture_output=True,
             text=True,

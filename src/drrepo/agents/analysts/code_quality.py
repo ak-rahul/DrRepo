@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from drrepo.agents.analysts.base import (
-    NARRATIVE_RULES,
     Analyst,
     Assessment,
     Recon,
@@ -48,16 +47,6 @@ def _recommendation(finding: dict[str, Any]) -> str:
 
 class CodeQualityAnalyst(Analyst):
     category = Category.CODE_QUALITY
-    narrative_prompt = (
-        "You are a senior code reviewer summarizing static-analysis results. " + NARRATIVE_RULES
-    )
-    investigation_prompt = (
-        "You are investigating code quality. The ruff findings listed are already reported -- "
-        "do not repeat them. Look for problems a linter misses: very long or deeply nested "
-        "functions, duplicated logic, swallowed exceptions, missing error handling at I/O "
-        "boundaries, dead code, and confusing module structure. Use run_scanner_on_path to "
-        "look closer at hot spots. Every issue must cite a file (and line where possible)."
-    )
     tool_families = ("files", "scanners")
     rescore_scale = 60.0
 

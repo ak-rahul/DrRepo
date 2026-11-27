@@ -13,14 +13,14 @@ from drrepo.recon.scanners import (
     run_bandit,
     run_ruff,
     run_semgrep,
-    scan_secrets,
 )
+from drrepo.recon.secrets import scan_secrets
 
 
 @pytest.fixture
 def fake_run(monkeypatch):
     """Replace subprocess.run in the scanner module; records argv and returns canned stdout."""
-    calls: list[dict] = []
+    calls: list[dict[str, object]] = []
     outputs: dict[str, str] = {}
 
     def run(argv, **kwargs):
