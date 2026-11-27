@@ -18,12 +18,12 @@ uv run pytest tests/test_pipeline.py::test_every_node_runs_exactly_once
 uv run pytest -k dependencies                   # by keyword
 uv run pytest -m integration -v                 # live: network, git, API keys (skip themselves if missing)
 uv run pytest --cov=drrepo                      # coverage
-uv run ruff check src tests                     # lint
-uv run ruff format src tests                    # format
-uv run mypy src                                 # types
+uv run ruff check src tests examples            # lint
+uv run ruff format src tests examples           # format
+uv run mypy src examples                        # types
 ```
 
-Before pushing, run the same checks as CI: `uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src && uv run pytest`.
+Before pushing, run the same checks as CI: `uv run ruff check src tests examples && uv run ruff format --check src tests examples && uv run mypy src examples && uv run pytest`.
 
 ## Tests
 
@@ -34,10 +34,11 @@ Before pushing, run the same checks as CI: `uv run ruff check src tests && uv ru
 - The investigator is tested by mocking `create_agent` with real `AIMessage`/`ToolMessage` objects (`GenericFakeChatModel` has no `bind_tools`). The live check is in `tests/integration/test_live.py`.
 - A plain `Mock()` auto-vivifies `usage_metadata`. Keep the `isinstance(..., dict)` guards in `extract_actual_tokens`.
 - The Streamlit UI is smoke-tested with `streamlit.testing.v1.AppTest`.
+- `tests/test_examples.py` imports every script in `examples/` and tests its logic. Examples are linted and type-checked like `src/`.
 
 ## Extending
 
-**A collector.** Write `collect_<name>(...) -> CollectorResult` in `recon/`, documenting the `data` schema in its docstring and returning `skipped`/`error` with a `detail` rather than raising. Add a `CollectorSpec` to `pipeline.COLLECTORS` (set `needs_clone`, and `after` if it consumes another collector's output). The graph wiring and `defer` are derived automatically. Read its output in an analyst with `collector_data(recon, "<name>")`.
+**A collector.** Write `collect_<name>(...) -> CollectorResult` in `recon/`, documenting the `data` schema in its docstring and returning `skipped`/`error` with a `detail` rather than raising. Add a `CollectorSpec` to `pipeline.COLLECTORS` (set `needs_clone`, and `after` if it consumes another collector's output). The graph wiring and `defer` are derived automatically. Read its output in an analyst with `collector_data(recon, "<name>")`. [examples/custom_collector.py](../examples/custom_collector.py) is a complete, tested walk-through.
 
 **A check in a category.** Add it to that analyst's `assess()`. Give each issue a stable `source` and `rule_id`: SARIF rule ids are `source/rule_id`, so a new source must not collide with an existing one.
 

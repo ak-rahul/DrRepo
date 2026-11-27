@@ -30,6 +30,7 @@ from functools import lru_cache
 from typing import Any, Literal
 
 import anyio
+import anyio.lowlevel
 from mcp.server.fastmcp import Context, FastMCP
 
 from drrepo.agents.tools import lookup_package
@@ -123,13 +124,16 @@ async def analyze_repository(
         return {"error": str(e)}
 
     steps = {"n": 0}
+    # LangGraph runs parallel nodes in its own thread pool, not in anyio worker
+    # threads, so from_thread.run needs an explicit token for this event loop.
+    loop_token = anyio.lowlevel.current_token()
 
     def progress(message: str) -> None:
         # Progress is best-effort: a client that doesn't track progress (or a
         # call made outside a live request) must never abort the analysis.
         steps["n"] += 1
         try:
-            anyio.from_thread.run(ctx.report_progress, steps["n"], None, message)
+            anyio.from_thread.run(ctx.report_progress, steps["n"], None, message, token=loop_token)
         except Exception as e:
             logger.debug(f"MCP progress notification failed: {e}")
 

@@ -1,0 +1,45 @@
+# Drop into .github/workflows/drrepo.yml of the repository you want audited.
+# DrRepo analyzes the public GitHub copy of the repository, not the CI checkout.
+name: DrRepo
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly: new advisories appear without any code change
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to code scanning
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Analyze
+        run: >-
+          uvx --from git+https://github.com/ak-rahul/DrRepo
+          drrepo analyze "https://github.com/${{ github.repository }}"
+          --shallow --format sarif,md -o drrepo --fail-under 60
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: LLM summaries. Drop --shallow above to allow deep investigations too.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: drrepo
+
+      - name: Keep the Markdown report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drrepo-report
+          path: drrepo/*.md

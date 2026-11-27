@@ -100,7 +100,7 @@ def run_ruff(root: Path, target: Path | None = None, timeout: int = 120) -> Scan
             "--no-cache",
             "--force-exclude",
             # Tests are excluded so findings match the source-only line count the
-            # code-quality score is normalized by (see collectors/layout.py).
+            # code-quality score is normalized by (see recon/files.py).
             f"--extend-exclude={','.join(sorted(SKIP_DIRS | TEST_DIRS))}",
         ],
         root,

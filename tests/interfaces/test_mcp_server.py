@@ -141,3 +141,29 @@ def test_prompt_mentions_focus():
         )
     )
     assert "auth" in result.messages[0].content.text
+
+
+def test_progress_reaches_client_from_foreign_threads(service):
+    """LangGraph runs parallel nodes in its own thread pool; progress from those
+    threads (not anyio workers) must still be delivered, not silently dropped."""
+    import threading
+
+    received: list[str] = []
+
+    class FakeContext:
+        async def info(self, _message):
+            return None
+
+        async def report_progress(self, _progress, _total, message):
+            received.append(message)
+
+    def analyze(*_args, progress, **_kwargs):
+        progress("from the worker thread")
+        worker = threading.Thread(target=progress, args=("from a foreign thread",))
+        worker.start()
+        worker.join()
+        return REPORT
+
+    service.analyze.side_effect = analyze
+    asyncio.run(mcp_server.analyze_repository("https://github.com/octo/demo", FakeContext()))
+    assert received == ["from the worker thread", "from a foreign thread"]

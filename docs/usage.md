@@ -66,7 +66,7 @@ print(report["overall_score"], report["issue_counts"])
 save_report(report, output_dir=Path("reports"), formats=("json", "sarif"))
 ```
 
-Reuse one `AnalysisService` for many analyses. The circuit breaker and dependency cache are shared; each run gets a fresh token budget. See `examples/compare_repositories.py`.
+Reuse one `AnalysisService` for many analyses. The circuit breaker and dependency cache are shared; each run gets a fresh token budget. See [examples/](../examples/README.md): `compare_repositories.py` ranks several repositories, `policy_gate.py` applies a custom CI policy, and `custom_collector.py` adds a collector to the pipeline.
 
 ## Docker
 
@@ -91,6 +91,8 @@ The image runs as a non-root user, contains `git`, and reads credentials from `.
     sarif_file: drrepo
 ```
 
+A complete workflow (weekly schedule, permissions, Markdown artifact) is in [examples/github-workflow.yml](../examples/github-workflow.yml).
+
 DrRepo analyzes the public GitHub copy of the repository, not the CI checkout. Each SARIF result's `uri` is repo-relative, so GitHub annotates the right files.
 
 ## MCP server
@@ -112,6 +114,8 @@ DrRepo analyzes the public GitHub copy of the repository, not the CI checkout. E
   }
 }
 ```
+
+**From Python:** [examples/mcp_client.py](../examples/mcp_client.py) starts the server over stdio, calls `analyze_repository` with progress notifications, and reads a report resource.
 
 **Claude Code:**
 

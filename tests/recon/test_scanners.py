@@ -123,6 +123,8 @@ def test_missing_tool_and_timeout(tmp_path, monkeypatch):
 
 
 AWS_KEY = "AKIA" + "Q3RZ7XK2M9PLW4TB"
+# Split so neither this file nor the repo trips secret scanners (incl. pre-commit).
+KEY_HEADER = "PRIVATE" + " KEY"
 GH_TOKEN = "ghp_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"
 
 
@@ -130,8 +132,8 @@ def test_secret_scan_finds_real_looking_secrets_only(make_repo):
     root = make_repo(
         {
             "config.py": f'AWS = "{AWS_KEY}"\napi_key = "your_api_key_here_please"\n',
-            "deploy/key.pem": "-----BEGIN RSA PRIVATE KEY-----\nabc\n",
-            "tests/certs/server.key": "-----BEGIN PRIVATE KEY-----\nabc\n",
+            "deploy/key.pem": f"-----BEGIN RSA {KEY_HEADER}-----\nabc\n",
+            "tests/certs/server.key": f"-----BEGIN {KEY_HEADER}-----\nabc\n",
             "app.js": f"const t = '{GH_TOKEN}';",
             "settings.py": 'password = "Zx8#kQ2!vB9mW4pL"\n',  # chars outside the generic charset
             "secret = 'aaaaaaaaaaaaaaaaaaaa'.py": "",
