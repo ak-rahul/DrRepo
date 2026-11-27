@@ -1,70 +1,87 @@
-"""Tests for Config -- particularly that `from_env` never needs real
-credentials to construct (only `validate_for_llm` reports what's missing)."""
+import pytest
 
-from src.config import Config
+from drrepo.config import Config
+from drrepo.core.errors import ConfigurationError
 
-
-class TestConfigFromEnv:
-    def test_defaults_when_no_env_vars_set(self, monkeypatch, tmp_path):
-        for key in (
-            "GROQ_API_KEY",
-            "OPENAI_API_KEY",
-            "GH_TOKEN",
-            "MODEL_PROVIDER",
-            "ENABLE_DEEP_INVESTIGATION",
-            "MAX_TOOL_CALLS_PER_INVESTIGATOR",
-            "ENABLE_LLM_CIRCUIT_BREAKER",
-            "LLM_TOKEN_BUDGET_PER_RUN",
-            "ENABLE_DEPENDENCY_LOOKUP_CACHE",
-            "ENABLE_SCORE_HISTORY",
-        ):
-            monkeypatch.delenv(key, raising=False)
-
-        config = Config.from_env(env_file=str(tmp_path / "nonexistent.env"))
-
-        assert config.groq_api_key == ""
-        assert config.model_provider == "groq"
-        assert config.enable_deep_investigation is True
-        assert config.max_tool_calls_per_investigator == 8
-        assert config.investigator_timeout_seconds == 90
-        assert config.enable_llm_circuit_breaker is True
-        assert config.llm_circuit_breaker_threshold == 3
-        assert config.llm_circuit_breaker_timeout_seconds == 300
-        assert config.enable_llm_budget_tracking is True
-        assert config.llm_token_budget_per_run == 60000
-        assert config.estimated_tokens_per_deep_investigation == 12000
-        assert config.enable_dependency_lookup_cache is True
-        assert config.enable_score_history is True
-
-    def test_env_vars_override_defaults(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("GROQ_API_KEY", "real_key")
-        monkeypatch.setenv("ENABLE_DEEP_INVESTIGATION", "false")
-        monkeypatch.setenv("MAX_TOOL_CALLS_PER_INVESTIGATOR", "3")
-        monkeypatch.setenv("ENABLE_LLM_CIRCUIT_BREAKER", "false")
-        monkeypatch.setenv("LLM_TOKEN_BUDGET_PER_RUN", "10000")
-        monkeypatch.setenv("ENABLE_DEPENDENCY_LOOKUP_CACHE", "false")
-        monkeypatch.setenv("ENABLE_SCORE_HISTORY", "false")
-
-        config = Config.from_env(env_file=str(tmp_path / "nonexistent.env"))
-
-        assert config.groq_api_key == "real_key"
-        assert config.enable_deep_investigation is False
-        assert config.max_tool_calls_per_investigator == 3
-        assert config.enable_llm_circuit_breaker is False
-        assert config.llm_token_budget_per_run == 10000
-        assert config.enable_dependency_lookup_cache is False
-        assert config.enable_score_history is False
+_ENV_KEYS = [
+    "GROQ_API_KEY",
+    "OPENAI_API_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "MODEL_PROVIDER",
+    "ENABLE_DEEP_INVESTIGATION",
+    "MAX_TOOL_CALLS_PER_INVESTIGATOR",
+    "LLM_TOKEN_BUDGET_PER_RUN",
+    "TEMPERATURE",
+    "LOG_LEVEL",
+]
 
 
-class TestValidateForLlm:
-    def test_missing_groq_key_reported(self):
-        config = Config(model_provider="groq", groq_api_key="")
-        assert config.validate_for_llm() == ["GROQ_API_KEY"]
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    for key in _ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    return str(tmp_path / "missing.env")
 
-    def test_missing_openai_key_reported(self):
-        config = Config(model_provider="openai", openai_api_key="")
-        assert config.validate_for_llm() == ["OPENAI_API_KEY"]
 
-    def test_valid_config_reports_nothing_missing(self):
-        config = Config(model_provider="groq", groq_api_key="present")
-        assert config.validate_for_llm() == []
+def test_defaults_without_env(clean_env):
+    config = Config.from_env(env_file=clean_env)
+    assert config == Config()
+
+
+def test_env_overrides(clean_env, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", " key ")
+    monkeypatch.setenv("ENABLE_DEEP_INVESTIGATION", "no")
+    monkeypatch.setenv("MAX_TOOL_CALLS_PER_INVESTIGATOR", "3")
+    monkeypatch.setenv("TEMPERATURE", "0.7")
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    monkeypatch.setenv("MODEL_PROVIDER", "OpenAI")
+    config = Config.from_env(env_file=clean_env)
+    assert config.groq_api_key == "key"
+    assert config.enable_deep_investigation is False
+    assert config.max_tool_calls_per_investigator == 3
+    assert config.temperature == 0.7
+    assert config.log_level == "DEBUG"
+    assert config.model_provider == "openai"
+
+
+def test_github_token_fallback(clean_env, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "from-actions")
+    assert Config.from_env(env_file=clean_env).github_token == "from-actions"
+
+
+def test_reads_dotenv_file(clean_env, monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("GROQ_API_KEY=from-file\n", encoding="utf-8")
+    try:
+        assert Config.from_env(env_file=str(env_file)).groq_api_key == "from-file"
+    finally:
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("ENABLE_DEEP_INVESTIGATION", "maybe", "not a boolean"),
+        ("MAX_TOOL_CALLS_PER_INVESTIGATOR", "many", "not an integer"),
+        ("TEMPERATURE", "hot", "not a number"),
+        ("MODEL_PROVIDER", "anthropic-ish", "not supported"),
+    ],
+)
+def test_invalid_values_raise(clean_env, monkeypatch, key, value, message):
+    monkeypatch.setenv(key, value)
+    with pytest.raises(ConfigurationError, match=message):
+        Config.from_env(env_file=clean_env)
+
+
+@pytest.mark.parametrize(
+    ("provider", "kwargs", "missing"),
+    [
+        ("groq", {}, ["GROQ_API_KEY"]),
+        ("openai", {}, ["OPENAI_API_KEY"]),
+        ("groq", {"groq_api_key": "x"}, []),
+        ("openai", {"openai_api_key": "x"}, []),
+    ],
+)
+def test_validate_for_llm(provider, kwargs, missing):
+    assert Config(model_provider=provider, **kwargs).validate_for_llm() == missing

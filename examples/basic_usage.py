@@ -1,42 +1,34 @@
-"""Basic usage example for DrRepo.
+"""Analyze one repository from Python and print the highlights.
 
-Runs the full recon -> plan -> investigate -> synthesize pipeline against one repository. See
-`examples/agent_outputs_explained.md` for what `investigation_depth`/`investigation_trace` mean.
+uv run python examples/basic_usage.py https://github.com/pallets/itsdangerous
 """
 
-from src.config import Config
-from src.graph.workflow import Workflow
-from src.main import save_report
+from __future__ import annotations
+
+import sys
+
+from drrepo.config import Config
+from drrepo.core.log import configure_logging
+from drrepo.service import AnalysisService, save_report
 
 
-def main():
-    """Run a basic analysis example."""
+def main(repo_url: str) -> None:
     config = Config.from_env()
-    missing = config.validate_for_llm()
-    if missing:
-        raise SystemExit(f"Missing required configuration: {missing}. See .env.example.")
+    configure_logging(config.log_level, console_level="WARNING")
+    service = AnalysisService(config)
 
-    workflow = Workflow(config)
+    report = service.analyze(repo_url, "Example run", progress=lambda msg: print(f"  · {msg}"))
 
-    repo_url = "https://github.com/psf/requests"
-    print(f"Analyzing {repo_url}...")
+    print(f"\n{report['repository']['full_name']}: {report['overall_score']}/100")
+    for name, category in report["category_scores"].items():
+        score = f"{category['score']:.0f}" if category["assessed"] else "n/a"
+        print(f"  {name:<16} {score:>4}  ({category['investigation_depth']})")
+    for issue in report["issues"][:5]:
+        print(f"  [{issue['severity']}] {issue['title']}")
 
-    result = workflow.execute(repo_url, description="Popular Python HTTP library")
-
-    print("\n=== Analysis Results ===")
-    print(f"Repository: {result['repository']['name']}")
-    print(f"Overall Score: {result['overall_score']:.1f}/100")
-    for name, cs in result["category_scores"].items():
-        depth_tag = " [deep investigation]" if cs["investigation_depth"] == "deep" else ""
-        print(f"  {name}: {cs['score']:.1f}/100{depth_tag}")
-
-    print("\nTop Issues:")
-    for issue in result["issues"][:5]:
-        print(f"  [{issue['severity'].upper()}] {issue['title']}")
-
-    report_path = save_report(result)
-    print(f"\nFull report saved to: {report_path}")
+    paths = save_report(report, output_dir=__import__("pathlib").Path("reports"))
+    print("\nSaved:", ", ".join(str(p) for p in paths))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "https://github.com/pallets/itsdangerous")

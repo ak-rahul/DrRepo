@@ -1,107 +1,56 @@
-.PHONY: help install install-dev test lint format clean run cli docker-build docker-run
-
-# Detect OS
-ifeq ($(OS),Windows_NT)
-    PYTHON := python
-    RM := del /Q
-    RMDIR := rmdir /S /Q
-else
-    PYTHON := python3
-    RM := rm -f
-    RMDIR := rm -rf
-endif
+# Thin convenience wrapper: every target is a plain `uv` command, so Windows
+# users without `make` can copy the command directly.
+.PHONY: help install lint format typecheck test test-integration cov check ui mcp doctor docker clean
+.DEFAULT_GOAL := help
 
 help:
-	@echo DrRepo - Makefile Commands
-	@echo ==========================
-	@echo install        - Install production dependencies
-	@echo install-dev    - Install development dependencies
-	@echo test           - Run tests
-	@echo test-unit      - Run unit tests only
-	@echo test-integration - Run integration tests
-	@echo lint           - Run linters
-	@echo format         - Format code
-	@echo clean          - Clean generated files
-	@echo run            - Run Streamlit app
-	@echo cli            - Run CLI version
-	@echo docker-build   - Build Docker image
-	@echo docker-run     - Run with Docker Compose
+	@echo "install           uv sync + pre-commit hooks"
+	@echo "lint / format     ruff check / ruff format"
+	@echo "typecheck         mypy src"
+	@echo "test              unit tests (hermetic)"
+	@echo "test-integration  live tests (network + API keys)"
+	@echo "cov               unit tests with coverage report"
+	@echo "check             lint + format check + typecheck + test"
+	@echo "ui / mcp / doctor run the Streamlit UI / MCP server / diagnostics"
+	@echo "docker            build the image"
 
 install:
-	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install -r requirements.txt
-
-install-dev:
-	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install -r requirements.txt
-	$(PYTHON) -m pip install -r requirements-dev.txt
-	pre-commit install
-
-test:
-	$(PYTHON) -m pytest tests/ -v --cov=src --cov-report=html --cov-report=term
-
-test-unit:
-	$(PYTHON) -m pytest tests/ -v -m "not integration"
-
-test-integration:
-	$(PYTHON) -m pytest tests/ -v -m integration
+	uv sync
+	uv run pre-commit install
 
 lint:
-	$(PYTHON) -m ruff check src/ tests/ app.py
-	$(PYTHON) -m flake8 src/ tests/
-	$(PYTHON) -m mypy src/ --ignore-missing-imports
+	uv run ruff check src tests
 
 format:
-	$(PYTHON) -m black src/ tests/ app.py
-	$(PYTHON) -m isort src/ tests/ app.py
+	uv run ruff format src tests
+	uv run ruff check --fix src tests
 
-format-check:
-	$(PYTHON) -m black --check src/ tests/ app.py
-	$(PYTHON) -m isort --check-only src/ tests/ app.py
+typecheck:
+	uv run mypy src
 
-clean:
-	$(PYTHON) -m pip install --upgrade pip
-ifeq ($(OS),Windows_NT)
-	-@for /r %%i in (__pycache__) do @if exist "%%i" rmdir /s /q "%%i"
-	-@del /s /q *.pyc 2>nul
-	-@del /s /q *.pyo 2>nul
-	-@if exist .pytest_cache rmdir /s /q .pytest_cache
-	-@if exist .mypy_cache rmdir /s /q .mypy_cache
-	-@if exist htmlcov rmdir /s /q htmlcov
-	-@if exist dist rmdir /s /q dist
-	-@if exist build rmdir /s /q build
-	-@if exist *.egg-info rmdir /s /q *.egg-info
-else
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	find . -type f -name "*.pyo" -delete 2>/dev/null || true
-	rm -rf .pytest_cache .mypy_cache htmlcov dist build *.egg-info
-endif
-	@echo Clean complete!
+test:
+	uv run pytest
 
-run:
-	$(PYTHON) -m streamlit run app.py
+test-integration:
+	uv run pytest -m integration -v
 
-cli:
-	@echo Usage: python -m src.main ^<repo_url^> ["description"]
-	@$(PYTHON) -m src.main
+cov:
+	uv run pytest --cov=drrepo --cov-report=term --cov-report=html
 
-docker-build:
+check: lint typecheck test
+	uv run ruff format --check src tests
+
+ui:
+	uv run drrepo ui
+
+mcp:
+	uv run drrepo mcp
+
+doctor:
+	uv run drrepo doctor
+
+docker:
 	docker build -t drrepo:latest .
 
-docker-run:
-	docker-compose up -d
-
-docker-stop:
-	docker-compose down
-
-docker-logs:
-	docker-compose logs -f
-
-check: format-check lint test
-	@echo All checks passed!
-
-dev-setup: install-dev
-	@echo Development environment ready!
-
-.DEFAULT_GOAL := help
+clean:
+	uv run python -c "import shutil, pathlib; [shutil.rmtree(p, ignore_errors=True) for p in ['.pytest_cache', '.mypy_cache', '.ruff_cache', 'htmlcov', 'dist', 'build', *map(str, pathlib.Path('.').rglob('__pycache__'))]]"

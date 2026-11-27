@@ -1,10 +1,6 @@
-# Pre-commit hooks for DrRepo
-# Install: pre-commit install
-# Run manually: pre-commit run --all-files
-# Update: pre-commit autoupdate
-
+# Install: uv run pre-commit install
+# Run all: uv run pre-commit run --all-files
 repos:
-  # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -12,83 +8,37 @@ repos:
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
-        args: [--allow-multiple-documents]
-      - id: check-added-large-files
-        args: ['--maxkb=1000']
-      - id: check-json
       - id: check-toml
+      - id: check-json
       - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
       - id: detect-private-key
-      - id: check-ast
-      - id: check-docstring-first
-      - id: debug-statements
       - id: mixed-line-ending
         args: [--fix=lf]
 
-  # Fast Python linter (also used at runtime by the static_analysis collector)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.12.9
     hooks:
-      - id: ruff
-        args: [--fix]
+      - id: uv-lock # keep uv.lock in sync with pyproject.toml
 
-  # Python code formatting
-  - repo: https://github.com/psf/black
-    rev: "26.5.1"
+  # Local hooks run the exact tool versions pinned in uv.lock, so pre-commit,
+  # CI, and your editor can never disagree.
+  - repo: local
     hooks:
-      - id: black
-        language_version: python3.11
-        args: [--line-length=100]
-
-  # Import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: v5.11.3
-    hooks:
-      - id: isort
-        args: ["--profile", "black", "--line-length", "100"]
-
-  # Linting (settings in .flake8 -- the single source of truth also used by
-  # `make lint` and CI, so all three can never drift apart again)
-  - repo: https://github.com/pycqa/flake8
-    rev: "7.3.0"
-    hooks:
-      - id: flake8
-        additional_dependencies:
-          - flake8-docstrings
-          - flake8-bugbear
-
-  # Type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.1.0
-    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
       - id: mypy
-        args: [--ignore-missing-imports, --no-strict-optional]
-
-  # Security checks
-  - repo: https://github.com/PyCQA/bandit
-    rev: "1.9.4"
-    hooks:
-      - id: bandit
-        args: ["-c", "pyproject.toml"]
-        additional_dependencies: ["bandit[toml]"]
-
-  # Python-specific checks
-  - repo: https://github.com/pre-commit/pygrep-hooks
-    rev: v1.10.0
-    hooks:
-      - id: python-use-type-annotations
-      - id: python-check-blanket-noqa
-      - id: python-check-mock-methods
-      - id: python-no-log-warn
-
-  # YAML formatting
-  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.14.0
-    hooks:
-      - id: pretty-format-yaml
-        args: [--autofix, --indent, "2"]
-
-# Configuration
-default_install_hook_types: [pre-commit, pre-push]
-default_stages: [pre-commit]
-fail_fast: false
+        name: mypy
+        entry: uv run mypy src
+        language: system
+        types: [python]
+        pass_filenames: false

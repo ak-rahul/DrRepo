@@ -1,59 +1,52 @@
-# DrRepo Dockerfile
-# Pinned to a specific patch release (not the floating `3.11-slim` tag) so
-# rebuilds are reproducible; `apt-get upgrade` below still pulls latest
-# security patches for installed OS packages on every build.
-FROM python:3.11.15-slim-bookworm
+# syntax=docker/dockerfile:1.7
+# DrRepo image: Streamlit UI by default; the same image runs the CLI, MCP server,
+# or health API by overriding the command (see docker-compose.yml).
+
+# ---- build stage: resolve and install dependencies with uv -------------------
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# Dependencies first (cached layer), then the project itself.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project
 
-# `git` is a runtime dependency: the repo_clone collector shells out to it to
-# shallow-clone repositories for analysis. `curl` is only for the healthcheck.
-# `apt-get upgrade` applies OS security patches released since the base image
-# was built -- rebuild periodically even without a Dockerfile change.
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+COPY pyproject.toml uv.lock README.md LICENSE.md ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
+# ---- runtime stage ------------------------------------------------------------
+FROM python:3.12-slim-trixie
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# git: the clone collector shells out to it. curl: container healthcheck only.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends git curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy application code
-COPY src/ ./src/
-COPY app.py .
-COPY scripts/ ./scripts/
+RUN useradd --create-home --uid 1000 drrepo
+WORKDIR /app
+COPY --from=builder --chown=drrepo:drrepo /app/.venv /app/.venv
+RUN mkdir -p /app/reports /app/logs && chown -R drrepo:drrepo /app
 
-# Create necessary directories
-RUN mkdir -p logs reports
-
-# Create non-root user for security
-RUN useradd -m -u 1000 drrepo && \
-    chown -R drrepo:drrepo /app
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 USER drrepo
 
-# 8501: Streamlit UI
-# 8000: Health Check API (optional)
-EXPOSE 8501 8000
+# 8501 Streamlit UI · 8000 health API · 8765 MCP (streamable-http)
+EXPOSE 8501 8000 8765
 
-# Health check using Streamlit's built-in health endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl --fail --silent http://localhost:8501/_stcore/health || exit 1
 
-# Real credentials must be supplied at runtime (--env-file .env or
-# docker-compose's env_file) -- no .env is baked into the image.
-CMD ["streamlit", "run", "app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.enableCORS=false", \
-     "--server.enableXsrfProtection=false"]
+# Credentials are supplied at runtime (--env-file / compose env_file); none are baked in.
+CMD ["drrepo", "ui", "--host", "0.0.0.0", "--port", "8501", "--headless"]

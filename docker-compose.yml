@@ -1,30 +1,46 @@
-services:
-  drrepo:
-    build: .
-    container_name: drrepo
-    ports:
-      - "8501:8501"  # Streamlit UI
-      - "8000:8000"  # Health API (optional)
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GH_TOKEN=${GH_TOKEN}
-      - MODEL_PROVIDER=groq
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./logs:/app/logs
-      - ./reports:/app/reports
-    env_file:
-      - .env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    networks:
-      - drrepo-network
+# docker compose up            -> Streamlit UI on http://localhost:8501
+# docker compose --profile api up    -> also the health API on :8000
+# docker compose --profile mcp up    -> also the MCP server (streamable HTTP) on :8765/mcp
+# One-off CLI run:
+#   docker compose run --rm ui drrepo analyze https://github.com/psf/requests
 
-networks:
-  drrepo-network:
-    driver: bridge
+x-drrepo: &drrepo
+  build: .
+  image: drrepo:latest
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./reports:/app/reports
+    - ./logs:/app/logs
+  restart: unless-stopped
+
+services:
+  ui:
+    <<: *drrepo
+    container_name: drrepo-ui
+    ports:
+      - "8501:8501"
+
+  health-api:
+    <<: *drrepo
+    profiles: [api]
+    container_name: drrepo-health-api
+    command: ["drrepo", "health-api", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mcp:
+    <<: *drrepo
+    profiles: [mcp]
+    container_name: drrepo-mcp
+    command: ["drrepo", "mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8765"]
+    ports:
+      - "8765:8765"
+    healthcheck:
+      disable: true
