@@ -35,6 +35,7 @@ drrepo audit https://github.com/owner/repo \
 | `--json` | print the full JSON report to stdout (progress stays on stderr) |
 | `--fail-under N` | exit code 3 if the overall score is below N |
 | `--no-history` | don't compare with or record into `reports/history.json` |
+| `--scan-history N` | also scan the lines the last N commits added for secrets that the current tree no longer has (clones N+1 commits) |
 | `-q` / `-v` | quiet / debug logs on the console |
 | `--env-file`, `--log-file` | alternative `.env` / log path (`''` disables) |
 

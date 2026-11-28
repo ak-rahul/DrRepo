@@ -57,7 +57,8 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
   "title": "bandit B602 (3 occurrences)",
   "description": "…", "recommendation": "…",
   "source": "bandit",          // collector/tool: ruff, bandit, semgrep, secret_scan, osv.dev,
-                               // license-audit, license-policy, dependency_audit, readme_analyzer, doc_checks, repo_hygiene,
+                               // license-audit, license-policy, dependency-maintenance, dependency_audit, lizard,
+                               // duplication, secret_history, readme_analyzer, doc_checks, repo_hygiene,
                                // investigator:<category>. Agent titles may start with
                                // "[unverified]" (grounding) or "[disputed]" (critic)
   "rule_id": "B602",           // tool-specific check id (null for some deterministic checks)

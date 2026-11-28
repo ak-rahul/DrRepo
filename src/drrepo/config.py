@@ -21,7 +21,7 @@ from drrepo.errors import ConfigurationError
 SUPPORTED_PROVIDERS = ("groq", "openai", "anthropic", "ollama")
 # Used when MODEL_NAME is unset. Override any of them with MODEL_NAME / MODEL_NAME_<ROLE>.
 DEFAULT_MODELS = {
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-5-5",
     "ollama": "llama3.1",
@@ -112,6 +112,13 @@ class Config:
     enable_bandit: bool = True
     enable_dependency_audit: bool = True
     enable_license_audit: bool = True
+    # Opt-in: scan the lines the last N commits added for secrets (0 = off;
+    # recon/secret_history.py). The clone then fetches N+1 commits.
+    scan_history_commits: int = 0
+    # lizard complexity and copy-paste detection (recon/complexity.py).
+    enable_complexity_metrics: bool = True
+    # deps.dev: deprecated runtime packages and ones with no release in two years.
+    enable_maintenance_audit: bool = True
     # License policy (SPDX ids, case-insensitive). When either is set it replaces the
     # built-in copyleft heuristic: deny-listed licenses are violations, and with an
     # allow-list every other known license is too.
@@ -238,6 +245,13 @@ class Config:
             enable_bandit=_env_bool("ENABLE_BANDIT", d.enable_bandit),
             enable_dependency_audit=_env_bool("ENABLE_DEPENDENCY_AUDIT", d.enable_dependency_audit),
             enable_license_audit=_env_bool("ENABLE_LICENSE_AUDIT", d.enable_license_audit),
+            scan_history_commits=_env_int("SCAN_HISTORY_COMMITS", d.scan_history_commits),
+            enable_complexity_metrics=_env_bool(
+                "ENABLE_COMPLEXITY_METRICS", d.enable_complexity_metrics
+            ),
+            enable_maintenance_audit=_env_bool(
+                "ENABLE_MAINTENANCE_AUDIT", d.enable_maintenance_audit
+            ),
             license_deny=_env_list("LICENSE_DENY"),
             license_allow=_env_list("LICENSE_ALLOW"),
             enable_workflow_audit=_env_bool("ENABLE_WORKFLOW_AUDIT", d.enable_workflow_audit),
@@ -330,5 +344,5 @@ _MUST_BE_POSITIVE = frozenset(
     }
 )
 _MUST_BE_NON_NEGATIVE = frozenset(
-    {"llm_circuit_breaker_timeout_seconds", "llm_token_budget_per_run"}
+    {"llm_circuit_breaker_timeout_seconds", "llm_token_budget_per_run", "scan_history_commits"}
 )

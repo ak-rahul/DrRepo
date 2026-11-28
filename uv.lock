@@ -758,6 +758,7 @@ dependencies = [
     { name = "langchain-groq" },
     { name = "langchain-openai" },
     { name = "langgraph" },
+    { name = "lizard" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pygithub" },
@@ -805,6 +806,7 @@ requires-dist = [
     { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", specifier = ">=1.3.3,<2" },
     { name = "langgraph", specifier = ">=1.2.7,<2" },
+    { name = "lizard", specifier = ">=1.26" },
     { name = "mcp", specifier = ">=2.3,<3" },
     { name = "pydantic", specifier = ">=2.13,<3" },
     { name = "pygithub", specifier = ">=2.9.1,<3" },
@@ -1630,6 +1632,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/40/71/d89bb0e71b1415453980fd32315f2a037aad9f7f70f695c7cec7035feb13/license_expression-30.4.4.tar.gz", hash = "sha256:73448f0aacd8d0808895bdc4b2c8e01a8d67646e4188f887375398c761f340fd", size = 186402, upload-time = "2025-07-22T11:13:32.17Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/40/791891d4c0c4dab4c5e187c17261cedc26285fd41541577f900470a45a4d/license_expression-30.4.4-py3-none-any.whl", hash = "sha256:421788fdcadb41f049d2dc934ce666626265aeccefddd25e162a26f23bcbf8a4", size = 120615, upload-time = "2025-07-22T11:13:31.217Z" },
+]
+
+[[package]]
+name = "lizard"
+version = "1.26.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pathspec" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/b1/47a2a3ca5aa0d57e8affeafaef79827e971dc448fb2b40b55708c81ebf62/lizard-1.26.1.tar.gz", hash = "sha256:9a4d7372faa12dbe725cfb6dcadf9bed4916f9176a154b285917713012ac35c3", size = 178050, upload-time = "2026-11-16T11:22:09.333Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/c8/c4af1e2aeb2fa71495684c64d491a8b9713344f0eeb3884ccfefc7569d2f/lizard-1.26.1-py2.py3-none-any.whl", hash = "sha256:344e2bfb1b41d31207223ba844fac1f84da80053edf901b3df4ee051b152d0f5", size = 188521, upload-time = "2026-11-16T11:22:07.7Z" },
 ]
 
 [[package]]

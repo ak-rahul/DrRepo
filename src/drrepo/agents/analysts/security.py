@@ -1,4 +1,5 @@
-"""Security analyst: bandit, semgrep, and secret-scan findings."""
+"""Security analyst: bandit, semgrep, secret-scan (tree and, opt-in, git history),
+CI/container and Scorecard findings."""
 
 from __future__ import annotations
 
@@ -63,6 +64,8 @@ def _title(finding: dict[str, Any], count: int) -> str:
         return f"Possible {rule} committed to source" + (
             f" ({count} locations)" if count > 1 else ""
         )
+    if tool == "secret_history":
+        return f"Possible {rule} in git history" + (f" ({count} files)" if count > 1 else "")
     label = str(rule).rsplit(".", 1)[-1] if tool == "semgrep" else rule
     message = (finding.get("message") or "").split("\n")[0][:70]
     return f"{tool} {label}: {message}" if count == 1 else f"{tool} {label} ({count} occurrences)"
@@ -71,6 +74,12 @@ def _title(finding: dict[str, Any], count: int) -> str:
 def _recommendation(finding: dict[str, Any]) -> str:
     if finding.get("tool") == "secret_scan" and "test/fixture" in (finding.get("message") or ""):
         return "Confirm this is a throwaway test credential that grants no real access; if not, rotate it."
+    if finding.get("tool") == "secret_history":
+        return (
+            "Treat the credential as exposed: deleting it from the code doesn't remove it from "
+            "history. Revoke and rotate it, then purge it from history (e.g. git filter-repo) if "
+            "the repository allows a rewrite."
+        )
     if finding.get("tool") == "secret_scan":
         return (
             "Revoke and rotate the credential now, move it to an environment variable or secret "
@@ -102,6 +111,7 @@ class SecurityAnalyst(Analyst):
             dedupe_cross_tool(security.get("findings", []))
             + [f for f in infrastructure.get("findings", []) if f.get("category") == "security"]
             + scorecard.get("findings", [])
+            + (collector_data(recon, "secret_history") or {}).get("findings", [])
         )
         tool_status = {
             **security.get("tool_status", {}),
@@ -127,12 +137,21 @@ class SecurityAnalyst(Analyst):
                 f"OpenSSF Scorecard findings describe commit {scanned[:12]} (its last scan on "
                 f"{scorecard.get('date', '?')}), not the analyzed commit {analyzed[:12]}."
             )
+        history = collector_data(recon, "secret_history")
+        if history is not None:
+            notes.append(
+                f"git history: scanned the lines {history.get('commits_scanned', 0)} commits added"
+                + (" (capped; older commits not read)" if history.get("truncated") else "")
+                + f", {len(history.get('findings', []))} secret(s) found only in history."
+            )
         if not issues:
             return Assessment(
                 issues=[], score=100.0, summary=f"No security findings from: {ran}.", notes=notes
             )
 
-        secrets = sum(i.occurrences for i in issues if i.source == "secret_scan")
+        secrets = sum(
+            i.occurrences for i in issues if i.source in ("secret_scan", "secret_history")
+        )
         counts = {s.value: sum(i.occurrences for i in issues if i.severity == s) for s in Severity}
         summary = (
             f"Scanners ({ran}) reported {sum(i.occurrences for i in issues)} findings: "

@@ -21,6 +21,7 @@ from drrepo.agents.investigator import (
 from drrepo.agents.llm import LLMRuntime, TokenBudget
 from drrepo.errors import CircuitOpenError
 from drrepo.models import Category, Issue, Severity
+from drrepo.resilience import is_retryable_llm_error
 
 
 def _messages():
@@ -79,7 +80,10 @@ def test_success_normalizes_issues_and_extracts_trace():
     assert issue.file == "app/db.py" and issue.source == "investigator:security"
     assert [t.tool for t in result.trace] == ["read_file"]  # synthetic submit call excluded
     assert agent.invoke.call_args.kwargs["config"] == {"recursion_limit": 10}
-    assert create.call_args.kwargs["response_format"] is InvestigationOutput
+    strategy = create.call_args.kwargs["response_format"]
+    assert strategy.schema is InvestigationOutput  # a ToolStrategy: never json mode with tools
+    [retry] = create.call_args.kwargs["middleware"]
+    assert retry.retry_on is is_retryable_llm_error and retry.on_failure == "error"
     assert llm.budget.usage()["used_tokens"] > 0
 
 

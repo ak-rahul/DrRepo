@@ -15,7 +15,8 @@ Hardening applied to every clone:
   pattern before it reaches `git`, and is always passed after `--`.
 
 Every clone records the exact commit it checked out (`commit_sha`), so a report
-always says which code it describes.
+always says which code it describes. The clone holds one commit, or N+1 with an
+opt-in history scan of N commits (`clone_depth`).
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ def _dir_size_mb(path: Path) -> float:
     return total / (1024 * 1024)
 
 
-def _git_env() -> dict[str, str]:
+def git_env() -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
@@ -112,13 +113,19 @@ def _git(args: list[str], cwd: Path | None, timeout: float) -> subprocess.Comple
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_git_env(),
+        env=git_env(),
         stdin=subprocess.DEVNULL,
         check=False,  # return codes are inspected by the caller
     )
 
 
-def _clone_commands(clone_url: str, dest: Path, ref: str | None) -> list[list[str]]:
+def clone_depth(config: Config) -> int:
+    """Commits to fetch: 1, or N+1 with a history scan of N commits, so the oldest
+    scanned commit still has its parent and shows only what it changed."""
+    return config.scan_history_commits + 1 if config.scan_history_commits > 0 else 1
+
+
+def _clone_commands(clone_url: str, dest: Path, ref: str | None, depth: int = 1) -> list[list[str]]:
     """The git invocations for a shallow checkout of the default branch or of `ref`.
 
     A named ref uses init + fetch instead of `clone --branch`, because only
@@ -131,7 +138,7 @@ def _clone_commands(clone_url: str, dest: Path, ref: str | None) -> list[list[st
                 *hardening,
                 "clone",
                 "--depth",
-                "1",
+                str(depth),
                 "--single-branch",
                 "--no-tags",
                 "--quiet",
@@ -149,7 +156,7 @@ def _clone_commands(clone_url: str, dest: Path, ref: str | None) -> list[list[st
             str(dest),
             "fetch",
             "--depth",
-            "1",
+            str(depth),
             "--no-tags",
             "--quiet",
             "origin",
@@ -184,7 +191,7 @@ def clone_repo(
 
     dest = Path(tempfile.mkdtemp(prefix="drrepo_clone_"))
     target = f"{repo.full_name}@{ref}" if ref else repo.full_name
-    for args in _clone_commands(repo.clone_url, dest, ref):
+    for args in _clone_commands(repo.clone_url, dest, ref, clone_depth(config)):
         try:
             result = _git(args, cwd=None, timeout=config.clone_timeout_seconds)
         except subprocess.TimeoutExpired:

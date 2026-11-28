@@ -51,6 +51,35 @@ _REFERENCE_DEF = re.compile(
 # The info string is the first word after the fence; MyST directives ("{note}") are not shell.
 _FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*(\S*)")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+# MyST target labels: "(label)=" on a line of its own.
+_MYST_LABEL = re.compile(r"^\s{0,3}\(([^()\s]{1,200})\)=\s*$")
+# In Sphinx (MyST) docs a link target without one of these suffixes is a
+# cross-reference to a label, object or document name, not a file path.
+_FILE_SUFFIXES = frozenset(
+    {
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".ipynb",
+        ".html",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
+        ".pdf",
+        ".py",
+        ".toml",
+        ".json",
+        ".yml",
+        ".yaml",
+        ".cfg",
+        ".ini",
+        ".sh",
+    }
+)
 _HTML_ANCHOR = re.compile(r"""<[^>]{0,200}?\b(?:id|name)\s*=\s*["']([^"']{1,200})["']""")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _SHELL_LANGS = {"", "bash", "sh", "shell", "console", "zsh", "terminal", "shell-session"}
@@ -112,7 +141,8 @@ def github_slug(heading: str) -> str:
 
 def anchors(text: str) -> set[str]:
     """Every anchor a Markdown file defines: heading slugs (with GitHub's -1, -2
-    suffixes for repeats) and explicit HTML `id`/`name` attributes."""
+    suffixes for repeats), explicit HTML `id`/`name` attributes, and MyST
+    `(label)=` targets."""
     found: set[str] = set()
     counts: dict[str, int] = {}
     in_fence = False
@@ -121,6 +151,10 @@ def anchors(text: str) -> set[str]:
             in_fence = not in_fence
             continue
         if in_fence:
+            continue
+        label = _MYST_LABEL.match(line)
+        if label:
+            found.add(label.group(1).lower())
             continue
         match = _HEADING.match(line)
         if match:
@@ -166,6 +200,16 @@ def _markdown_files(root: Path) -> list[Path]:
     return (readmes + in_docs)[:MAX_MARKDOWN_FILES]
 
 
+def _in_sphinx_docs(path: Path, root: Path) -> bool:
+    """True if a Sphinx `conf.py` sits in the file's directory or one above it (within root)."""
+    for directory in path.parents:
+        if (directory / "conf.py").is_file():
+            return True
+        if directory == root:
+            return False
+    return False
+
+
 def check_links(root: Path, files: list[Path]) -> tuple[int, list[dict[str, Any]]]:
     cache: dict[Path, set[str]] = {}
 
@@ -179,6 +223,7 @@ def check_links(root: Path, files: list[Path]) -> tuple[int, list[dict[str, Any]
     for md in files:
         text = read_text_file(md) or ""
         rel_md = relative_posix(md, root)
+        sphinx = _in_sphinx_docs(md, root)
         for line, raw in _links(text):
             if checked >= MAX_LINKS:
                 return checked, broken
@@ -186,6 +231,8 @@ def check_links(root: Path, files: list[Path]) -> tuple[int, list[dict[str, Any]
                 continue  # external: never fetched
             target, _, anchor = unquote(raw).partition("#")
             target = target.split("?", 1)[0]
+            if sphinx and target and Path(target).suffix.lower() not in _FILE_SUFFIXES:
+                continue  # a MyST cross-reference ([](attrs.frozen), [](api-validators))
             checked += 1
             if target:
                 base = root if target.startswith("/") else md.parent

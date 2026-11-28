@@ -156,3 +156,22 @@ def test_directive_fences_and_prose_are_not_commands(tmp_path):
     )
     missing = collect_doc_checks(str(tmp_path)).data["missing_commands"]
     assert [m["command"] for m in missing] == ["click --help"]  # no entry point declared
+
+
+def test_sphinx_myst_cross_references_are_not_file_links(tmp_path):
+    # attrs-style MyST docs: [](attrs.frozen) and [](api-validators) name objects and
+    # labels; "(label)=" defines an anchor. Only real file targets are checked there.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "conf.py").write_text("project = 'x'\n", encoding="utf-8")
+    (tmp_path / "docs" / "api.md").write_text("(api-validators)=\n# API\n", encoding="utf-8")
+    (tmp_path / "docs" / "index.md").write_text(
+        "See [](attrs.frozen), [validators](api-validators), [](genindex),\n"
+        "[the API](api.md#api-validators) and [gone](missing.md).\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text("[contributing](CONTRIBUTING)\n", encoding="utf-8")
+    data = collect_doc_checks(str(tmp_path)).data
+    assert sorted((b["file"], b["target"]) for b in data["broken_links"]) == [
+        ("README.md", "CONTRIBUTING"),  # outside the Sphinx tree: still a file link
+        ("docs/index.md", "missing.md"),
+    ]

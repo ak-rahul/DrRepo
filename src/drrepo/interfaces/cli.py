@@ -128,6 +128,8 @@ def _run_config(args: argparse.Namespace) -> Config:
     config = _load_config(args.env_file)
     if getattr(args, "shallow", False):
         config = dataclasses.replace(config, enable_deep_investigation=False)
+    if getattr(args, "scan_history", None) is not None:
+        config = dataclasses.replace(config, scan_history_commits=args.scan_history)
     if getattr(args, "no_history", False):
         config = dataclasses.replace(config, enable_score_history=False)
     if args.suppressions:
@@ -348,6 +350,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "streamlit",
         "fastapi",
         "mcp",
+        "lizard",
     ):
         try:
             importlib.import_module(module)
@@ -549,6 +552,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--no-history", action="store_true", help="don't record or compare score history"
+        )
+        p.add_argument(
+            "--scan-history",
+            type=int,
+            metavar="N",
+            help="also scan the lines the last N commits added for secrets (clones N+1 commits)",
         )
         p.add_argument("-q", "--quiet", action="store_true", help="no progress or summary output")
         p.add_argument("-v", "--verbose", action="store_true", help="print debug logs to stderr")

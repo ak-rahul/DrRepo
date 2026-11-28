@@ -15,9 +15,9 @@ Code from the analyzed repository is never executed, installed, or built.
 
 | Category | Signals |
 |---|---|
-| Security | bandit, semgrep (security audit plus per-language rulesets), secret scanner, zizmor (CI workflows), hadolint (Dockerfiles), OpenSSF Scorecard |
-| Code quality | ruff (bug-class rules), normalized per 1k lines |
-| Dependencies | OSV.dev advisories for exact pins/lockfiles, license policy or compatibility, pinning, CycloneDX SBOM |
+| Security | bandit, semgrep (security audit plus per-language rulesets), secret scanner (plus git history with `--scan-history N`), zizmor (CI workflows), hadolint (Dockerfiles), OpenSSF Scorecard |
+| Code quality | ruff (bug-class rules), lizard complexity and function length, copy-paste detection; normalized per 1k lines |
+| Dependencies | OSV.dev advisories for exact pins/lockfiles, license policy or compatibility, deprecated or long-unreleased packages (deps.dev), pinning, CycloneDX SBOM |
 | Documentation | README structure and completeness |
 | Maintainability | tests, CI, license, policies, activity, archived status |
 

@@ -71,42 +71,60 @@ def is_fixture_path(rel_path: str) -> bool:
     return any(part.lower() in _FIXTURE_DIRS for part in rel_path.split("/")[:-1])
 
 
+def match_secret(line: str) -> str | None:
+    """The secret rule `line` matches, or None. Placeholders and low-entropy values never match."""
+    if len(line) > 2000:  # minified bundles; not worth the regex cost
+        return None
+    for name, pattern, min_entropy in _SECRET_PATTERNS:
+        match = pattern.search(line)
+        if not match:
+            continue
+        value = match.group(match.lastindex or 0)
+        if _PLACEHOLDER_RE.search(value) or _shannon_entropy(value) < min_entropy:
+            continue
+        return name
+    return None
+
+
+def secret_severity(rule: str, rel_path: str) -> str:
+    """CRITICAL for a provider key, HIGH for a generic assignment, LOW under test/fixture paths."""
+    if is_fixture_path(rel_path):
+        return "LOW"
+    return "CRITICAL" if rule != "Generic Secret Assignment" else "HIGH"
+
+
+def is_scannable(rel_path: str) -> bool:
+    return not any(rel_path.endswith(s) for s in _SKIP_SUFFIXES)
+
+
 def scan_secrets(root: Path) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for path in iter_repo_files(root):
-        if any(path.name.endswith(s) for s in _SKIP_SUFFIXES):
+        rel = relative_posix(path, root)
+        if not is_scannable(rel):
             continue
         text = read_text_file(path)
         if text is None:
             continue
-        rel = relative_posix(path, root)
         for line_no, line in enumerate(text.splitlines(), start=1):
-            if len(line) > 2000:  # minified bundles; not worth the regex cost
-                continue
-            for name, pattern, min_entropy in _SECRET_PATTERNS:
-                match = pattern.search(line)
-                if not match:
-                    continue
-                value = match.group(match.lastindex or 0)
-                if _PLACEHOLDER_RE.search(value) or _shannon_entropy(value) < min_entropy:
-                    continue
-                fixture = is_fixture_path(rel)
-                severity = "CRITICAL" if name != "Generic Secret Assignment" else "HIGH"
-                findings.append(
-                    {
-                        "tool": "secret_scan",
-                        "rule": name,
-                        "message": (
-                            f"Possible {name} in a test/fixture path; confirm it is a dummy credential"
-                            if fixture
-                            else f"Possible {name} committed to source"
-                        ),
-                        # Test suites routinely commit throwaway keys and certs (e.g.
-                        # tests/certs/server.key); still reported, but not as critical.
-                        "severity": "LOW" if fixture else severity,
-                        "file": rel,
-                        "line": line_no,
-                    }
-                )
-                break  # one finding per line is enough
+            name = match_secret(line)
+            if name is None:
+                continue  # one finding per line at most
+            fixture = is_fixture_path(rel)
+            findings.append(
+                {
+                    "tool": "secret_scan",
+                    "rule": name,
+                    "message": (
+                        f"Possible {name} in a test/fixture path; confirm it is a dummy credential"
+                        if fixture
+                        else f"Possible {name} committed to source"
+                    ),
+                    # Test suites routinely commit throwaway keys and certs (e.g.
+                    # tests/certs/server.key); still reported, but not as critical.
+                    "severity": secret_severity(name, rel),
+                    "file": rel,
+                    "line": line_no,
+                }
+            )
     return findings

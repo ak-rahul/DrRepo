@@ -22,6 +22,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Upgraded FastAPI to 0.165 and refreshed `uv.lock`.
 
 ### Fixed
+- The default Groq model is now `openai/gpt-oss-120b`: Groq retired `llama-3.3-70b-versatile`, so every LLM call failed with `NotFoundError`.
+- Deep investigations failed on models with native structured output ("json mode cannot be combined with tool/function calling"). Findings are now always submitted as a tool call (`ToolStrategy`), and each model call in the agent loop retries rate limits and 5xx like every other LLM call.
 - An unexpected exception inside any collector crashed the whole analysis. The collector node now turns it into an `error` result, and the run continues.
 - The documentation narrative excerpt also came from the HEAD README instead of the analyzed commit.
 - The README was read from the GitHub API, which always serves HEAD, even when a specific commit was analyzed. It now comes from the clone, falling back to the API.
@@ -33,6 +35,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - The external MCP server (`drrepo mcp`, its Docker Compose profile and the MCP client examples). MCP is now used only inside DrRepo: each investigator calls its tools through the in-memory tool server. Assistants can run the CLI (`drrepo audit --json`) instead.
 
 ### Added
+- Complexity and duplication metrics (`recon/complexity.py`): lizard cyclomatic complexity and function length in 20 languages, and a copy-paste detector, over product code only. They feed Code Quality as aggregated issues (`high-complexity`, `very-high-complexity`, `long-function`, `duplicated-code`), so repositories without Python now get a Code Quality score. Toggle: `ENABLE_COMPLEXITY_METRICS`.
+- Abandoned dependencies: deps.dev deprecation flags (`deprecated-package`, medium) and newest release dates (`stale-package`, one low issue for runtime packages with no release in two years). Toggle: `ENABLE_MAINTENANCE_AUDIT`.
+- Opt-in secret history scan: `--scan-history N` (`SCAN_HISTORY_COMMITS`) clones N+1 commits and runs the secret patterns over the lines each commit added, reporting secrets the current tree no longer has with the commit that added them.
 - Investigators call their tools over MCP: each investigation starts DrRepo's own MCP tool server (`agents/tool_server.py`) for the clone, connected in memory, exposing only that category's read-only tools; the agent chooses among them by their descriptions. A failed call is an `ERROR:` result for the agent; a server that can't start falls back to in-process tools with a note. The server is internal to the agents. Toggle: `ENABLE_MCP_TOOLS`.
 - Short commands: `drrepo audit <url>` (`analyze` stays as an alias), `drrepo quick <url>` for a deterministic audit, `drrepo diff <url> <base> [head]` with positional refs, and `uv tool install --editable .` to put `drrepo` on PATH. Development shortcuts: `uv run poe test|lint|fmt|types|fix|check`. `.env.local` is loaded automatically and wins over `.env`.
 - Web UI: compare mode (base vs. head, with new, worse and fixed issues and the head report), recent analyses that survive a page refresh, a score-over-time chart, Dependencies, Suppressed and Details (models, scanner versions, instruction hashes) tabs, token usage per step, distinct deep and lite markers, issue search and source/origin filters with paging, and the summary download. View logic lives in `interfaces/ui_data.py` and is unit-tested.

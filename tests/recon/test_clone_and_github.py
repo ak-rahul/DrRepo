@@ -59,6 +59,19 @@ class TestClone:
         assert fetch[-2:] == ["--", "v1.2.0"] and "--depth" in fetch
         assert "core.symlinks=false" in next(c["cmd"] for c in calls if "checkout" in c["cmd"])
 
+    def test_history_scan_deepens_the_clone(self, monkeypatch):
+        import dataclasses
+
+        from drrepo.config import Config
+
+        calls = self._fake_git(monkeypatch)
+        config = dataclasses.replace(Config(), scan_history_commits=5)
+        cloned, _ = clone_repo("https://github.com/octo/demo", config)
+        assert cloned is not None
+        cloned.cleanup()
+        cmd = calls[0]["cmd"]
+        assert cmd[cmd.index("--depth") + 1] == "6"  # N+1: the oldest scanned commit has a parent
+
     @pytest.mark.parametrize(
         "bad", ["--upload-pack=x", "a..b", "x@{1}", "-x", "a b", "a.lock", "a/", ""]
     )

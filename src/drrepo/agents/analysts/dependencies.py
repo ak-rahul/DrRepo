@@ -1,4 +1,5 @@
-"""Dependency analyst: known vulnerabilities (OSV.dev), pinning, license policy or compatibility."""
+"""Dependency analyst: known vulnerabilities (OSV.dev), pinning, license policy or
+compatibility, and upstream maintenance (deprecated or long-unreleased packages)."""
 
 from __future__ import annotations
 
@@ -19,6 +20,8 @@ from drrepo.agents.analysts.base import (
 from drrepo.models import Category, Issue, Severity
 
 _SCALE = 40.0
+# A runtime dependency with no release for this long is likely unmaintained.
+STALE_RELEASE_DAYS = 730
 
 # SPDX ids grouped by how they interact with a permissively licensed project.
 # A heuristic, not legal advice -- see `license_issues`.
@@ -216,6 +219,79 @@ def license_issues(licenses: list[dict[str, Any]], repo_license_spdx: str | None
     return issues
 
 
+def maintenance_issues(entries: list[dict[str, Any]]) -> list[Issue]:
+    """Deprecated runtime packages (one issue each) and long-unreleased ones (one issue).
+
+    "No release in two years" is a signal, not proof: small, finished libraries
+    can be stable for years. So stale packages share one low-severity issue.
+    """
+    issues = []
+    for entry in entries:
+        if not entry.get("deprecated"):
+            continue
+        reason = str(entry.get("deprecated_reason") or "").strip()
+        issues.append(
+            Issue(
+                severity=Severity.MEDIUM,
+                category=Category.DEPENDENCIES,
+                title=f"{entry['package']}@{entry['version']} is deprecated upstream",
+                description=(
+                    f"The {entry['ecosystem']} registry marks {entry['package']}@{entry['version']} "
+                    "as deprecated" + (f": {reason}" if reason else ".")
+                ),
+                recommendation=(
+                    f"Replace {entry['package']} with a maintained alternative"
+                    + (
+                        f", or upgrade if {entry['latest_version']} is not deprecated."
+                        if entry.get("latest_version")
+                        and entry.get("latest_version") != entry.get("version")
+                        else "."
+                    )
+                ),
+                source="dependency-maintenance",
+                rule_id="deprecated-package",
+            )
+        )
+    stale = sorted(
+        (
+            e
+            for e in entries
+            if not e.get("deprecated")
+            and isinstance(e.get("days_since_release"), int)
+            and e["days_since_release"] > STALE_RELEASE_DAYS
+        ),
+        key=lambda e: -int(e["days_since_release"]),
+    )
+    if stale:
+        listed = ", ".join(
+            f"{e['package']} ({str(e.get('last_release') or '')[:7]})" for e in stale[:8]
+        )
+        issues.append(
+            Issue(
+                severity=Severity.LOW,
+                category=Category.DEPENDENCIES,
+                title=(
+                    f"{len(stale)} runtime "
+                    + ("dependency has" if len(stale) == 1 else "dependencies have")
+                    + " had no release in over 2 years"
+                ),
+                description=(
+                    f"Newest release per package (year-month): {listed}"
+                    + ("..." if len(stale) > 8 else "")
+                    + ". Long-unreleased packages may be unmaintained, so security fixes may "
+                    "never arrive. Small, finished libraries can also be stable for years."
+                ),
+                recommendation=(
+                    "Check each upstream for activity, and plan replacements for packages "
+                    "that are unmaintained."
+                ),
+                source="dependency-maintenance",
+                rule_id="stale-package",
+            )
+        )
+    return issues
+
+
 class DependencyAnalyst(Analyst):
     category = Category.DEPENDENCIES
     tool_families = ("files", "dependencies")
@@ -247,10 +323,14 @@ class DependencyAnalyst(Analyst):
         # The policy travels in the collector's data (it is per-run config), not on the analyst.
         policy = deps.get("license_policy") or {}
         deny, allow = tuple(policy.get("deny", ())), tuple(policy.get("allow", ()))
-        issues = vuln_issues + (
-            license_policy_issues(licenses, deny, allow)
-            if deny or allow
-            else license_issues(licenses, repo_license)
+        issues = (
+            vuln_issues
+            + (
+                license_policy_issues(licenses, deny, allow)
+                if deny or allow
+                else license_issues(licenses, repo_license)
+            )
+            + maintenance_issues(deps.get("maintenance", []))
         )
         if unpinned and not has_lockfile:
             issues.append(

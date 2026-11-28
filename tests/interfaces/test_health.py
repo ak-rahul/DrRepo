@@ -8,7 +8,7 @@ from drrepo.interfaces.health import check_all, check_github, check_llm
 from tests.conftest import mock_http
 
 GOOD = {
-    "GET api.groq.com/openai/v1/models": {"data": [{"id": "llama-3.3-70b-versatile"}]},
+    "GET api.groq.com/openai/v1/models": {"data": [{"id": "openai/gpt-oss-120b"}]},
     "GET api.github.com/rate_limit": {"resources": {"core": {"remaining": 4999, "limit": 5000}}},
     "POST api.osv.dev/v1/query": {"vulns": []},
 }

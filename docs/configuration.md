@@ -7,7 +7,7 @@ All settings come from environment variables, optionally loaded from `.env.local
 | Variable | Default | Notes |
 |---|---|---|
 | `MODEL_PROVIDER` | `groq` | `groq`, `openai`, `anthropic` (extra `anthropic`), or `ollama` (extra `ollama`, local models: code never leaves the machine) |
-| `MODEL_NAME` | provider default | groq `llama-3.3-70b-versatile`, openai `gpt-4o-mini`, anthropic `claude-sonnet-5-5`, ollama `llama3.1`. Must support tool calling for deep mode |
+| `MODEL_NAME` | provider default | groq `openai/gpt-oss-120b` (Groq retired `llama-3.3-70b-versatile`), openai `gpt-4o-mini`, anthropic `claude-sonnet-5-5`, ollama `llama3.1`. Must support tool calling for deep mode |
 | `MODEL_NAME_PLANNER` | `MODEL_NAME` | model for the Lead Investigator and the documentation rubric (structured output) |
 | `MODEL_NAME_NARRATIVE` | `MODEL_NAME` | model for the short category summaries (a small, cheap model is fine) |
 | `MODEL_NAME_INVESTIGATION` | `MODEL_NAME` | model for deep tool-calling investigations (pick your most reliable tool-user) |
@@ -41,6 +41,9 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 | `ENABLE_BANDIT` | `true` | |
 | `ENABLE_DEPENDENCY_AUDIT` | `true` | OSV.dev lookups |
 | `ENABLE_LICENSE_AUDIT` | `true` | deps.dev license lookups (runtime dependencies only, max 30) |
+| `ENABLE_MAINTENANCE_AUDIT` | `true` | deps.dev deprecation flags and newest release dates (runtime dependencies only, max 30): deprecated packages, and packages with no release in two years |
+| `ENABLE_COMPLEXITY_METRICS` | `true` | lizard cyclomatic complexity and function length, and copy-paste detection, over product code in 20 languages (tests, examples, docs and vendored code excluded) |
+| `SCAN_HISTORY_COMMITS` | `0` | opt-in: also scan the lines the last N commits added for secrets (`--scan-history N`). The clone then fetches N+1 commits, which counts toward `CLONE_MAX_SIZE_MB`; at most 1000 |
 | `LICENSE_DENY` | empty | comma-separated SPDX ids (case-insensitive). A runtime dependency under one is a high `license-denied` issue |
 | `LICENSE_ALLOW` | empty | comma-separated SPDX ids. A runtime dependency under any other known license is a medium `license-not-allowed` issue |
 | `ENABLE_WORKFLOW_AUDIT` | `true` | zizmor over the repository's GitHub Actions workflows (offline) |

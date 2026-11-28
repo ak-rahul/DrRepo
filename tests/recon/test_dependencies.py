@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import httpx
 
@@ -9,6 +10,7 @@ from drrepo.recon.dependencies import (
     collect_dependency_audit,
     import_evidence,
     query_licenses,
+    query_maintenance,
     query_osv_ids,
 )
 from tests.conftest import mock_http
@@ -209,14 +211,91 @@ class TestCache:
         got.append("mutated")
         assert cache.get_osv(key) == ["GHSA-1"]
 
-    def test_license_distinguishes_none_from_miss(self):
+    def test_metadata_distinguishes_none_from_miss(self):
         cache = DependencyLookupCache()
         key = ("npm", "left-pad", "1.0.0")
-        assert cache.get_license(key) == (False, None)
-        cache.set_license(key, None)
-        assert cache.get_license(key) == (True, None)
+        assert cache.get_version_meta(key) == (False, None)
+        cache.set_version_meta(key, None)
+        assert cache.get_version_meta(key) == (True, None)
+        assert cache.get_package_meta(("npm", "left-pad")) == (False, None)
+        cache.set_package_meta(("npm", "left-pad"), {"last_release": None})
+        assert cache.get_package_meta(("npm", "left-pad")) == (True, {"last_release": None})
 
     def test_stats(self):
         cache = DependencyLookupCache()
         cache.set_vuln("GHSA-1", {"id": "GHSA-1"})
-        assert cache.stats() == {"osv_entries": 0, "vuln_entries": 1, "license_entries": 0}
+        assert cache.stats() == {
+            "osv_entries": 0,
+            "vuln_entries": 1,
+            "version_entries": 0,
+            "package_entries": 0,
+        }
+
+
+NOW = datetime(2026, 11, 28, tzinfo=UTC)
+LEFT_PAD = {
+    "GET /packages/left-pad/versions/1.3.0": {
+        "licenses": ["WTFPL"],
+        "isDeprecated": True,
+        "deprecatedReason": "use String.prototype.padStart()",
+    },
+    "GET /packages/left-pad": {
+        "versions": [
+            {"versionKey": {"version": "1.2.0"}, "publishedAt": "2017-01-01T00:00:00Z"},
+            {
+                "versionKey": {"version": "1.3.0"},
+                "publishedAt": "2018-04-09T01:10:45Z",
+                "isDefault": True,
+            },
+        ]
+    },
+}
+
+
+def test_query_maintenance_reads_deprecation_and_the_newest_release():
+    requests_seen = []
+
+    def count(routes):
+        def handler(request):
+            requests_seen.append(request.url.path)
+            for key, value in routes.items():
+                if key.split(" ", 1)[1] in request.url.path:
+                    return httpx.Response(200, json=value)
+            return httpx.Response(404)
+
+        return handler
+
+    client = httpx.Client(transport=httpx.MockTransport(count(LEFT_PAD)))
+    cache = DependencyLookupCache()
+    packages = [("npm", "left-pad", "1.3.0"), ("Go", "x", "1"), ("npm", "gone", "1.0.0")]
+    licenses = query_licenses(client, packages, cache)
+    [entry] = query_maintenance(client, packages, cache, now=NOW)
+    assert licenses[0]["license"] == "WTFPL"
+    assert entry == {
+        "package": "left-pad",
+        "ecosystem": "npm",
+        "version": "1.3.0",
+        "deprecated": True,
+        "deprecated_reason": "use String.prototype.padStart()",
+        "last_release": "2018-04-09T01:10:45Z",
+        "days_since_release": 3154,
+        "latest_version": "1.3.0",
+    }
+    # The license pass's version lookup is reused; failed lookups aren't repeated.
+    assert requests_seen.count("/v3/systems/npm/packages/left-pad/versions/1.3.0") == 1
+    assert requests_seen.count("/v3/systems/npm/packages/gone/versions/1.0.0") == 1
+
+
+def test_collect_reports_maintenance_for_runtime_packages_only(make_repo):
+    root = make_repo(
+        {
+            "package.json": json.dumps(
+                {"dependencies": {"left-pad": "1.3.0"}, "devDependencies": {"jest": "29.0.0"}}
+            )
+        }
+    )
+    client = mock_http({"POST querybatch": {"results": [{}, {}]}, **LEFT_PAD})
+    data = collect_dependency_audit(str(root), Config(), http_client=client).data
+    assert [m["package"] for m in data["maintenance"]] == ["left-pad"]
+    off = Config(enable_maintenance_audit=False)
+    assert collect_dependency_audit(str(root), off, http_client=client).data["maintenance"] == []

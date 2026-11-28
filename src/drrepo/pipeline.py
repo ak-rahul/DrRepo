@@ -62,6 +62,7 @@ from drrepo.models import (
     Report,
 )
 from drrepo.recon.clone import clone_repo
+from drrepo.recon.complexity import collect_complexity
 from drrepo.recon.dependencies import DependencyLookupCache, collect_dependency_audit
 from drrepo.recon.doc_checks import collect_doc_checks
 from drrepo.recon.files import collect_repo_layout
@@ -70,6 +71,7 @@ from drrepo.recon.infrastructure import collect_infrastructure
 from drrepo.recon.readme import analyze_readme
 from drrepo.recon.scanners import collect_security, collect_static_analysis
 from drrepo.recon.scorecard import collect_scorecard
+from drrepo.recon.secret_history import collect_secret_history
 from drrepo.report.provenance import build_provenance
 from drrepo.report.suppressions import (
     REPOSITORY_FILE,
@@ -152,6 +154,16 @@ class CollectorSpec:
     after: tuple[str, ...] = ()
 
 
+def _tree_secrets(state: State) -> set[tuple[str, str]]:
+    """`(file, rule)` of every secret the tree scanner found: history reports only the rest."""
+    security = collector_data(state["collector_results"], "security") or {}
+    return {
+        (str(f.get("file")), str(f.get("rule")))
+        for f in security.get("findings", [])
+        if f.get("tool") == "secret_scan"
+    }
+
+
 def _readme(state: State, ctx: RunContext) -> CollectorResult:
     """README from the clone (the exact commit analyzed), falling back to the GitHub
     API, which always serves the default branch's HEAD. SKIPPED (never an analysis
@@ -216,6 +228,21 @@ COLLECTORS: tuple[CollectorSpec, ...] = (
         lambda s, c: collect_doc_checks(s["clone_path"] or ""),
         "Checking documentation links, docstrings and commands",
         needs_clone=True,
+    ),
+    CollectorSpec(
+        "complexity",
+        lambda s, c: collect_complexity(s["clone_path"] or "", c.config),
+        "Measuring complexity and duplication",
+        needs_clone=True,
+    ),
+    CollectorSpec(
+        "secret_history",
+        lambda s, c: collect_secret_history(
+            s["clone_path"] or "", c.config, present=_tree_secrets(s)
+        ),
+        "Scanning git history for secrets",
+        needs_clone=True,
+        after=("security",),
     ),
     CollectorSpec("readme", _readme, after=("github_metadata", "repo_layout")),
 )

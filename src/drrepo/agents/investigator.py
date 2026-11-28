@@ -32,6 +32,7 @@ from drrepo.agents.llm import LLMRuntime, estimate_tokens, extract_actual_tokens
 from drrepo.errors import CircuitOpenError, InvestigationError
 from drrepo.log import logger
 from drrepo.models import Category, Issue, Location, Severity, ToolCallTrace
+from drrepo.resilience import is_retryable_llm_error
 
 MAX_LIST_ITEMS_IN_PROMPT = 15
 MAX_TEXT_FIELD_CHARS = 1500
@@ -119,12 +120,29 @@ def investigate(
 ) -> InvestigationResult:
     """Run one bounded investigation. Raises `InvestigationError` on any failure."""
     from langchain.agents import create_agent
+    from langchain.agents.middleware import ModelRetryMiddleware
+    from langchain.agents.structured_output import ToolStrategy
 
     agent = create_agent(
         model=llm.client,
         tools=tools,
         system_prompt=system_prompt,
-        response_format=InvestigationOutput,
+        # Always submit findings as a tool call. With a bare schema, models with
+        # native structured output get a JSON response_format alongside the tools,
+        # which providers such as Groq reject ("json mode cannot be combined with
+        # tool/function calling").
+        response_format=ToolStrategy(InvestigationOutput),
+        # Each model call in the loop gets the same retry policy as every other
+        # LLM call: rate limits and 5xx back off, permanent errors fail at once.
+        middleware=[
+            ModelRetryMiddleware(
+                max_retries=2,
+                retry_on=is_retryable_llm_error,
+                on_failure="error",
+                initial_delay=2.0,
+                max_delay=20.0,
+            )
+        ],
     )
     prompt = build_prompt(recon_data, known_issues, user_context)
     recursion_limit = max_tool_calls * 2 + 4

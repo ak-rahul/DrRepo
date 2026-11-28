@@ -6,11 +6,16 @@ import pytest
 
 from drrepo.agents.analysts import default_analysts
 from drrepo.agents.analysts.base import aggregate, decay_score, issue_penalty, merge_issues
-from drrepo.agents.analysts.code_quality import CodeQualityAnalyst, ruff_severity
+from drrepo.agents.analysts.code_quality import (
+    CodeQualityAnalyst,
+    complexity_issues,
+    ruff_severity,
+)
 from drrepo.agents.analysts.dependencies import (
     DependencyAnalyst,
     license_issues,
     license_policy_issues,
+    maintenance_issues,
     vulnerability_issues,
 )
 from drrepo.agents.analysts.documentation import DocumentationAnalyst
@@ -147,8 +152,104 @@ class TestCodeQuality:
         )
         assert result.score == 100 and result.narrative_facts is None
 
+    @staticmethod
+    def _metrics(ccns=(), long=0, ratio=0.0, duplicated=0):
+        functions = [
+            {"file": f"src/m{i}.go", "line": i + 1, "name": f"f{i}", "ccn": c, "nloc": 40}
+            for i, c in enumerate(sorted(ccns, reverse=True))
+        ]
+        return {
+            "files_analyzed": 4,
+            "functions": 50,
+            "nloc": 3000,
+            "average_ccn": 3.1,
+            "thresholds": {"ccn": 15, "nloc": 100, "window": 8},
+            "complex_count": len(functions),
+            "complex_functions": functions,
+            "long_count": long,
+            "long_functions": [
+                {"file": "src/big.go", "line": 9, "name": "big", "ccn": 4, "nloc": 240}
+            ][:long],
+            "duplication": {
+                "lines": 3000,
+                "duplicated_lines": duplicated,
+                "ratio": ratio,
+                "blocks": [
+                    {
+                        "file": "src/a.go",
+                        "line": 10,
+                        "end_line": 30,
+                        "lines": 20,
+                        "also_in": {"file": "src/b.go", "line": 5},
+                    }
+                ],
+            },
+        }
+
+    def test_complexity_bands_long_functions_and_duplication(self):
+        issues = {
+            i.rule_id: i
+            for i in complexity_issues(
+                self._metrics(ccns=(45, 31, 20, 16), long=1, ratio=0.2, duplicated=600)
+            )
+        }
+        very, high = issues["very-high-complexity"], issues["high-complexity"]
+        assert (very.severity, very.occurrences, very.file) == (Severity.MEDIUM, 2, "src/m0.go")
+        assert (high.severity, high.occurrences) == (Severity.LOW, 2)
+        assert "f2" in high.description and "(ccn 20)" in high.description
+        assert issues["long-function"].title == "1 function longer than 100 lines of code"
+        duplication = issues["duplicated-code"]
+        assert duplication.severity == Severity.MEDIUM and duplication.title.startswith("20%")
+        assert "also at src/b.go:5" in duplication.description
+        # Small or rare duplication is not worth an issue.
+        assert complexity_issues(self._metrics(ratio=0.2, duplicated=20)) == []
+        assert complexity_issues(self._metrics(ratio=0.01, duplicated=900)) == []
+
+    def test_complexity_scores_a_repository_without_python(self):
+        recon = {
+            "static_analysis": ok({"findings": []}),
+            "repo_layout": ok({"python_lines": 0, "lines_by_language": {"Go": 3000}}),
+            "complexity": ok(self._metrics(ccns=(40,))),
+        }
+        result = CodeQualityAnalyst().assess(recon)
+        assert result.assessed and 0 < result.score < 100
+        assert [i.rule_id for i in result.issues] == ["very-high-complexity"]
+        assert "ruff" not in result.summary and "50 functions in 4 files" in result.summary
+
+    def test_complexity_without_ruff_says_ruff_did_not_run(self):
+        recon = {
+            "static_analysis": failed("ruff crashed"),
+            "repo_layout": ok({"python_lines": 500}),
+            "complexity": ok(self._metrics()),
+        }
+        result = CodeQualityAnalyst().assess(recon)
+        assert result.assessed and result.score == 100
+        assert result.summary.startswith("ruff did not run (")
+
 
 class TestSecurity:
+    def test_history_secrets_are_scored_and_noted(self):
+        finding = {
+            "tool": "secret_history",
+            "rule": "AWS Access Key",
+            "severity": "HIGH",
+            "file": "config.py",
+            "line": 1,
+            "message": "Possible AWS Access Key added to config.py in commit abc",
+        }
+        recon = {
+            "security": ok({"findings": [], "tool_status": {"bandit": "ok"}}),
+            "secret_history": ok(
+                {"commits_scanned": 40, "truncated": False, "findings": [finding]}
+            ),
+        }
+        result = SecurityAnalyst().assess(recon)
+        [issue] = result.issues
+        assert issue.title == "Possible AWS Access Key in git history"
+        assert issue.severity == Severity.HIGH and "rotate" in issue.recommendation
+        assert "1 possible committed secret" in result.summary
+        assert any("40 commits" in n for n in result.notes)
+
     def test_low_confidence_bandit_downgraded(self):
         assert (
             security_severity({"tool": "bandit", "severity": "HIGH", "confidence": "LOW"})
@@ -283,6 +384,38 @@ class TestDependencies:
         assert [i.rule_id for i in license_policy_issues(licenses, ("MPL-2.0",), ())] == [
             "license-denied"
         ]
+
+    def test_maintenance_flags_deprecated_and_long_unreleased_packages(self):
+        def entry(name, deprecated=False, days=10, reason=""):
+            return {
+                "package": name,
+                "ecosystem": "npm",
+                "version": "1.0.0",
+                "deprecated": deprecated,
+                "deprecated_reason": reason,
+                "last_release": "2018-04-09T00:00:00Z",
+                "days_since_release": days,
+                "latest_version": "2.0.0",
+            }
+
+        issues = maintenance_issues(
+            [
+                entry("request", deprecated=True, days=2000, reason="see the README"),
+                entry("old-a", days=2000),
+                entry("old-b", days=800),
+                entry("fresh", days=100),
+                entry("unknown", days=None),
+            ]
+        )
+        deprecated, stale = issues
+        assert (deprecated.rule_id, deprecated.severity) == ("deprecated-package", Severity.MEDIUM)
+        assert "see the README" in deprecated.description
+        assert "upgrade if 2.0.0" in deprecated.recommendation
+        # Stale packages share one low issue; a deprecated one isn't counted twice.
+        assert (stale.rule_id, stale.severity) == ("stale-package", Severity.LOW)
+        assert stale.title.startswith("2 runtime dependencies")
+        assert stale.description.index("old-a") < stale.description.index("old-b")
+        assert maintenance_issues([entry("fresh")]) == []
 
     def test_policy_travels_in_the_collector_data(self):
         audit = {
