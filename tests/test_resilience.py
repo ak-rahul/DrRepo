@@ -199,6 +199,20 @@ class TestRetry:
         error.status_code = status  # type: ignore[attr-defined]
         assert is_retryable_llm_error(error) is retryable
 
+    def test_a_malformed_tool_call_is_retryable_other_400s_are_not(self):
+        glitch = Exception(
+            "Error code: 400 - {'error': {'message': 'Tool call validation failed: parameters "
+            "for tool search_code did not match schema', 'code': 'tool_use_failed'}}"
+        )
+        glitch.status_code = 400  # type: ignore[attr-defined]
+        assert is_retryable_llm_error(glitch) is True
+        daily = Exception("Rate limit reached ... on tokens per day (TPD): Limit 200000")
+        daily.status_code = 429  # type: ignore[attr-defined]
+        assert is_retryable_llm_error(daily) is False
+        bad = Exception("Error code: 400 - context length exceeded")
+        bad.status_code = 400  # type: ignore[attr-defined]
+        assert is_retryable_llm_error(bad) is False
+
     def test_is_retryable_reads_response_status(self):
         error = Exception("x")
         error.response = Mock(status_code=401)  # type: ignore[attr-defined]

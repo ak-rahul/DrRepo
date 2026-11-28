@@ -95,6 +95,7 @@ def doc_check_issues(checks: dict[str, Any] | None, readme_file: str) -> list[Is
 class DocumentationAnalyst(Analyst):
     category = Category.DOCUMENTATION
     tool_families = ("files",)
+    recon_inputs = ("readme", "doc_checks", "github_metadata", "repo_layout")
     rescore_scale = 60.0
 
     def score_issues(self, recon: Recon, issues: list[Issue]) -> float | None:

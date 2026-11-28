@@ -49,6 +49,7 @@ def days_since(iso_timestamp: str | None, now: datetime | None = None) -> int | 
 class MaintainabilityAnalyst(Analyst):
     category = Category.MAINTAINABILITY
     tool_families = ("files", "git_history")
+    recon_inputs = ("github_metadata", "repo_layout", "infrastructure")
     rescore_scale = _SCALE
 
     def assess(self, recon: Recon) -> Assessment:

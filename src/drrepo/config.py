@@ -131,6 +131,14 @@ class Config:
     # Agentic investigation: bounds on the tool-calling investigator loops.
     max_tool_calls_per_investigator: int = 8
     investigator_timeout_seconds: int = 90
+    # Investigations allowed to run at once (0 = unlimited). Set 1 on providers
+    # with small per-minute token limits, such as Groq's free tier.
+    llm_max_parallel_investigations: int = 0
+    # Most tokens one investigator request may use: system prompt, tool schemas,
+    # conversation and MAX_TOKENS for the reply. Older tool results are cleared and
+    # long ones cut to stay under it. Set it below a provider's per-request limit
+    # (e.g. 7000 on Groq's free tier, which allows 8000 tokens per minute).
+    investigation_context_tokens: int = 32000
     # Kill switch: force every category "shallow" -- a regression safety net
     # and a cost control for anyone who wants the fast/cheap mode.
     enable_deep_investigation: bool = True
@@ -263,6 +271,12 @@ class Config:
             investigator_timeout_seconds=_env_int(
                 "INVESTIGATOR_TIMEOUT_SECONDS", d.investigator_timeout_seconds
             ),
+            llm_max_parallel_investigations=_env_int(
+                "LLM_MAX_PARALLEL_INVESTIGATIONS", d.llm_max_parallel_investigations
+            ),
+            investigation_context_tokens=_env_int(
+                "INVESTIGATION_CONTEXT_TOKENS", d.investigation_context_tokens
+            ),
             enable_deep_investigation=_env_bool(
                 "ENABLE_DEEP_INVESTIGATION", d.enable_deep_investigation
             ),
@@ -341,8 +355,14 @@ _MUST_BE_POSITIVE = frozenset(
         "investigator_timeout_seconds",
         "llm_circuit_breaker_threshold",
         "estimated_tokens_per_deep_investigation",
+        "investigation_context_tokens",
     }
 )
 _MUST_BE_NON_NEGATIVE = frozenset(
-    {"llm_circuit_breaker_timeout_seconds", "llm_token_budget_per_run", "scan_history_commits"}
+    {
+        "llm_circuit_breaker_timeout_seconds",
+        "llm_token_budget_per_run",
+        "scan_history_commits",
+        "llm_max_parallel_investigations",
+    }
 )

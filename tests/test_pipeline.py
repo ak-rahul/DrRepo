@@ -493,3 +493,37 @@ def test_pipeline_uses_mcp_tools_by_default(collectors):
         lead.return_value.plan.return_value = _plan(Category.SECURITY)
         Workflow().run(REPO, _ctx(budget=TokenBudget(100_000)))
     assert seen["type"] == "StructuredTool" and "ERROR" not in seen["listing"]
+
+
+def test_investigators_see_only_their_own_recon(collectors):
+    seen = {}
+
+    def fake_investigate(**kwargs):
+        seen[kwargs["category"]] = set(kwargs["recon_data"])
+        return InvestigationResult(summary="s", issues=[], trace=[])
+
+    with (
+        patch(f"{P}.LeadInvestigator") as lead,
+        patch(f"{P}.investigate", side_effect=fake_investigate),
+    ):
+        lead.return_value.plan.return_value = _plan(Category.SECURITY)
+        Workflow().run(REPO, _ctx(budget=TokenBudget(100_000)))
+    assert seen[Category.SECURITY] <= {"security", "infrastructure", "scorecard", "secret_history"}
+    assert "security" in seen[Category.SECURITY]
+
+
+def test_parallel_investigations_can_be_capped():
+    unlimited = RunContext(config=Config(), llm=LLMRuntime(client=None))
+    with unlimited.investigation_slot():
+        pass
+    capped = RunContext(
+        config=Config(llm_max_parallel_investigations=1), llm=LLMRuntime(client=None)
+    )
+    acquired: list[bool] = []
+    with capped.investigation_slot():
+        other = threading.Thread(
+            target=lambda: acquired.append(capped._slots.acquire(timeout=0.05))
+        )
+        other.start()
+        other.join()
+    assert acquired == [False]  # the one slot was held

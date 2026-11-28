@@ -27,8 +27,11 @@ one runs first and then again (observed live: every category ran twice).
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,6 +115,16 @@ class RunContext:
     # The clone's symbol index, shared by every investigation of this run (built
     # lazily on the first symbol tool call). Set by `Workflow.run`.
     symbol_index: SymbolIndex | None = None
+    # Built from `config.llm_max_parallel_investigations`; None means unlimited.
+    _slots: threading.BoundedSemaphore | None = field(init=False, default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        limit = self.config.llm_max_parallel_investigations
+        self._slots = threading.BoundedSemaphore(limit) if limit > 0 else None
+
+    def investigation_slot(self) -> AbstractContextManager[Any]:
+        """Hold one of the run's investigation slots (a no-op when unlimited)."""
+        return self._slots if self._slots is not None else contextlib.nullcontext()
 
     def deep_estimate(self) -> tuple[int, str]:
         """Tokens one deep investigation is expected to cost, and where that came from."""
@@ -411,29 +424,38 @@ class Workflow:
                 system_prompt=analyst.investigation_prompt,
                 tools=tools,
                 llm=ctx.llm.for_role("investigation", label=f"investigation:{category.value}"),
-                recon_data={name: r.data for name, r in recon.items()},
+                recon_data={
+                    name: r.data
+                    for name, r in recon.items()
+                    if not analyst.recon_inputs or name in analyst.recon_inputs
+                },
                 known_issues=shallow.issues,
                 max_tool_calls=max_tool_calls,
                 timeout_seconds=ctx.config.investigator_timeout_seconds,
                 user_context=state["description"],
+                context_tokens=ctx.config.investigation_context_tokens,
+                reserve_tokens=ctx.config.max_tokens,
             )
 
         try:
-            if ctx.config.enable_mcp_tools:
-                try:
-                    # The investigator calls DrRepo's own MCP tool server (in memory).
-                    with mcp_tools(analyst.tool_families, **tool_args) as tools:
-                        result = run_investigation(tools, "MCP")
-                except ToolServerError as e:
-                    logger.warning(f"{category.value}: {e}; using in-process tools")
-                    tool_note = f"MCP tool server unavailable ({e}); the investigation used in-process tools."
+            # Optional cap on concurrent investigations (LLM_MAX_PARALLEL_INVESTIGATIONS),
+            # so small per-minute token limits aren't hit by every category at once.
+            with ctx.investigation_slot():
+                if ctx.config.enable_mcp_tools:
+                    try:
+                        # The investigator calls DrRepo's own MCP tool server (in memory).
+                        with mcp_tools(analyst.tool_families, **tool_args) as tools:
+                            result = run_investigation(tools, "MCP")
+                    except ToolServerError as e:
+                        logger.warning(f"{category.value}: {e}; using in-process tools")
+                        tool_note = f"MCP tool server unavailable ({e}); the investigation used in-process tools."
+                        result = run_investigation(
+                            build_tools(analyst.tool_families, **tool_args), "in-process"
+                        )
+                else:
                     result = run_investigation(
                         build_tools(analyst.tool_families, **tool_args), "in-process"
                     )
-            else:
-                result = run_investigation(
-                    build_tools(analyst.tool_families, **tool_args), "in-process"
-                )
         except InvestigationError as e:
             ctx.emit(
                 f"{category.label}: {depth.value} investigation {e.reason}; using automated pass"

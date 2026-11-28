@@ -295,6 +295,7 @@ def maintenance_issues(entries: list[dict[str, Any]]) -> list[Issue]:
 class DependencyAnalyst(Analyst):
     category = Category.DEPENDENCIES
     tool_families = ("files", "dependencies")
+    recon_inputs = ("dependency_audit", "github_metadata", "repo_layout")
     rescore_scale = _SCALE
 
     def assess(self, recon: Recon) -> Assessment:

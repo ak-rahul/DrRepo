@@ -157,6 +157,10 @@ class Analyst(ABC):
     tool_families: ClassVar[tuple[str, ...]] = ("files",)
     # Penalty that maps to ~37% when re-scoring investigator-added issues.
     rescore_scale: ClassVar[float] = 50.0
+    # Collectors whose data the deep investigator sees in its prompt (empty: all).
+    # Keep it to what `assess` reads: every other collector's data only costs
+    # tokens, and the agent can fetch anything else with its tools.
+    recon_inputs: ClassVar[tuple[str, ...]] = ()
 
     @abstractmethod
     def assess(self, recon: Recon) -> Assessment:

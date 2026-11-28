@@ -5,7 +5,7 @@
     "categories": {
       "code_quality": 73.9,
       "dependencies": 90.5,
-      "documentation": 49.1,
+      "documentation": 64.0,
       "maintainability": 100.0,
       "security": 88.2
     },
@@ -13,7 +13,7 @@
     "commit_sha": "6771a04893780166e4b7826b63599f43ac30d00a",
     "deep_categories": [],
     "disputed_agent_findings": [],
-    "elapsed_seconds": 6.0,
+    "elapsed_seconds": 5.2,
     "findings": [
       "attrs|code_quality|lizard|high-complexity|src/attr/_make.py",
       "attrs|code_quality|lizard|long-function|src/attr/_make.py",
@@ -22,13 +22,6 @@
       "attrs|code_quality|ruff|B905|src/attr/_make.py",
       "attrs|code_quality|ruff|F821|src/attr/__init__.pyi",
       "attrs|dependencies|dependency_audit|unpinned-dependencies|",
-      "attrs|documentation|doc_checks|broken-link|docs/examples.md",
-      "attrs|documentation|doc_checks|broken-link|docs/glossary.md",
-      "attrs|documentation|doc_checks|broken-link|docs/index.md",
-      "attrs|documentation|doc_checks|broken-link|docs/init.md",
-      "attrs|documentation|doc_checks|broken-link|docs/names.md",
-      "attrs|documentation|doc_checks|broken-link|docs/overview.md",
-      "attrs|documentation|doc_checks|broken-link|docs/why.md",
       "attrs|documentation|readme_analyzer|missing-section-contributing|README.md",
       "attrs|documentation|readme_analyzer|missing-section-documentation|README.md",
       "attrs|documentation|readme_analyzer|missing-section-features|README.md",
@@ -37,7 +30,7 @@
       "attrs|security|bandit|B112|src/attr/validators.py",
       "attrs|security|bandit|B307|src/attr/_make.py"
     ],
-    "overall": 80.9,
+    "overall": 83.1,
     "provenance": {
       "instructions": {
         "code_quality": "8a69f6e16a67",
@@ -48,16 +41,7 @@
         "security": "46f0b39749f3",
         "shared": "a7713c4ea74b"
       },
-      "llm": {
-        "model": "llama-3.3-70b-versatile",
-        "provider": "groq",
-        "roles": {
-          "critic": "llama-3.3-70b-versatile",
-          "investigation": "llama-3.3-70b-versatile",
-          "narrative": "llama-3.3-70b-versatile",
-          "planner": "llama-3.3-70b-versatile"
-        }
-      },
+      "llm": null,
       "tools": {
         "bandit": "1.9.4",
         "git": "2.47.0",
@@ -85,7 +69,7 @@
     "commit_sha": "874ca2bc1c30d93a4ac6e36a15ed685eafe89097",
     "deep_categories": [],
     "disputed_agent_findings": [],
-    "elapsed_seconds": 6.7,
+    "elapsed_seconds": 6.0,
     "findings": [
       "click|code_quality|lizard|high-complexity|src/click/core.py",
       "click|code_quality|lizard|very-high-complexity|src/click/core.py",
@@ -117,16 +101,7 @@
         "security": "46f0b39749f3",
         "shared": "a7713c4ea74b"
       },
-      "llm": {
-        "model": "llama-3.3-70b-versatile",
-        "provider": "groq",
-        "roles": {
-          "critic": "llama-3.3-70b-versatile",
-          "investigation": "llama-3.3-70b-versatile",
-          "narrative": "llama-3.3-70b-versatile",
-          "planner": "llama-3.3-70b-versatile"
-        }
-      },
+      "llm": null,
       "tools": {
         "bandit": "1.9.4",
         "git": "2.47.0",
@@ -154,7 +129,7 @@
     "commit_sha": "096c8d42545d3b68ea21a4f890fb2b2d8979c0bd",
     "deep_categories": [],
     "disputed_agent_findings": [],
-    "elapsed_seconds": 6.5,
+    "elapsed_seconds": 6.0,
     "findings": [
       "itsdangerous|code_quality|duplication|duplicated-code|src/itsdangerous/serializer.py",
       "itsdangerous|documentation|readme_analyzer|missing-section-contributing|README.md",
@@ -182,16 +157,7 @@
         "security": "46f0b39749f3",
         "shared": "a7713c4ea74b"
       },
-      "llm": {
-        "model": "llama-3.3-70b-versatile",
-        "provider": "groq",
-        "roles": {
-          "critic": "llama-3.3-70b-versatile",
-          "investigation": "llama-3.3-70b-versatile",
-          "narrative": "llama-3.3-70b-versatile",
-          "planner": "llama-3.3-70b-versatile"
-        }
-      },
+      "llm": null,
       "tools": {
         "bandit": "1.9.4",
         "git": "2.47.0",
@@ -246,16 +212,7 @@
         "security": "46f0b39749f3",
         "shared": "a7713c4ea74b"
       },
-      "llm": {
-        "model": "llama-3.3-70b-versatile",
-        "provider": "groq",
-        "roles": {
-          "critic": "llama-3.3-70b-versatile",
-          "investigation": "llama-3.3-70b-versatile",
-          "narrative": "llama-3.3-70b-versatile",
-          "planner": "llama-3.3-70b-versatile"
-        }
-      },
+      "llm": null,
       "tools": {
         "bandit": "1.9.4",
         "git": "2.47.0",
@@ -283,7 +240,7 @@
     "commit_sha": "0e322af87745eff34caffe4df68456ebc20d9068",
     "deep_categories": [],
     "disputed_agent_findings": [],
-    "elapsed_seconds": 6.5,
+    "elapsed_seconds": 5.9,
     "findings": [
       "requests|code_quality|lizard|high-complexity|src/requests/models.py",
       "requests|code_quality|ruff|B004|src/requests/hooks.py",
@@ -316,16 +273,7 @@
         "security": "46f0b39749f3",
         "shared": "a7713c4ea74b"
       },
-      "llm": {
-        "model": "llama-3.3-70b-versatile",
-        "provider": "groq",
-        "roles": {
-          "critic": "llama-3.3-70b-versatile",
-          "investigation": "llama-3.3-70b-versatile",
-          "narrative": "llama-3.3-70b-versatile",
-          "planner": "llama-3.3-70b-versatile"
-        }
-      },
+      "llm": null,
       "tools": {
         "bandit": "1.9.4",
         "git": "2.47.0",

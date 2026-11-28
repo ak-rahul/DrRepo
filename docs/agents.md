@@ -72,9 +72,12 @@ All tools are read-only and treat every argument as hostile; see [architecture.m
 
 | Bound | Setting | Default |
 |---|---|---|
-| Tool calls | `MAX_TOOL_CALLS_PER_INVESTIGATOR` (graph `recursion_limit = 2n + 4`) | 8 |
+| Tool calls | `MAX_TOOL_CALLS_PER_INVESTIGATOR`: further calls are answered "budget used up, submit now" without running, so the agent concludes with what it found (graph `recursion_limit = 2n + 8` as the backstop) | 8 |
 | Wall clock | `INVESTIGATOR_TIMEOUT_SECONDS` | 90 s |
-| Prompt size | recon data trimmed by `summarize_recon_data` (long strings and lists capped) | — |
+| Prompt size | only the collectors the category's analyst reads (`Analyst.recon_inputs`), as compact JSON with long strings and lists capped and the README left out (the agent can read it) | — |
+| Request size | `INVESTIGATION_CONTEXT_TOKENS` (system prompt, tool schemas, conversation and `MAX_TOKENS`): older tool results are cleared and each result is cut to a third of the conversation budget | 32,000 |
+| Model-call retries | rate limits, 5xx and malformed tool calls the model generated retry up to 5 times, waiting the provider's `retry-after` when it fits in the time budget; a daily quota or a `retry-after` over 60 s fails at once | — |
+| Concurrency | `LLM_MAX_PARALLEL_INVESTIGATIONS` (`0` = unlimited) | 0 |
 | Tokens | counted against the run's `TokenBudget` | 60,000 per run |
 | Provider failures | the shared `CircuitBreaker` opens after `LLM_CIRCUIT_BREAKER_THRESHOLD` failures | 3 |
 

@@ -62,6 +62,8 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 | `ENABLE_AGENT_CRITIC` | `true` | re-check grounded high/critical agent findings; the critic can lower a severity or mark a finding disputed, never raise or remove one |
 | `MAX_TOOL_CALLS_PER_INVESTIGATOR` | `8` | step budget per investigation |
 | `INVESTIGATOR_TIMEOUT_SECONDS` | `90` | wall-clock budget per investigation |
+| `INVESTIGATION_CONTEXT_TOKENS` | `32000` | most tokens one investigator request may use (system prompt, tool schemas, conversation, plus `MAX_TOKENS` for the reply). Older tool results are cleared and long ones cut to stay under it |
+| `LLM_MAX_PARALLEL_INVESTIGATIONS` | `0` | investigations allowed at once (`0` = unlimited); `1` runs them one after another |
 
 ## Resilience and cost
 
@@ -87,5 +89,5 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 ## Tuning recipes
 
 - **Fast and cheap:** `ENABLE_DEEP_INVESTIGATION=false ENABLE_SEMGREP=false` gives a typical run in under 30 seconds.
-- **Free-tier Groq:** keep the defaults. On a provider 429/413 error the breaker opens after 3 failures, and the rest of the run finishes deterministically.
+- **Free-tier Groq** (8,000 tokens per minute per model): `LLM_MAX_PARALLEL_INVESTIGATIONS=1 INVESTIGATION_CONTEXT_TOKENS=7000 INVESTIGATOR_TIMEOUT_SECONDS=240`. Investigations then run one at a time, each request fits the per-minute limit, and rate-limit waits (the provider's `retry-after`) fit in the time budget. A run takes several minutes. If the provider keeps failing, the breaker opens after 3 failures and the rest of the run finishes deterministically.
 - **Thorough:** raise `LLM_TOKEN_BUDGET_PER_RUN` to `150000` and `MAX_TOOL_CALLS_PER_INVESTIGATOR` to `15`.

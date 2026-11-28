@@ -130,6 +130,43 @@ def test_real_react_loop_calls_tools_and_parses_findings(tmp_path):
     assert budget.usage()["used_tokens"] > 0
 
 
+class GreedyChatModel(ScriptedChatModel):
+    """Keeps calling read_file until told the budget is spent, then submits."""
+
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **_: Any
+    ) -> ChatResult:
+        from drrepo.agents.investigator import BUDGET_SPENT
+
+        spent = any(isinstance(m, ToolMessage) and m.content == BUDGET_SPENT for m in messages)
+        if not spent:
+            calls = sum(isinstance(m, ToolMessage) for m in messages)
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "read_file", "args": {"path": "app.py"}, "id": f"call-{calls}"}
+                ],
+            )
+            message.usage_metadata = {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50}
+            return ChatResult(generations=[ChatGeneration(message=message)])
+        return super()._generate(messages, stop, run_manager)
+
+
+def test_an_agent_over_its_tool_budget_still_submits_findings(tmp_path):
+    root = _clone(tmp_path)
+    result = investigate(
+        category=Category.SECURITY,
+        system_prompt="Investigate security.",
+        tools=build_tools(("files",), clone_root=str(root), config=Config(), cache=None),
+        llm=LLMRuntime(client=GreedyChatModel(), budget=TokenBudget(100_000)),
+        recon_data={"security": {"findings": []}},
+        known_issues=[],
+        max_tool_calls=2,
+    )
+    assert len(result.trace) == 2  # the refused third call never ran
+    assert [i.title for i in result.issues] == ["Debug mode enabled in production entry point"]
+
+
 def _patch_pipeline(tmp_path, monkeypatch) -> None:
     root = _clone(tmp_path)
 

@@ -199,6 +199,16 @@ def retry_with_backoff(
 
 
 _PERMANENT_HTTP_STATUSES = frozenset({400, 401, 403, 404, 413, 422})
+# A 400 that blames the model's own output, not the request: the provider
+# rejected a malformed tool call the model generated (Groq: "tool_use_failed").
+# Sampling again usually succeeds.
+_MODEL_OUTPUT_ERRORS = (
+    "tool_use_failed",
+    "tool call validation failed",
+    "failed to call a function",
+)
+# A 429 for a daily quota won't clear within a run: retrying only burns time.
+_DAILY_QUOTA_ERRORS = ("tokens per day", "requests per day", "(tpd)", "(rpd)")
 
 
 def is_retryable_llm_error(error: BaseException) -> bool:
@@ -206,12 +216,18 @@ def is_retryable_llm_error(error: BaseException) -> bool:
 
     An open circuit and HTTP 400/401/403/404/413/422 (bad request, auth, too
     large) are permanent for the run; retrying only burns backoff. Rate limits
-    (429) and 5xx are retried. Duck-typed on `status_code` so it works for the
-    Groq and OpenAI SDKs without importing either.
+    (429, except a daily quota), 5xx, and a 400 caused by a malformed tool call
+    the model generated are retried. Duck-typed on `status_code` so it works for the Groq and
+    OpenAI SDKs without importing either.
     """
     if isinstance(error, CircuitOpenError):
         return False
     status = getattr(error, "status_code", None)
     if status is None:
         status = getattr(getattr(error, "response", None), "status_code", None)
+    message = str(error).lower()
+    if status == 400 and any(m in message for m in _MODEL_OUTPUT_ERRORS):
+        return True
+    if status == 429 and any(m in message for m in _DAILY_QUOTA_ERRORS):
+        return False
     return not (isinstance(status, int) and status in _PERMANENT_HTTP_STATUSES)
