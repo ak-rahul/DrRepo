@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<title>DrRepo: {{ repo.full_name or repo.name }} {{ "%.0f"|format(score) }}/100</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #66665f; --line: #e3e3de;
+  --accent: #2f6f4f; --critical: #b3261e; --high: #c2570c; --medium: #a37a00; --low: #3a6ea5;
+  --code: #f0f0ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --text: #ecece7; --muted: #a2a29a; --line: #34342f;
+    --accent: #6fbf94; --critical: #f2716a; --high: #f0a35e; --medium: #e3c35a; --low: #84b0e6;
+    --code: #2a2a27;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+a { color: var(--accent); }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 19px; margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+h3 { font-size: 15px; margin: 0 0 6px; }
+.muted { color: var(--muted); }
+.mono, code, pre { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 13px; }
+pre { background: var(--code); padding: 10px 12px; border-radius: 6px; overflow-x: auto;
+  white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
+.header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.score { text-align: right; }
+.score .value { font-size: 44px; font-weight: 700; line-height: 1; }
+.score .grade { font-size: 18px; font-weight: 600; color: var(--accent); }
+.delta-up { color: var(--accent); } .delta-down { color: var(--critical); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.card, .issue, details.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.card { padding: 14px; }
+.card .num { font-size: 26px; font-weight: 700; }
+meter { width: 100%; height: 10px; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--line); color: var(--muted); }
+.sev { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+.sev-critical { color: var(--critical); } .sev-high { color: var(--high); }
+.sev-medium { color: var(--medium); } .sev-low { color: var(--low); }
+.counts { display: flex; gap: 18px; flex-wrap: wrap; margin: 6px 0 14px; }
+.issue { padding: 12px 14px; margin: 8px 0; }
+.issue .meta { color: var(--muted); font-size: 13px; }
+.text { white-space: pre-wrap; word-break: break-word; }
+details.panel { margin: 10px 0; }
+details.panel > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
+details.panel > .body { padding: 0 14px 12px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 13px; }
+ul.plain { padding-left: 18px; margin: 6px 0; }
+footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+@media print {
+  body { background: #fff; }
+  details.panel { break-inside: avoid; }
+  details.panel:not([open]) > .body { display: block; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<div class="header">
+  <div>
+    <h1>{% if repo_url %}<a href="{{ repo_url }}" rel="noopener noreferrer">{{ repo.full_name or repo.name }}</a>{% else %}{{ repo.full_name or repo.name }}{% endif %}</h1>
+    {% if repo.description %}<div class="muted text">{{ repo.description }}</div>{% endif %}
+    <div class="muted mono">
+      {% if repo.commit_sha %}commit {{ repo.commit_sha[:12] }}{% endif %}
+      {% if repo.ref %} · {{ repo.ref }}{% endif %}
+      {% if repo.language %} · {{ repo.language }}{% endif %}
+      {% if repo.license %} · {{ repo.license }}{% endif %}
+    </div>
+  </div>
+  <div class="score">
+    <div class="value">{{ "%.1f"|format(score) }}</div>
+    <div class="grade">grade {{ grade }}</div>
+    {% if history %}
+    <div class="{{ 'delta-up' if history.overall_score_delta >= 0 else 'delta-down' }}">
+      {{ "%+.1f"|format(history.overall_score_delta) }} since {{ history.previous_timestamp[:10] }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="counts">
+  {% for sev in severities %}
+  <span><span class="sev sev-{{ sev }}">{{ sev }}</span> {{ counts.get(sev, 0) }}</span>
+  {% endfor %}
+</div>
+
+<h2>Categories</h2>
+<div class="cards">
+  {% for c in categories %}
+  <div class="card">
+    <h3>{{ c.label }} {% if c.depth != "shallow" %}<span class="badge">{{ c.depth }}</span>{% endif %}</h3>
+    {% if c.assessed %}
+    <div class="num">{{ "%.0f"|format(c.score) }}</div>
+    <meter min="0" max="100" low="50" high="75" optimum="100" value="{{ c.score }}"></meter>
+    {% else %}
+    <div class="num muted">n/a</div>
+    {% endif %}
+    {% if history and c.name in history.category_score_deltas %}
+    <div class="{{ 'delta-up' if history.category_score_deltas[c.name] >= 0 else 'delta-down' }}">
+      {{ "%+.1f"|format(history.category_score_deltas[c.name]) }}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% for c in categories %}
+<details class="panel" open>
+  <summary>{{ c.label }}{% if c.assessed %} · {{ "%.0f"|format(c.score) }}{% else %} · not assessed{% endif %}</summary>
+  <div class="body">
+    <div class="text">{{ c.summary }}</div>
+    {% if c.notes %}<ul class="plain muted">{% for n in c.notes %}<li class="text">{{ n }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+</details>
+{% endfor %}
+
+{% if quick_wins %}
+<h2>Quick wins</h2>
+<ul class="plain">{% for win in quick_wins %}<li class="text">{{ win }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Issues ({{ report.issues|length }})</h2>
+{% for sev in severities %}
+{% set group = by_severity[sev] %}
+{% if group %}
+<details class="panel" {% if sev in ("critical", "high") %}open{% endif %}>
+  <summary><span class="sev sev-{{ sev }}">{{ sev }}</span> {{ group|length }}</summary>
+  <div class="body">
+  {% for issue in group %}
+    <div class="issue">
+      <h3 class="text">{{ issue.title }}{% if issue.occurrences > 1 %} <span class="badge">×{{ issue.occurrences }}</span>{% endif %}</h3>
+      <div class="meta">
+        {{ label(issue.category) }} · {{ issue.source }}{% if issue.rule_id %} · {{ issue.rule_id }}{% endif %}
+        {% if location(issue) %} · <span class="mono">{{ location(issue) }}</span>{% endif %}
+      </div>
+      <div class="text">{{ issue.description }}</div>
+      <div class="text"><strong>Fix:</strong> {{ issue.recommendation }}</div>
+      {% if issue.locations|length > 1 %}
+      <div class="meta">Also at:
+        {% for loc in issue.locations[1:10] %}<span class="mono">{{ loc.file }}{% if loc.line %}:{{ loc.line }}{% endif %}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endfor %}
+{% if not report.issues %}<p class="muted">No issues.</p>{% endif %}
+
+{% if suppressed %}
+<h2>Suppressed ({{ suppressed|length }})</h2>
+<table>
+  <tr><th>Issue</th><th>Rule</th><th>Reason</th><th>Expires</th><th>From</th></tr>
+  {% for s in suppressed %}
+  <tr><td class="text">{{ s.issue.title }}</td><td class="mono">{{ s.suppression.rule }}</td>
+      <td class="text">{{ s.suppression.reason }}</td><td>{{ s.suppression.expires or "never" }}</td>
+      <td>{{ s.suppression.origin }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if dependencies %}
+<h2>Dependencies ({{ dependencies|length }}, {{ vulnerable }} with advisories)</h2>
+<details class="panel" {% if vulnerable %}open{% endif %}>
+  <summary>Packages</summary>
+  <div class="body">
+  <table>
+    <tr><th>Package</th><th>Version</th><th>Scope</th><th>License</th><th>Advisories</th></tr>
+    {% for d in dependencies %}
+    <tr>
+      <td class="mono">{{ d.name }} <span class="muted">({{ d.ecosystem }})</span></td>
+      <td class="mono">{{ d.version }}</td><td>{{ d.scope }}</td><td>{{ d.license or "unknown" }}</td>
+      <td>{% for a in d.vulnerabilities %}{% set url = advisory_url(a) %}{% if url %}<a class="mono" href="{{ url }}" rel="noopener noreferrer">{{ a }}</a>{% else %}<span class="mono">{{ a }}</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</details>
+{% endif %}
+
+{% if plan or categories|selectattr("trace")|list %}
+<h2>How it investigated</h2>
+{% if plan %}
+<table>
+  <tr><th>Category</th><th>Depth</th><th>Why</th></tr>
+  {% for name, p in plan.items() %}
+  <tr><td>{{ label(name) }}</td><td>{{ p.depth }}</td><td class="text">{{ p.rationale }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% for c in categories if c.trace %}
+<details class="panel"><summary>{{ c.label }}: {{ c.depth }}, {{ c.trace|length }} tool calls</summary>
+  <div class="body">
+  {% for call in c.trace %}
+    <div class="mono"><strong>{{ call.tool }}</strong> {{ call.tool_input|tojson }}</div>
+    <pre>{{ call.observation }}</pre>
+  {% endfor %}
+  </div>
+</details>
+{% endfor %}
+{% endif %}
+
+<h2>Details</h2>
+<details class="panel"><summary>Collectors</summary>
+  <div class="body"><table>
+    <tr><th>Collector</th><th>Status</th><th>Detail</th></tr>
+    {% for name, c in collectors.items() %}
+    <tr><td class="mono">{{ name }}</td><td>{{ c.status }}</td><td class="text">{{ c.detail or "" }}</td></tr>
+    {% endfor %}
+  </table></div>
+</details>
+{% if provenance %}
+<details class="panel"><summary>Provenance</summary>
+  <div class="body">
+  {% if provenance.llm %}
+  <p>LLM: <span class="mono">{{ provenance.llm.provider }} / {{ provenance.llm.model }}</span></p>
+  {% if provenance.llm.roles %}<table><tr><th>Role</th><th>Model</th></tr>
+    {% for role, model in provenance.llm.roles.items() %}<tr><td>{{ role }}</td><td class="mono">{{ model }}</td></tr>{% endfor %}
+  </table>{% endif %}
+  {% else %}<p class="muted">No LLM: the report is fully deterministic.</p>{% endif %}
+  <table><tr><th>Tool</th><th>Version</th></tr>
+    {% for tool, version in provenance.tools.items() %}<tr><td>{{ tool }}</td><td class="mono">{{ version or "unavailable" }}</td></tr>{% endfor %}
+  </table>
+  </div>
+</details>
+{% endif %}
+{% if usage %}
+<details class="panel"><summary>LLM usage: {{ "{:,}".format(usage.used_tokens) }} of {{ "{:,}".format(usage.max_tokens) }} tokens</summary>
+  <div class="body"><table><tr><th>Step</th><th>Tokens</th></tr>
+    {% for step, tokens in (usage.by_label or {}).items() %}<tr><td class="mono">{{ step }}</td><td>{{ "{:,}".format(tokens) }}</td></tr>{% endfor %}
+  </table></div>
+</details>
+{% endif %}
+
+<footer>
+  Generated by DrRepo {{ report.drrepo_version }} on {{ report.generated_at }}.
+  Text from the analyzed repository is shown as plain text.
+</footer>
+</main>
+</body>
+</html>

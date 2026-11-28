@@ -30,7 +30,7 @@ drrepo audit https://github.com/owner/repo \
 | `-d, --description` | context passed to the planner and investigators |
 | `--ref REF` | analyze a branch, tag, or full 40-character commit SHA instead of the default branch |
 | `--shallow` | no deep investigations for this run (`drrepo quick` is `audit --shallow`; `analyze` is an alias of `audit`) |
-| `--format` | any of `json,md,sarif,cdx,summary`: `cdx` is a CycloneDX 1.6 SBOM (`.cdx.json`), `summary` a short Markdown summary for PR comments (`.summary.md`); `''` writes nothing |
+| `--format` | any of `json,md,sarif,cdx,summary,html`: `cdx` is a CycloneDX 1.6 SBOM (`.cdx.json`), `summary` a short Markdown summary for PR comments (`.summary.md`), `html` a self-contained page to open in any browser; `''` writes nothing |
 | `-o, --output-dir` | default `reports/`. Files are named `<owner>__<repo>_<UTC timestamp>.<ext>`, e.g. `psf__requests_20261127-091500Z.json` |
 | `--json` | print the full JSON report to stdout (progress stays on stderr) |
 | `--fail-under N` | exit code 3 if the overall score is below N |
@@ -207,7 +207,7 @@ The action analyzes the pushed commit, or the pull request head, with the DrRepo
 | `fail-on-new` | empty | diff mode: fail on a new or worsened issue at this severity or above |
 | `deep` | `false` | allow tool-calling investigations, in diff mode only where things got worse (needs an LLM key in the step's `env`) |
 | `fail-under` | empty | fail below this score |
-| `formats` | `md,sarif` | any of `json,md,sarif,cdx,summary`; `summary` is always written |
+| `formats` | `md,sarif` | any of `json,md,sarif,cdx,summary,html`; `summary` is always written |
 | `output-dir` | `drrepo-report` | |
 | `upload-sarif` | `true` | needs `security-events: write` |
 | `comment` | `false` | needs `pull-requests: write`; pull requests from forks get a read-only token, so the step warns and carries on |

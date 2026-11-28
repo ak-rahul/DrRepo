@@ -32,7 +32,7 @@ inputs:
     description: Fail the step if the overall score is below this value. Empty means never fail on the score.
     default: ""
   formats:
-    description: Report files to write (json, md, sarif, cdx, summary). sarif is added when upload-sarif is true.
+    description: Report files to write (json, md, sarif, cdx, summary, html). sarif is added when upload-sarif is true.
     default: md,sarif
   output-dir:
     description: Directory the reports are written to.

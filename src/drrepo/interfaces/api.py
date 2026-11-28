@@ -57,7 +57,9 @@ _MEDIA_TYPES = {
     "sarif": "application/sarif+json",
     "cdx": "application/vnd.cyclonedx+json",
     "summary": "text/markdown; charset=utf-8",
+    "html": "text/html; charset=utf-8",
 }
+_HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"
 _BADGE_COLORS = {"A": "brightgreen", "B": "green", "C": "yellow", "D": "orange", "F": "red"}
 _WINDOW_SECONDS = 3600.0
 
@@ -254,7 +256,12 @@ def create_app(
             raise HTTPException(status_code=409, detail=f"the analysis failed: {job['error']}")
         if job["status"] != DONE or not job.get("report"):
             raise HTTPException(status_code=409, detail=f"the analysis is {job['status']}")
-        return Response(EXPORTERS[format](job["report"]), media_type=_MEDIA_TYPES[format])
+        return Response(
+            EXPORTERS[format](job["report"]),
+            media_type=_MEDIA_TYPES[format],
+            # The HTML report carries its own CSP; this header makes it binding when served.
+            headers={"Content-Security-Policy": _HTML_CSP} if format == "html" else None,
+        )
 
     @app.get("/repos/{owner}/{name}/history")
     def history(owner: str, name: str, _who: Client) -> list[dict[str, Any]]:

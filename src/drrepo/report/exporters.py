@@ -13,13 +13,14 @@ from typing import Any
 from urllib.parse import quote
 
 from drrepo.models import rule_key
+from drrepo.report.html import to_html
 from drrepo.report.synthesis import grade
 
 SARIF_SCHEMA_URL = "https://json.schemastore.org/sarif-2.1.0.json"
 _SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low": "note"}
 _SARIF_SECURITY_SEVERITY = {"critical": "9.5", "high": "7.5", "medium": "5.0", "low": "2.0"}
 _SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}
-FORMATS = ("json", "md", "sarif", "cdx", "summary")
+FORMATS = ("json", "md", "sarif", "cdx", "summary", "html")
 
 
 def to_json(report: dict[str, Any]) -> str:
@@ -508,6 +509,7 @@ EXPORTERS = {
     "sarif": to_sarif,
     "cdx": to_cyclonedx,
     "summary": to_summary,
+    "html": to_html,
 }
 # File extension per format; CycloneDX's convention is `.cdx.json`.
 EXTENSIONS = {
@@ -516,4 +518,5 @@ EXTENSIONS = {
     "sarif": "sarif",
     "cdx": "cdx.json",
     "summary": "summary.md",
+    "html": "html",
 }

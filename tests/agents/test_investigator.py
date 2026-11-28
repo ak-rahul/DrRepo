@@ -215,3 +215,16 @@ def test_tool_budget_answers_calls_over_the_limit_without_running_them():
         results[2],
     ]
     assert extract_trace(messages) == []
+
+
+def test_provider_errors_are_described_without_their_raw_message():
+    from drrepo.agents.investigator import describe_llm_error
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    secret = "Rate limit reached for model in organization `org_01abc` on tokens per day (TPD)"
+    described = describe_llm_error(RateLimitError(secret))
+    assert described == "RateLimitError (HTTP 429): the provider's daily quota is used up"
+    assert "org_" not in describe_llm_error(RateLimitError("org_01abc tokens per minute"))
+    assert describe_llm_error(ValueError("bad output")) == "ValueError: bad output"

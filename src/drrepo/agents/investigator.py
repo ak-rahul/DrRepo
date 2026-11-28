@@ -98,6 +98,30 @@ def summarize_recon_data(recon_data: dict[str, Any]) -> dict[str, Any]:
     return {name: _summarize_value(data) for name, data in recon_data.items()}
 
 
+_STATUS_REASONS = {
+    400: "the provider rejected the request",
+    401: "the provider rejected the API key",
+    403: "the provider refused access",
+    404: "the provider doesn't offer this model",
+    413: "the request is larger than the provider's per-request limit",
+    429: "rate limited by the provider",
+}
+
+
+def describe_llm_error(error: BaseException) -> str:
+    """A short, shareable reason for a failed LLM call. Reports end up in pull requests,
+    so the provider's raw message (account and organization ids) stays in the log."""
+    status = getattr(error, "status_code", None)
+    if status is None:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    if isinstance(status, int):
+        reason = _STATUS_REASONS.get(status, "the provider failed")
+        if status == 429 and "per day" in str(error).lower():
+            reason = "the provider's daily quota is used up"
+        return f"{type(error).__name__} (HTTP {status}): {reason}"
+    return f"{type(error).__name__}: {str(error)[:200]}"
+
+
 def retry_after_seconds(error: BaseException) -> float | None:
     """The provider's `retry-after` hint on a rate-limit error, in seconds, if it gave one."""
     headers = getattr(getattr(error, "response", None), "headers", None)
@@ -325,7 +349,7 @@ def investigate(
         ) from e
     except Exception as e:
         logger.error(f"Investigator for {category.value} failed: {e}")
-        raise InvestigationError(f"failed: {type(e).__name__}: {str(e)[:200]}") from e
+        raise InvestigationError(f"failed: {describe_llm_error(e)}") from e
 
     messages = result.get("messages", [])
     if llm.budget is not None:

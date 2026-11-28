@@ -45,7 +45,7 @@ Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or l
 
 ## Interfaces
 
-- **CLI**: `drrepo audit <url> [--format json,md,sarif,cdx,summary] [--fail-under 70]`, or `drrepo quick <url>` without LLM investigations. The exit code makes it usable as a CI gate. `drrepo diff <url> main <sha>` reports what a change made better or worse.
+- **CLI**: `drrepo audit <url> [--format json,md,sarif,cdx,summary,html] [--fail-under 70]`, or `drrepo quick <url>` without LLM investigations. The exit code makes it usable as a CI gate. `drrepo diff <url> main <sha>` reports what a change made better or worse.
 - **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score or, on pull requests, on what the change made worse; uploads SARIF to code scanning; and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
 - **Web UI**: audit a commit or compare two, with live progress, issue search and filters, one-click "mark as false positive" (writes a suppression), what the agent read for each of its findings, dependencies, suppressions, the tool-call trace and token use, a score trend, and every export.
 - **Organizations**: `drrepo org <owner>` audits an organization's repositories and writes a leaderboard and one SARIF log. See [docs/usage.md](docs/usage.md#auditing-an-organization).

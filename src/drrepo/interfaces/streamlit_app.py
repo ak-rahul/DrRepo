@@ -45,6 +45,7 @@ from drrepo.report.exporters import (
     to_summary,
 )
 from drrepo.report.history import repo_key
+from drrepo.report.html import to_html
 from drrepo.report.suppressions import REPOSITORY_FILE, SuppressionError, append_suppression
 from drrepo.report.synthesis import grade
 from drrepo.service import AnalysisService
@@ -404,6 +405,7 @@ def render_downloads(result: dict[str, Any], key: str) -> None:
         ("SARIF", to_sarif, "sarif", "application/sarif+json"),
         ("SBOM", to_cyclonedx, "cdx.json", "application/vnd.cyclonedx+json"),
         ("Summary", to_summary, "summary.md", "text/markdown"),
+        ("HTML", to_html, "html", "text/html"),
     ]
     for col, (name, export, ext, mime) in zip(st.columns(len(files)), files, strict=True):
         col.download_button(

@@ -113,6 +113,10 @@ After a deep investigation, the investigator's *new* issues are applied on top o
 
 **Identity.** Two issues are the same when category, source, rule id (the title for checks without a stable rule id, with `[unverified]`/`[disputed]` marks and occurrence counts removed) and file match; line numbers are ignored. README findings ignore the file, so renaming the README is not a fix.
 
+## HTML
+
+`--format html` writes `<name>.html`: one self-contained page (inline CSS, no scripts, light and dark themes, printable) with the score, categories with their summaries and notes, issues grouped by severity, suppressions, dependencies, the investigation plan and tool traces, collector status, provenance and token use. It needs no server and works offline. Repository text is HTML-escaped by the template engine, and a Content-Security-Policy in the page blocks scripts and remote loads, so a planted `<script>` or tracking image stays inert. The only links built from report data are the repository's GitHub URL and `osv.dev` advisory pages, each validated first. The web UI and the REST API (`/analyses/{id}/report?format=html`) offer the same file.
+
 ## CycloneDX 1.6 SBOM
 
 `--format cdx` writes `<name>.cdx.json`, built from `dependencies`: what the repository's manifests and lockfiles declare at the analyzed commit. Nothing is installed, so packages declared only as version ranges are absent (they are listed as `unpinned` in the dependency findings instead).

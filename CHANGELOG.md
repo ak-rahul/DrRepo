@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
+- Investigation notes no longer quote the LLM provider's raw error, which can include account or organization ids. They give the HTTP status and a short reason, and the full error stays in the log.
 - `Config` no longer shows API keys or tokens in its `repr`.
 - The web UI rendered text from the analyzed repository (issue titles and descriptions, summaries, notes, file names) as Markdown, so a planted `![](https://...)` could load a remote image (a tracking pixel) and `$...$` rendered as LaTeX. All such text is now escaped (`interfaces/ui_data.escape_markdown`); tables and code blocks show it as plain text.
 - `search_code` (an investigator tool whose regex the LLM chooses) could be stalled forever by a catastrophic-backtracking pattern, for example one planted by prompt injection in an analyzed repository. Matching now uses `regex` with a per-line timeout and a total time budget.
@@ -37,6 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - The external MCP server (`drrepo mcp`, its Docker Compose profile and the MCP client examples). MCP is now used only inside DrRepo: each investigator calls its tools through the in-memory tool server. Assistants can run the CLI (`drrepo audit --json`) instead.
 
 ### Added
+- HTML report (`--format html`): a self-contained page with no scripts and light and dark themes, also in the web UI's downloads and the API. Repository text is escaped by the template engine and the page carries a strict Content-Security-Policy.
 - Organization batch mode: `drrepo org <owner>` audits an organization's (or user's) newest-pushed public repositories on a bounded pool, and writes a Markdown/JSON leaderboard with each repository's change since the previous run, plus one SARIF log with a run per repository.
 - Observability: Prometheus metrics at `/metrics` (analyses, durations, collector results, tokens, jobs, breaker state), `LOG_FORMAT=json`, and OpenTelemetry traces (the `otel` extra and `OTEL_EXPORTER_OTLP_ENDPOINT`) with a span per collector and category in one trace per analysis.
 - Clone cache by commit (`CLONE_CACHE_TTL_SECONDS`, off by default): `git ls-remote` resolves the commit, and a cached clone of it is copied out instead of cloning again.
