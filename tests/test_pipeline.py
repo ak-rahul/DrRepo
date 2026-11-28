@@ -527,38 +527,3 @@ def test_parallel_investigations_can_be_capped():
         other.start()
         other.join()
     assert acquired == [False]  # the one slot was held
-
-
-def test_node_spans_join_the_analysis_trace(collectors):
-    """Collector and category spans run on LangGraph's worker threads, yet share one trace."""
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
-    from drrepo.telemetry import current_context, span
-
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = provider.get_tracer("test")
-    with patch("drrepo.telemetry._tracer", lambda: tracer):
-        ctx = _ctx(SHALLOW)
-        with span("drrepo.analysis", repo="octo/demo") as root:
-            ctx.trace_parent = current_context()
-            Workflow().run(REPO, ctx)
-    spans = exporter.get_finished_spans()
-    names = Counter(s.name for s in spans)
-    assert names["drrepo.analysis"] == 1 and names["drrepo.category"] == 5
-    assert names["drrepo.collector"] == len(COLLECTORS)
-    root_id = root.get_span_context().span_id
-    children = [s for s in spans if s.name != "drrepo.analysis"]
-    assert all(s.parent is not None and s.parent.span_id == root_id for s in children)
-    security = next(s for s in spans if s.attributes.get("category") == "security")
-    assert security.attributes["depth"] == "shallow" and "score" in security.attributes
-    assert {s.attributes["status"] for s in spans if s.name == "drrepo.collector"} <= {
-        "ok",
-        "skipped",
-        "error",
-    }
-    del trace  # the global provider is never touched

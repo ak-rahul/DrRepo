@@ -58,7 +58,7 @@ Other commands:
 uv run drrepo ui [--port 8501] [--headless]         # Streamlit UI
 uv run drrepo health [--json]                       # LLM provider / GitHub / OSV connectivity
 uv run drrepo doctor [--offline]                    # full local diagnostics
-uv run drrepo serve [--port 8000]                   # REST API (see below); `health-api` still works
+uv run drrepo serve [--port 8000]                   # REST API (see Local API below); `health-api` still works
 ```
 
 ## Web UI
@@ -102,50 +102,39 @@ Reuse one `AnalysisService` for many analyses. The circuit breaker and dependenc
 
 ```bash
 docker compose up                                   # UI on :8501
-docker compose --profile api up                     # + REST API :8000 (SQLite store; set API_KEYS)
 docker compose run --rm ui drrepo audit https://github.com/psf/requests --format md
 ```
 
 The image runs as a non-root user, contains `git` and semgrep, and reads credentials from `.env` at runtime. None are baked in. `reports/` and `logs/` are mounted volumes. On Linux, make them writable by uid 1000 (`sudo chown 1000:1000 reports logs`); if history can't be written, analyses still complete.
 
-Ports are published on `127.0.0.1` only. The UI has no authentication, and the REST API serves only callers with an `API_KEYS` key from inside the container. To reach them from another machine, put a reverse proxy with authentication in front rather than changing the bind address.
+The UI's port is published on `127.0.0.1` only, because the UI has no authentication.
 
-## REST API
+## Local API
 
-`drrepo serve` runs analyses as background jobs for a team or a dashboard:
+`drrepo serve` runs analyses as background jobs for scripts and tools on this machine:
 
 ```bash
-API_KEYS=change-me STORE_BACKEND=sqlite drrepo serve --host 0.0.0.0 --port 8000
+drrepo serve                                    # http://127.0.0.1:8000 (STORE_BACKEND=sqlite keeps jobs across restarts)
 
-curl -X POST localhost:8000/analyses -H "X-API-Key: change-me" \
-     -H "content-type: application/json" \
+curl -X POST localhost:8000/analyses -H "content-type: application/json" \
      -d '{"repo_url": "https://github.com/pallets/itsdangerous", "deep": false}'
 # 202 {"id": "...", "status": "queued", "links": {"self": "/analyses/<id>"}}
-curl localhost:8000/analyses/<id> -H "X-API-Key: change-me"                  # status, progress, summary
-curl "localhost:8000/analyses/<id>/report?format=sarif" -H "X-API-Key: change-me"
+curl localhost:8000/analyses/<id>                               # status, progress, summary
+curl "localhost:8000/analyses/<id>/report?format=html" > report.html
 ```
 
 | Endpoint | Returns |
 |---|---|
 | `POST /analyses` | `{repo_url, ref?, deep?, description?}` → 202 with a job id |
-| `GET /analyses`, `GET /analyses/{id}` | your jobs: `queued`, `running` (with the latest progress message), `done` (with a score summary) or `failed` (with the error) |
-| `GET /analyses/{id}/report?format=` | the finished report as `json`, `md`, `sarif`, `cdx` or `summary` |
+| `GET /analyses`, `GET /analyses/{id}` | jobs: `queued`, `running` (with the latest progress message), `done` (with a score summary) or `failed` (with the error) |
+| `GET /analyses/{id}/report?format=` | the finished report as `json`, `md`, `sarif`, `cdx`, `summary` or `html` |
 | `GET /repos/{owner}/{name}/history` | recorded runs of a repository |
 | `GET /repos/{owner}/{name}/report` | its newest stored report (`STORE_BACKEND=sqlite` only) |
-| `GET /badge/{owner}/{name}` | a [shields.io endpoint](https://shields.io/badges/endpoint-badge) badge: `![DrRepo](https://img.shields.io/endpoint?url=https://your-host/badge/owner/name)` |
 | `GET /health`, `/health/live`, `/health/ready` | dependency checks, liveness, readiness |
 
-**Authentication.** With `API_KEYS` (comma-separated), every endpoint except health and badges needs a key as `X-API-Key` or `Authorization: Bearer`, and each key sees only its own jobs. Jobs record a fingerprint of the key, never the key. Without keys, only clients on the same machine are served; a request with `X-Forwarded-For`, `Forwarded` or `X-Real-IP` never counts as local, so a reverse proxy on the same host can't open the API to everyone.
+It serves this machine only: a request from another host, or one carrying proxy headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`), gets 403. At most `API_WORKERS` analyses run at once and `API_MAX_QUEUED` wait. With `STORE_BACKEND=sqlite`, jobs live in the database with the runs and full reports, so a restart re-queues whatever was queued or running; with the default JSON store, jobs are kept in memory.
 
-**Limits.** `API_RATE_LIMIT_PER_HOUR` analyses per client (429 with `Retry-After`), `API_MAX_QUEUED` waiting jobs (503), and `API_WORKERS` running at once. Every analysis clones a repository and may spend LLM tokens, so keep them small.
-
-**Jobs and restarts.** With `STORE_BACKEND=sqlite`, jobs live in the database with the runs and full reports, so a restart re-queues whatever was queued or running. With the default JSON store, jobs are kept in memory and lost on restart, and no full reports are stored.
-
-### Metrics, logs and traces
-
-- `GET /metrics` (with the same authentication) serves Prometheus text: analyses by outcome, analysis time, collector results by status, LLM tokens by budget line, API jobs waiting or running, and whether the LLM circuit breaker is open.
-- `LOG_FORMAT=json` writes one JSON object per log line, for log shippers.
-- With the `otel` extra and `OTEL_EXPORTER_OTLP_ENDPOINT`, every analysis is one trace (`drrepo.analysis`), with a span per collector and per category (depth, score, issues, tokens).
+`LOG_FORMAT=json` writes one JSON object per log line, for any of the commands.
 
 ## Auditing an organization
 

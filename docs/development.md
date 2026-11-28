@@ -56,7 +56,7 @@ uv run drrepo eval --deep                # with an LLM key: compare with evals/b
 It prints a Markdown table of scores per category (with deltas), findings added and removed, deep categories, tool calls, tokens and time.
 - **Regressions:** a score drop beyond `--tolerance` (default 5 points), a category that is no longer assessed, or a failed case is a regression. It is listed under the table and gives exit code 3.
 - **Why a tolerance:** even at a pinned commit, OSV advisories and GitHub metadata are live, so some drift is expected over time.
-- **Precision:** to measure how often agent findings are right, record verdicts in `evals/labels.toml`, using the keys the table prints. Unlabeled findings are counted, never guessed.
+- **Precision:** to measure how often agent findings are right, run `drrepo eval --deep` (it keeps each case's full report in `reports/eval/`), then `drrepo label`. It shows each unlabeled agent finding with a GitHub link to the cited line at the analyzed commit and the tool output the agent read; you answer true positive, false positive, or skip, and every answer is saved to `evals/labels.toml` at once. Unlabeled findings are counted, never guessed.
 - **What changed:** each result records the report's `provenance` (prompt hashes, model, scanner versions), and the table lists any change since the baseline, such as "instructions changed: security" or "ruff 0.17.6 -> 0.18.0", so drift can be traced to its cause.
 - **Environment problems:** a collector that failed (most often an unauthenticated GitHub API rate limit) makes a case "not comparable" instead of producing misleading score deltas. `--update-baseline` refuses to record a degraded run. Set `GH_TOKEN` when running the eval.
 

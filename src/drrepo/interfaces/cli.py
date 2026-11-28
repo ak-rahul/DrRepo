@@ -8,8 +8,9 @@
     drrepo health      [--json]               connectivity of LLM provider, GitHub, OSV.dev
     drrepo doctor                             full local diagnostics
     drrepo eval        [--deep] [--update-baseline]   run the evaluation set vs. its baseline
+    drrepo label       [reports/eval]          label agent findings for eval precision
     drrepo baseline    <url> [-o .drrepo.toml]         accept current findings as suppressions
-    drrepo serve       [--port 8000]          REST API: analysis jobs, history, badges, health
+    drrepo serve       [--port 8000]          local API: analysis jobs, history, health
 
 `drrepo <url>` is shorthand for `drrepo audit <url>`; `analyze` is an alias of `audit`.
 
@@ -51,6 +52,7 @@ SUBCOMMANDS = {
     "eval",
     "baseline",
     "org",
+    "label",
 }
 
 
@@ -511,6 +513,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
         read_baseline,
         render_markdown,
         run_cases,
+        save_reports,
         write_baseline,
     )
     from drrepo.service import AnalysisService
@@ -538,11 +541,18 @@ def cmd_eval(args: argparse.Namespace) -> int:
     baseline_path = Path(args.baseline or f"evals/baseline{'-deep' if args.deep else ''}.json")
 
     service = AnalysisService(config)
+    reports: dict[str, dict[str, Any]] = {}
+
+    def analyze(case: Any) -> dict[str, Any]:
+        report = service.analyze(case.url, ref=case.ref, deep=args.deep, record_history=False)
+        reports[case.name] = report
+        return report
+
     results = run_cases(
-        lambda case: service.analyze(case.url, ref=case.ref, deep=args.deep, record_history=False),
-        cases,
-        progress=lambda message: print(f"  · {message}", file=sys.stderr),
+        analyze, cases, progress=lambda message: print(f"  · {message}", file=sys.stderr)
     )
+    if args.reports_dir:
+        save_reports(Path(args.reports_dir), reports)
     if args.update_baseline:
         try:
             write_baseline(baseline_path, results)
@@ -558,6 +568,65 @@ def cmd_eval(args: argparse.Namespace) -> int:
     if args.output:
         Path(args.output).write_text(markdown, encoding="utf-8")
     return EXIT_FAIL_UNDER if comparison.regressed else EXIT_OK
+
+
+def cmd_label(args: argparse.Namespace) -> int:
+    """Walk through unlabeled agent findings and record your verdicts in labels.toml."""
+    from drrepo.evaluation import (
+        load_labels,
+        load_reports,
+        permalink,
+        unlabeled_agent_findings,
+        write_labels,
+    )
+    from drrepo.interfaces.ui_data import evidence_steps
+
+    labels_path = Path(args.labels)
+    try:
+        labels = load_labels(labels_path) if labels_path.exists() else {}
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    reports = load_reports(Path(args.reports))
+    if not reports:
+        print(
+            f"No reports in {args.reports}. Run `drrepo eval --deep` first: it saves them there.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    tasks = unlabeled_agent_findings(reports, labels)
+    if not tasks:
+        print("Every agent finding in these reports is labeled.")
+        return EXIT_OK
+    print(f"{len(tasks)} unlabeled agent finding(s). Check the cited code, then answer:")
+    print("  t = true positive   f = false positive   s = skip   q = quit\n")
+    done = 0
+    for number, task in enumerate(tasks, 1):
+        issue = task.issue
+        print(f"[{number}/{len(tasks)}] {task.case}: [{issue.get('severity')}] {issue['title']}")
+        if link := permalink(task.report, issue):
+            print(f"  {link}")
+        print(f"  {issue.get('description', '')}")
+        for step in evidence_steps(issue, task.report)[:2]:
+            print(f"  -- {step['tool']} {json.dumps(step['tool_input'])[:120]}")
+            for line in str(step["observation"]).splitlines()[:12]:
+                print(f"     {line}")
+        while True:
+            try:
+                answer = input("  verdict [t/f/s/q]: ").strip().lower()
+            except EOFError:
+                answer = "q"
+            if answer in ("t", "f", "s", "q"):
+                break
+        if answer == "q":
+            break
+        if answer in ("t", "f"):
+            labels[task.key] = "true_positive" if answer == "t" else "false_positive"
+            write_labels(labels_path, labels)  # saved after every answer
+            done += 1
+        print()
+    print(f"{done} label(s) written to {labels_path}.")
+    return EXIT_OK
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -745,14 +814,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--tolerance", type=float, default=5.0, help="allowed score drop before a regression"
     )
     p.add_argument("--update-baseline", action="store_true", help="record this run as the baseline")
+    p.add_argument(
+        "--reports-dir",
+        default="reports/eval",
+        help="keep each case's full report here, for `drrepo label` ('' to skip)",
+    )
     p.add_argument("-o", "--output", help="also write the Markdown table to this file")
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser(
+        "label", parents=[common], help="label agent findings of the last eval for precision"
+    )
+    p.add_argument(
+        "reports", nargs="?", default="reports/eval", help="reports saved by `drrepo eval`"
+    )
+    p.add_argument("--labels", default="evals/labels.toml", help="labels file to update")
+    p.set_defaults(func=cmd_label)
 
     p = sub.add_parser(
         "serve",
         aliases=["health-api"],
         parents=[common],
-        help="REST API: analysis jobs, history, badges and health endpoints",
+        help="local API (this machine only): analysis jobs, history and health endpoints",
     )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)

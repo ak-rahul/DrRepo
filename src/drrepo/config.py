@@ -103,8 +103,6 @@ class Config:
     # Application settings
     log_level: str = "INFO"
     log_format: str = "text"  # "json": one JSON object per line
-    # OpenTelemetry traces over OTLP/HTTP (needs the otel extra; telemetry.py).
-    otel_endpoint: str = ""
 
     # Clone/collector limits
     clone_timeout_seconds: int = 60
@@ -193,12 +191,9 @@ class Config:
     store_backend: str = "json"
     store_path: str = ""
 
-    # REST API (`drrepo serve`, interfaces/api.py). With no API keys, only
-    # clients on this machine may use the analysis endpoints.
-    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    # Local REST API (`drrepo serve`, interfaces/api.py): this machine only.
     api_workers: int = 2
     api_max_queued: int = 50
-    api_rate_limit_per_hour: int = 30
 
     def __post_init__(self) -> None:
         """Reject values that would only fail later, deep inside a run.
@@ -274,7 +269,6 @@ class Config:
             ),
             log_level=_env_str("LOG_LEVEL", d.log_level).upper(),
             log_format=_env_str("LOG_FORMAT", d.log_format).lower(),
-            otel_endpoint=_env_str("OTEL_EXPORTER_OTLP_ENDPOINT", d.otel_endpoint),
             clone_timeout_seconds=_env_int("CLONE_TIMEOUT_SECONDS", d.clone_timeout_seconds),
             clone_max_size_mb=_env_int("CLONE_MAX_SIZE_MB", d.clone_max_size_mb),
             clone_cache_ttl_seconds=_env_int("CLONE_CACHE_TTL_SECONDS", d.clone_cache_ttl_seconds),
@@ -344,10 +338,8 @@ class Config:
             enable_score_history=_env_bool("ENABLE_SCORE_HISTORY", d.enable_score_history),
             store_backend=_env_str("STORE_BACKEND", d.store_backend).lower(),
             store_path=_env_str("STORE_PATH", d.store_path),
-            api_keys=_env_list("API_KEYS"),
             api_workers=_env_int("API_WORKERS", d.api_workers),
             api_max_queued=_env_int("API_MAX_QUEUED", d.api_max_queued),
-            api_rate_limit_per_hour=_env_int("API_RATE_LIMIT_PER_HOUR", d.api_rate_limit_per_hour),
             suppressions_file=_env_str("SUPPRESSIONS_FILE", d.suppressions_file),
             trust_repo_suppressions=_env_bool("TRUST_REPO_SUPPRESSIONS", d.trust_repo_suppressions),
         )
@@ -401,7 +393,6 @@ _MUST_BE_POSITIVE = frozenset(
         "investigation_context_tokens",
         "api_workers",
         "api_max_queued",
-        "api_rate_limit_per_hour",
         "clone_cache_max_mb",
     }
 )

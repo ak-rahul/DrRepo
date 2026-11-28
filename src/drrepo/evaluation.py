@@ -352,3 +352,76 @@ def read_baseline(path: Path) -> dict[str, dict[str, Any]]:
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, dict) else {}
+
+
+# ------------------------------------------------------------- labeling ---
+
+_LABELS_HEADER = """# Human labels for findings, used by `drrepo eval` to measure precision.
+#
+# Key format (printed by `drrepo eval` for every finding):
+#   "<case>|<category>|<source>|<rule or title>|<file>"
+# Verdicts: "true_positive" or "false_positive". Only label findings you have
+# checked by reading the cited code. Unlabeled findings are reported as such.
+# `drrepo label` walks you through the unlabeled agent findings of the last
+# `drrepo eval --deep` run and writes this file.
+
+[labels]
+"""
+
+
+def save_reports(directory: Path, reports: dict[str, dict[str, Any]]) -> None:
+    """Keep each case's full report (`<case>.json`) for `drrepo label`."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for case, report in reports.items():
+        (directory / f"{case}.json").write_text(
+            json.dumps(report, indent=2, default=str), encoding="utf-8"
+        )
+
+
+def load_reports(directory: Path) -> dict[str, dict[str, Any]]:
+    """Reports saved by `save_reports`, by case name."""
+    return {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.json"))
+    }
+
+
+@dataclass
+class LabelTask:
+    key: str
+    case: str
+    issue: dict[str, Any]
+    report: dict[str, Any]
+
+
+def unlabeled_agent_findings(
+    reports: dict[str, dict[str, Any]], labels: dict[str, str]
+) -> list[LabelTask]:
+    """Agent findings without a verdict, severe first, one task per key."""
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    tasks: dict[str, LabelTask] = {}
+    for case, report in reports.items():
+        for issue in report.get("issues", []):
+            if not str(issue.get("source", "")).startswith(AGENT_SOURCE_PREFIX):
+                continue
+            key = finding_key(case, issue)
+            if key not in labels and key not in tasks:
+                tasks[key] = LabelTask(key, case, issue, report)
+    return sorted(tasks.values(), key=lambda t: (order.get(str(t.issue.get("severity")), 4), t.key))
+
+
+def permalink(report: dict[str, Any], issue: dict[str, Any]) -> str | None:
+    """The cited line on GitHub, at the exact commit analyzed."""
+    repo = report.get("repository") or {}
+    url, sha, path = repo.get("url"), repo.get("commit_sha"), issue.get("file")
+    if not (url and sha and path):
+        return None
+    line = f"#L{issue['line']}" if issue.get("line") else ""
+    return f"{url}/blob/{sha}/{path}{line}"
+
+
+def write_labels(path: Path, labels: dict[str, str]) -> None:
+    """Rewrite the labels file: the explanatory header, then every verdict, sorted."""
+    body = "".join(f"{json.dumps(key)} = {json.dumps(labels[key])}\n" for key in sorted(labels))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_LABELS_HEADER + body, encoding="utf-8", newline="\n")

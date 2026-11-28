@@ -18,7 +18,6 @@ import dataclasses
 import json
 import sqlite3
 import threading
-import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -28,7 +27,6 @@ from typing import Any
 from drrepo.agents.llm import LLMRuntime, TokenBudget, build_chat_model
 from drrepo.config import Config
 from drrepo.log import logger
-from drrepo.metrics import Metrics
 from drrepo.models import RepoRef
 from drrepo.pipeline import ProgressCallback, RunContext, Workflow
 from drrepo.recon.clone import validate_ref
@@ -40,7 +38,6 @@ from drrepo.report.store import ReportStore, attach_history, open_store
 from drrepo.report.suppressions import Suppression
 from drrepo.report.suppressions import load_file as load_suppression_file
 from drrepo.resilience import CircuitBreaker
-from drrepo.telemetry import configure_tracing, current_context, set_attributes, span
 
 MAX_REPORTS_IN_MEMORY = 20
 _UNSET: Any = object()
@@ -60,8 +57,6 @@ class AnalysisService:
         self.config = config
         # Score history, full reports where the backend keeps them, and API jobs.
         self.store = store if store is not None else open_store(config)
-        self.metrics = Metrics()
-        configure_tracing(config)  # once per process; a no-op without an OTLP endpoint
         self.workflow = workflow or Workflow()
         self.role_clients: dict[str, Any] = {}
         if llm_client is _UNSET:
@@ -158,20 +153,7 @@ class AnalysisService:
             context.deep_allowed = frozenset(deep_categories)
         if use_history:
             context.deep_investigation_tokens = self._deep_estimate(repo, config)
-        started = time.monotonic()
-        with span("drrepo.analysis", repo=repo.full_name, ref=ref or "") as current:
-            context.trace_parent = current_context()
-            try:
-                report = self.workflow.run(repo, context, description, ref)
-            except Exception:
-                self.metrics.inc("drrepo_analyses_total", outcome="error")
-                raise
-            set_attributes(
-                current,
-                commit=(report.get("repository") or {}).get("commit_sha") or "",
-                overall_score=report.get("overall_score", 0.0),
-            )
-        self.metrics.record_analysis(report, time.monotonic() - started)
+        report = self.workflow.run(repo, context, description, ref)
 
         if use_history:
             report = attach_history(report, self.store)

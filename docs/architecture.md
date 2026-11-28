@@ -40,7 +40,7 @@ src/drrepo/
                     tools (all investigator tools + build_tools), analysts/ (one per category),
                     prompts (loader) + instructions/*.md (every agent's job, as documents)
   report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX), diff (two reports compared)
-  interfaces/       cli, streamlit_app, ui_data, api (REST API), health (checks + router)
+  interfaces/       cli, streamlit_app, ui_data, api (local API), health (checks + router)
   jobs.py           background analysis jobs for the API
 ```
 
@@ -151,7 +151,7 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 **Data that leaves the machine:** public repository metadata to GitHub, package names and versions to OSV.dev and deps.dev, and trimmed recon data plus tool outputs to the configured LLM provider. Secrets are never reported by value.
 
-**Exposed services:** the web UI has no authentication. The REST API needs an `API_KEYS` key, or without keys serves only loopback callers that carry no proxy headers; it rate-limits and caps its queue per `API_*`. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
+**Exposed services:** the web UI has no authentication and binds to localhost. The local API serves only loopback callers without proxy headers, and caps its workers and queue (`API_*`). They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
 
 **Scanner limits:** besides its timeout, each scanner and `git log` runs under `prlimit` on Linux (`recon/limits.py`): a file-size cap, and an opt-in address-space cap. The prefix replaces `preexec_fn`, which is unsafe in the threaded collector fan-out.
 
@@ -161,7 +161,7 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 - **cli**: argparse subcommands. Progress goes to stderr and the report to stdout, so `--json` can be piped.
 - **streamlit_app**: runs the analysis on a worker thread that writes to a plain `AnalysisJob` object. `st.fragment(run_every=1)` shows progress and reruns once when the job finishes. `main()` runs only under `__main__`.
-- **api**: the REST API (`drrepo serve`, FastAPI). `POST /analyses` validates the URL and ref, then hands the job to `jobs.JobQueue`: a bounded thread pool whose job state (status, progress, summary, report) lives in the store, so a SQLite-backed queue resumes after a restart. Authentication, the per-client `RateLimiter` and the queue cap run before any work is queued.
+- **api**: the local API (`drrepo serve`, FastAPI; loopback callers only). `POST /analyses` validates the URL and ref, then hands the job to `jobs.JobQueue`: a bounded thread pool whose job state (status, progress, summary, report) lives in the store, so a SQLite-backed queue resumes after a restart.
 - **health**: token-free connectivity checks and the health `router` the API mounts (sync endpoints, lazy config).
 
-**Operations.** `metrics.Metrics` counts analyses, durations, collector results and tokens in `AnalysisService`; the API serves them at `/metrics`. `telemetry.py` makes OpenTelemetry spans (a no-op without the `otel` extra); because LangGraph runs nodes on worker threads, the analysis span's context travels in `RunContext.trace_parent`. `batch.py` (`drrepo org`) lists an owner's repositories and runs them on a bounded pool over one service.
+**Operations.** `batch.py` (`drrepo org`) lists an owner's repositories and runs them on a bounded pool over one service.

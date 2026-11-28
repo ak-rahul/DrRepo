@@ -85,24 +85,21 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 | `ENABLE_SCORE_HISTORY` | `true` | records each run so the next one shows deltas |
 | `STORE_BACKEND` | `json` | `json`: scores in `reports/history.json` (20 runs per repository; API jobs in memory). `sqlite`: scores, full reports (200 runs per repository) and API jobs in `reports/drrepo.db`, safe for several processes |
 | `STORE_PATH` | backend default | another file for the store |
+| `SUPPRESSIONS_FILE` | empty | suppression file (`.drrepo.toml` format) applied to every analysis |
+| `TRUST_REPO_SUPPRESSIONS` | `false` | also honor the analyzed repository's own `.drrepo.toml`. Enable only for your own repositories: otherwise a repository could hide its own findings |
 
-## REST API (`drrepo serve`)
+## Local API (`drrepo serve`)
 
 | Variable | Default | Effect |
 |---|---|---|
-| `API_KEYS` | — | comma-separated keys. Without any, only clients on the same machine are served |
 | `API_WORKERS` | `2` | analyses running at once |
 | `API_MAX_QUEUED` | `50` | waiting analyses before `POST /analyses` returns 503 |
-| `API_RATE_LIMIT_PER_HOUR` | `30` | analyses per client per hour (sliding window) |
-| `SUPPRESSIONS_FILE` | empty | suppression file (`.drrepo.toml` format) applied to every analysis |
-| `TRUST_REPO_SUPPRESSIONS` | `false` | also honor the analyzed repository's own `.drrepo.toml`. Enable only for your own repositories: otherwise a repository could hide its own findings |
 
 ## Logging
 
 | Variable | Default | Notes |
 |---|---|---|
 | `LOG_FORMAT` | `text` | `json`: one JSON object per line (`timestamp`, `level`, `logger`, `message`, `exception`) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | with the `otel` extra (`uv sync --extra otel`), export traces over OTLP/HTTP, e.g. `http://localhost:4318` |
 | `LOG_LEVEL` | `INFO` | applies to the log file (`logs/app.log`, override with `--log-file`; `--log-file ''` disables it). The CLI console shows only warnings unless `-v` is passed |
 
 ## Tuning recipes

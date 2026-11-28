@@ -230,3 +230,93 @@ def test_lite_categories_are_listed():
     report = _report()
     report["category_scores"]["documentation"]["investigation_depth"] = "lite"
     assert summarize(CASE, report, 1)["deep_categories"] == ["documentation (lite)", "security"]
+
+
+def _agent_report(case_url="https://github.com/octo/demo"):
+    return {
+        "repository": {"url": case_url, "commit_sha": "a" * 40},
+        "category_scores": {
+            "security": {
+                "investigation_trace": [
+                    {
+                        "tool": "read_file",
+                        "tool_input": {"path": "app.py"},
+                        "observation": "DEBUG = True",
+                    }
+                ]
+            }
+        },
+        "issues": [
+            {
+                "severity": "low",
+                "category": "security",
+                "title": "Minor",
+                "source": "investigator:security",
+                "rule_id": "agent-finding",
+                "file": "lib.py",
+                "line": None,
+            },
+            {
+                "severity": "high",
+                "category": "security",
+                "title": "Debug on in production",
+                "description": "app.py sets DEBUG",
+                "source": "investigator:security",
+                "rule_id": "agent-finding",
+                "file": "app.py",
+                "line": 1,
+            },
+            {
+                "severity": "high",
+                "category": "security",
+                "title": "B602",
+                "source": "bandit",
+                "rule_id": "B602",
+                "file": "x.py",
+                "line": 2,
+            },
+        ],
+    }
+
+
+def test_labeling_tasks_round_trip(tmp_path):
+    from drrepo.evaluation import (
+        load_labels,
+        load_reports,
+        permalink,
+        save_reports,
+        unlabeled_agent_findings,
+        write_labels,
+    )
+
+    save_reports(tmp_path / "reports", {"demo": _agent_report()})
+    reports = load_reports(tmp_path / "reports")
+    tasks = unlabeled_agent_findings(reports, {})
+    assert [t.issue["title"] for t in tasks] == ["Debug on in production", "Minor"]  # severe first
+    assert permalink(reports["demo"], tasks[0].issue) == (
+        "https://github.com/octo/demo/blob/" + "a" * 40 + "/app.py#L1"
+    )
+    path = tmp_path / "labels.toml"
+    write_labels(path, {tasks[0].key: "true_positive", 'odd|"quoted"|key': "false_positive"})
+    labels = load_labels(path)
+    assert (
+        labels[tasks[0].key] == "true_positive" and labels['odd|"quoted"|key'] == "false_positive"
+    )
+    assert path.read_text(encoding="utf-8").startswith("# Human labels")
+    assert [t.issue["title"] for t in unlabeled_agent_findings(reports, labels)] == ["Minor"]
+
+
+def test_label_command_records_answers_as_it_goes(tmp_path, monkeypatch, capsys):
+    from drrepo.evaluation import load_labels, save_reports
+    from drrepo.interfaces import cli
+
+    save_reports(tmp_path / "reports", {"demo": _agent_report()})
+    labels = tmp_path / "labels.toml"
+    answers = iter(["x", "f", "q"])  # an invalid answer is asked again; q stops early
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    argv = ["label", str(tmp_path / "reports"), "--labels", str(labels), "--log-file", ""]
+    assert cli.main(argv) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "2 unlabeled agent finding(s)" in out and "DEBUG = True" in out
+    assert list(load_labels(labels).values()) == ["false_positive"]
+    assert cli.main(["label", str(tmp_path / "none"), "--log-file", ""]) == cli.EXIT_USAGE

@@ -1,3 +1,4 @@
+import json
 import logging
 
 from drrepo.log import configure_logging, logger
@@ -28,3 +29,14 @@ class TestLogging:
         finally:
             for handler in list(logger.handlers):
                 logger.removeHandler(handler)
+
+
+def test_json_log_lines():
+    from drrepo.log import JsonFormatter
+
+    record = logging.LogRecord(
+        "drrepo", logging.WARNING, __file__, 1, "clone %s failed", ("x",), None
+    )
+    entry = json.loads(JsonFormatter().format(record))
+    assert entry["level"] == "WARNING" and entry["message"] == "clone x failed"
+    assert entry["logger"] == "drrepo" and entry["timestamp"].endswith("+00:00")

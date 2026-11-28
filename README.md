@@ -50,7 +50,7 @@ Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or l
 - **Web UI**: audit a commit or compare two, with live progress, issue search and filters, one-click "mark as false positive" (writes a suppression), what the agent read for each of its findings, dependencies, suppressions, the tool-call trace and token use, a score trend, and every export.
 - **Organizations**: `drrepo org <owner>` audits an organization's repositories and writes a leaderboard and one SARIF log. See [docs/usage.md](docs/usage.md#auditing-an-organization).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
-- **REST API**: `drrepo serve` queues analyses as background jobs (API keys, per-key rate limits), serves score history, report exports and shields.io badges, plus health checks. Prometheus metrics at `/metrics`, JSON logs and optional OpenTelemetry traces. See [docs/usage.md](docs/usage.md#rest-api).
+- **Local API**: `drrepo serve` queues analyses as background jobs for scripts on this machine, and serves score history, report exports and health checks. See [docs/usage.md](docs/usage.md#local-api).
 
 ## How it works
 

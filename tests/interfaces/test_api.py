@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from drrepo.config import Config
-from drrepo.interfaces.api import RateLimiter, create_app
+from drrepo.interfaces.api import create_app
 from drrepo.jobs import DONE, FAILED, JobQueue, new_job
 from drrepo.report.store import JsonFileStore, SQLiteStore, attach_history
 from tests.report.conftest import report_dict  # noqa: F401 - fixture
@@ -80,20 +80,17 @@ def test_an_analysis_runs_as_a_job_and_lands_in_history(tmp_path, report_dict): 
         [run] = api.get("/repos/octo/demo/history").json()
         assert run["repo_key"] == URL
         assert api.get("/repos/octo/demo/report").json()["overall_score"] == run["overall_score"]
-        badge = api.get("/badge/octo/demo").json()
-        assert badge["schemaVersion"] == 1 and badge["message"].endswith(
-            f"({job['summary']['grade']})"
-        )
-        assert api.get("/badge/octo/other").json()["message"] == "not analyzed"
+        html = api.get(f"/analyses/{job_id}/report", params={"format": "html"})
+        assert html.headers["content-security-policy"].startswith("default-src 'none'")
         assert api.get("/health/live").text == "alive"
 
 
-def test_without_keys_only_local_clients_are_served(tmp_path, report_dict):  # noqa: F811
+def test_only_local_callers_are_served(tmp_path, report_dict):  # noqa: F811
     remote, _, _ = _client(tmp_path, report_dict, client=REMOTE)
     with remote:
         assert remote.post("/analyses", json={"repo_url": URL}).status_code == 403
-        assert remote.get("/badge/octo/demo").status_code == 200  # badges are public
-        assert remote.get("/health/live").status_code == 200
+        assert remote.get("/analyses").status_code == 403
+        assert remote.get("/health/live").status_code == 403
     local, _, _ = _client(tmp_path, report_dict)
     with local:
         # A reverse proxy on this host forwards remote callers: never treated as local.
@@ -103,24 +100,7 @@ def test_without_keys_only_local_clients_are_served(tmp_path, report_dict):  # n
         assert proxied.status_code == 403
 
 
-def test_api_keys_authenticate_and_separate_jobs(tmp_path, report_dict):  # noqa: F811
-    api, _, store = _client(tmp_path, report_dict, client=REMOTE, api_keys=("alpha", "beta"))
-    with api:
-        assert api.post("/analyses", json={"repo_url": URL}).status_code == 401
-        wrong = api.post("/analyses", json={"repo_url": URL}, headers={"X-API-Key": "nope"})
-        assert wrong.status_code == 401
-        alpha = {"X-API-Key": "alpha"}
-        job_id = api.post("/analyses", json={"repo_url": URL}, headers=alpha).json()["id"]
-        _wait(api, job_id, alpha)
-        beta = {"Authorization": "Bearer beta"}
-        assert api.get(f"/analyses/{job_id}", headers=beta).status_code == 404
-        assert api.get("/analyses", headers=beta).json() == []
-        assert len(api.get("/analyses", headers=alpha).json()) == 1
-    # Jobs record a fingerprint of the key, never the key.
-    assert "alpha" not in str(store.job(job_id))
-
-
-def test_bad_input_rate_limit_and_full_queue(tmp_path, report_dict):  # noqa: F811
+def test_bad_input_and_a_full_queue(tmp_path, report_dict):  # noqa: F811
     gate = threading.Event()
     store = SQLiteStore(tmp_path / "drrepo.db")
     service = FakeService(store, report_dict, gate=gate)
@@ -129,7 +109,6 @@ def test_bad_input_rate_limit_and_full_queue(tmp_path, report_dict):  # noqa: F8
         report_dict,
         store=store,
         service=service,
-        api_rate_limit_per_hour=3,
         api_max_queued=1,
     )
     with api:
@@ -141,8 +120,6 @@ def test_bad_input_rate_limit_and_full_queue(tmp_path, report_dict):  # noqa: F8
         assert api.post("/analyses", json={"repo_url": URL}).status_code == 202  # queued
         full = api.post("/analyses", json={"repo_url": URL})
         assert full.status_code == 503 and full.headers["retry-after"] == "60"
-        limited = api.post("/analyses", json={"repo_url": URL})
-        assert limited.status_code == 429 and int(limited.headers["retry-after"]) > 0
         gate.set()
 
 
@@ -183,32 +160,7 @@ def test_json_store_keeps_jobs_in_memory_and_no_reports(tmp_path, report_dict): 
         assert len(api.get("/repos/octo/demo/history").json()) == 1
 
 
-def test_rate_limiter_slides():
-    now = [0.0]
-    limiter = RateLimiter(2, clock=lambda: now[0])
-    assert limiter.acquire("a") is None and limiter.acquire("a") is None
-    assert limiter.acquire("a") == pytest.approx(3600)
-    assert limiter.acquire("b") is None  # per client
-    now[0] = 3600.0
-    assert limiter.acquire("a") is None
-
-
 def test_queue_requires_start(tmp_path, report_dict):  # noqa: F811
     store = JsonFileStore(tmp_path / "h.json")
     with pytest.raises(RuntimeError, match="start"):
         JobQueue(FakeService(store, report_dict), store).submit({"repo_url": URL}, "local")
-
-
-def test_metrics_endpoint(tmp_path, report_dict):  # noqa: F811
-    from drrepo.metrics import Metrics
-
-    store = SQLiteStore(tmp_path / "drrepo.db")
-    service = FakeService(store, report_dict)
-    service.metrics = Metrics()
-    service.metrics.inc("drrepo_analyses_total", outcome="ok")
-    service.breaker_state = lambda: {"state": "open"}
-    api, _, _ = _client(tmp_path, report_dict, store=store, service=service)
-    with api:
-        text = api.get("/metrics").text
-    assert 'drrepo_analyses_total{outcome="ok"} 1' in text
-    assert 'drrepo_jobs{status="queued"} 0' in text and "drrepo_llm_breaker_open 1" in text

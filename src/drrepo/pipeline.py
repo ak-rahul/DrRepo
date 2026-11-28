@@ -85,7 +85,6 @@ from drrepo.report.suppressions import (
 from drrepo.report.suppressions import apply as apply_suppressions
 from drrepo.report.suppressions import load_file as load_suppression_file
 from drrepo.report.synthesis import dependency_inventory, synthesize_report
-from drrepo.telemetry import set_attributes, span
 
 ProgressCallback = Callable[[str], None]
 
@@ -116,9 +115,6 @@ class RunContext:
     # The clone's symbol index, shared by every investigation of this run (built
     # lazily on the first symbol tool call). Set by `Workflow.run`.
     symbol_index: SymbolIndex | None = None
-    # The analysis span's OpenTelemetry context, so node spans on worker threads
-    # join its trace (telemetry.py). None without OpenTelemetry.
-    trace_parent: Any = None
     # Built from `config.llm_max_parallel_investigations`; None means unlimited.
     _slots: threading.BoundedSemaphore | None = field(init=False, default=None, repr=False)
 
@@ -306,12 +302,6 @@ class Workflow:
     ) -> Callable[[State, Runtime[RunContext]], dict[str, Any]]:
         def node(state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
             ctx = runtime.context
-            with span("drrepo.collector", parent=ctx.trace_parent, collector=spec.name) as current:
-                result = run(state, ctx)
-                set_attributes(current, status=result.status.value)
-            return {"collector_results": {spec.name: result}}
-
-        def run(state: State, ctx: RunContext) -> CollectorResult:
             if spec.needs_clone and not state["clone_path"]:
                 result = CollectorResult.skipped(spec.name, "no clone")
             else:
@@ -329,7 +319,7 @@ class Workflow:
                         CollectorStatus.ERROR,
                         detail=f"unexpected error: {type(e).__name__}: {str(e)[:200]}",
                     )
-            return result
+            return {"collector_results": {spec.name: result}}
 
         return node
 
@@ -371,17 +361,7 @@ class Workflow:
         self, category: Category
     ) -> Callable[[State, Runtime[RunContext]], dict[str, Any]]:
         def node(state: State, runtime: Runtime[RunContext]) -> dict[str, Any]:
-            ctx = runtime.context
-            with span("drrepo.category", parent=ctx.trace_parent, category=category.value) as s:
-                finding = self.analyze_category(category, state, ctx)
-                usage = ctx.llm.budget.usage() if ctx.llm.budget else {}
-                set_attributes(
-                    s,
-                    depth=finding.investigation_depth.value,
-                    score=finding.score,
-                    issues=len(finding.issues),
-                    tokens=(usage.get("by_label") or {}).get(f"investigation:{category.value}", 0),
-                )
+            finding = self.analyze_category(category, state, runtime.context)
             return {"category_findings": {category.value: finding}}
 
         return node
