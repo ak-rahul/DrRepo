@@ -12,7 +12,7 @@ Every exporter and interface consumes one dict shape, `Report.to_dict()`. Its co
                  "ref"},         // requested branch/tag/SHA, else the default branch
   "overall_score": 73.7,                 // 0-100, weighted over assessed categories only
   "generated_at": "2026-11-27T12:35:46+00:00",
-  "drrepo_version": "3.1.0",
+  "drrepo_version": "4.0.0",
   "issue_counts": {"critical": 0, "high": 2, "medium": 5, "low": 14},
   "category_scores": {
     "security": {

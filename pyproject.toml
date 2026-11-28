@@ -1,6 +1,6 @@
 [project]
 name = "drrepo"
-version = "3.1.0"
+version = "4.0.0"
 description = "Agentic multi-agent AI system that clones and audits public GitHub repositories"
 readme = "README.md"
 requires-python = ">=3.11"

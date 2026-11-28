@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-28
+
+**Upgrading from 3.x.** Breaking changes:
+- `drrepo mcp` is gone. MCP now runs only inside DrRepo, between the investigators and their tools; run the CLI (`drrepo audit --json`) from assistants instead.
+- `drrepo diff` takes its refs as positional arguments: `drrepo diff <url> <base> [head]`.
+- `drrepo health-api` now starts the local API (`drrepo serve`), which keeps the same `/health` endpoints but serves only callers on this machine. The Compose `api` profile and `drrepo.interfaces.health.app` are removed.
+- Python API: `AnalysisService(store=JsonFileStore(path))` replaces `history_path=path`, and `report.store.attach_history(report, store)` replaces `report.history.attach_and_record_history`.
+- The Groq default model is now `openai/gpt-oss-120b` (Groq retired `llama-3.3-70b-versatile`); update `MODEL_NAME` if you pinned the old one.
+- Scores move: complexity and duplication now count in Code Quality (repositories without Python are scored instead of skipped), and deprecated or long-unreleased dependencies in Dependencies. Re-record score baselines.
+
 ### Security
 - Investigation notes no longer quote the LLM provider's raw error, which can include account or organization ids. They give the HTTP status and a short reason, and the full error stays in the log.
 - `Config` no longer shows API keys or tokens in its `repr`.
