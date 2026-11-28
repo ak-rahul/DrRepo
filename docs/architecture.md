@@ -27,6 +27,7 @@ AnalysisService (one per process)
 ```
 src/drrepo/
   config.py         Config (frozen, validated); from_env() is the only os.environ reader
+  defaults.toml     every setting's default, plus per-provider tables (env overrides)
   errors.py         DrRepoError, ConfigurationError, CircuitOpenError, InvestigationError
   log.py            logger + configure_logging (no import-time side effects)
   models.py         RepoRef, Issue, CategoryFinding, InvestigationPlan, Report, ...

@@ -1,0 +1,113 @@
+# DrRepo's settings and their default values: every setting, in one place.
+#
+# Override any of them without editing this file: set the key in upper case as an
+# environment variable, or put it in `.env` / `.env.local` (MAX_TOKENS=4000).
+# Real environment variables win over `.env.local`, which wins over `.env`,
+# which wins over this file. Reference: docs/configuration.md.
+#
+# API keys are not here: they come from the environment only (GROQ_API_KEY,
+# OPENAI_API_KEY, ANTHROPIC_API_KEY, GH_TOKEN or GITHUB_TOKEN).
+#
+# Section names only group the keys; every key is unique across the file.
+
+[llm]
+model_provider = "groq"             # groq | openai | anthropic | ollama
+# Empty model names fall back: role model -> model_name -> the provider's default
+# (groq openai/gpt-oss-120b, openai gpt-4o-mini, anthropic claude-sonnet-5-5,
+# ollama llama3.1). Deep mode needs a model that supports tool calling.
+model_name = ""
+model_name_planner = ""             # Lead Investigator and documentation rubric
+model_name_narrative = ""           # short category summaries
+model_name_investigation = ""       # deep tool-calling investigations
+model_name_critic = ""              # second look at severe agent findings
+ollama_base_url = "http://localhost:11434"
+temperature = 0.3                   # 0 to 2
+max_tokens = 2000                   # most completion tokens per call
+llm_request_timeout_seconds = 60    # per HTTP request to the provider
+
+[logging]
+log_level = "INFO"                  # DEBUG | INFO | WARNING | ERROR | CRITICAL
+log_format = "text"                 # text | json (one JSON object per line)
+
+[clone]
+clone_timeout_seconds = 60
+clone_max_size_mb = 300             # larger clones are deleted; clone-based collectors skip
+clone_cache_ttl_seconds = 0         # reuse a clone of the same commit this long (0 = off)
+clone_cache_max_mb = 2000           # cache size cap; the oldest entries go first
+clone_cache_dir = ""                # empty = <system temp>/drrepo-clone-cache
+
+[scanners]
+enable_scanner_limits = true        # Linux: run scanners and git log under prlimit caps
+scanner_file_size_mb = 512          # largest file a scanner process may write
+scanner_memory_mb = 0               # address-space cap per scanner process (0 = off)
+collector_timeout_seconds = 120     # per scanner subprocess and HTTP client
+
+[collectors]
+enable_semgrep = true               # the slowest scanner; runs only if installed
+enable_bandit = true
+enable_dependency_audit = true      # OSV.dev vulnerability lookups
+enable_license_audit = true         # deps.dev licenses (runtime dependencies only)
+enable_maintenance_audit = true     # deps.dev: deprecated or long-unreleased packages
+enable_complexity_metrics = true    # lizard complexity and copy-paste detection
+enable_workflow_audit = true        # zizmor over .github/workflows
+enable_dockerfile_audit = true      # hadolint plus a root-user check
+enable_scorecard = true             # OpenSSF Scorecard lookup
+scan_history_commits = 0            # opt-in: scan lines the last N commits added for secrets
+# License policy (SPDX ids, case-insensitive). Either list replaces the built-in
+# copyleft heuristic. As environment variables they are comma-separated.
+license_deny = []
+license_allow = []
+
+[investigation]
+enable_deep_investigation = true    # false = every category shallow
+enable_llm_judgment = true          # bounded LLM score adjustment (documentation rubric, +/-25)
+enable_agent_critic = true          # re-check high/critical agent findings
+enable_mcp_tools = true             # tools via DrRepo's in-memory MCP server; false = in-process
+max_tool_calls_per_investigator = 8
+investigator_timeout_seconds = 90   # wall-clock budget per investigation
+llm_max_parallel_investigations = 0 # investigations at once (0 = unlimited)
+# Most tokens one investigator request may use: system prompt, tool schemas,
+# conversation and max_tokens for the reply. Older tool results are cleared and
+# long ones cut to stay under it.
+investigation_context_tokens = 32000
+
+[circuit_breaker]
+# Opens after repeated failed LLM calls, so the rest of the run (and other runs
+# in the process) finish deterministically instead of retrying a dead quota.
+enable_llm_circuit_breaker = true
+llm_circuit_breaker_threshold = 3
+llm_circuit_breaker_timeout_seconds = 300
+
+[budget]
+# A rough per-run token cap, so the planner's deep/shallow choices are cost-aware.
+enable_llm_budget_tracking = true
+llm_token_budget_per_run = 60000
+# Expected cost of one deep investigation until score history has measurements.
+estimated_tokens_per_deep_investigation = 12000
+
+[cache]
+enable_dependency_lookup_cache = true   # OSV/deps.dev answers, in memory, per process
+
+[suppressions]
+suppressions_file = ""              # a .drrepo.toml-format file applied to every analysis
+trust_repo_suppressions = false     # also honor the analyzed repository's own .drrepo.toml
+
+[store]
+enable_score_history = true
+store_backend = "json"              # json: reports/history.json | sqlite: reports/drrepo.db
+store_path = ""                     # empty = the backend's default file
+
+[api]
+# Local API (drrepo serve): this machine only.
+api_workers = 2                     # analyses running at once
+api_max_queued = 50                 # waiting analyses before POST /analyses returns 503
+
+# Per-provider defaults: applied over the values above when model_provider is that
+# provider. Environment variables and .env files still win.
+[providers.groq]
+# Groq's free tier allows 8,000 tokens per minute: run investigations one at a
+# time, keep each request under the limit, and leave time for rate-limit waits.
+# On a paid Groq tier, raise these in .env.local.
+llm_max_parallel_investigations = 1
+investigation_context_tokens = 7000
+investigator_timeout_seconds = 240

@@ -5,7 +5,7 @@
 ```bash
 uv tool install --editable .   # `drrepo` on PATH, running this checkout (incl. ruff, bandit)
 uv tool install semgrep        # optional: the semgrep scanner, in its own isolated environment
-cp .env.example .env           # set GROQ_API_KEY; GH_TOKEN recommended
+cp .env.example .env           # set GROQ_API_KEY; GH_TOKEN recommended (other settings: src/drrepo/defaults.toml)
 drrepo doctor                  # verifies git, scanners, config, connectivity
 ```
 

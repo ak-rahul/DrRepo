@@ -1,5 +1,8 @@
+import dataclasses
+
 import pytest
 
+from drrepo import config as config_module
 from drrepo.config import Config
 from drrepo.errors import ConfigurationError
 
@@ -14,6 +17,10 @@ _ENV_KEYS = [
     "LLM_TOKEN_BUDGET_PER_RUN",
     "TEMPERATURE",
     "LOG_LEVEL",
+    "LLM_MAX_PARALLEL_INVESTIGATIONS",
+    "INVESTIGATION_CONTEXT_TOKENS",
+    "INVESTIGATOR_TIMEOUT_SECONDS",
+    "LICENSE_DENY",
 ]
 
 
@@ -24,9 +31,54 @@ def clean_env(monkeypatch, tmp_path):
     return str(tmp_path / "missing.env")
 
 
-def test_defaults_without_env(clean_env):
+def test_defaults_without_env_are_the_file_plus_the_provider_table(clean_env):
     config = Config.from_env(env_file=clean_env)
-    assert config == Config()
+    groq = config_module._PROVIDER_DEFAULTS["groq"]
+    assert config == dataclasses.replace(Config(), **groq)
+    assert config.llm_max_parallel_investigations == 1
+    assert config.investigation_context_tokens == 7000
+
+
+def test_config_defaults_come_from_the_defaults_file():
+    defaults = config_module._DEFAULTS
+    config = Config()
+    for f in dataclasses.fields(Config):
+        if f.name not in config_module._SECRETS:
+            assert getattr(config, f.name) == defaults[f.name], f.name
+    # Secrets never live in the file.
+    assert not defaults.keys() & config_module._SECRETS.keys()
+
+
+def test_provider_table_applies_only_to_its_provider(clean_env, monkeypatch):
+    monkeypatch.setenv("MODEL_PROVIDER", "openai")
+    config = Config.from_env(env_file=clean_env)
+    assert config.investigation_context_tokens == Config().investigation_context_tokens
+
+
+def test_environment_wins_over_the_provider_table(clean_env, monkeypatch):
+    monkeypatch.setenv("INVESTIGATION_CONTEXT_TOKENS", "20000")
+    monkeypatch.setenv("LICENSE_DENY", "GPL-3.0, AGPL-3.0,")
+    config = Config.from_env(env_file=clean_env)
+    assert config.investigation_context_tokens == 20000
+    assert config.license_deny == ("GPL-3.0", "AGPL-3.0")
+
+
+@pytest.mark.parametrize(
+    ("defaults", "providers", "message"),
+    [
+        ({"surprise": 1}, {}, "unknown setting 'surprise'"),
+        ({"max_tokens": "2000"}, {}, "max_tokens = '2000' should be int"),
+        ({"enable_semgrep": 1}, {}, "enable_semgrep = 1 should be bool"),
+        ({"max_tokens": True}, {}, "max_tokens = True should be int"),
+        ({}, {"mistral": {}}, "not a supported provider"),
+        ({}, {"groq": {"max_token": 1}}, "unknown setting 'max_token'"),
+    ],
+)
+def test_defaults_file_is_checked(monkeypatch, defaults, providers, message):
+    monkeypatch.setattr(config_module, "_DEFAULTS", {**config_module._DEFAULTS, **defaults})
+    monkeypatch.setattr(config_module, "_PROVIDER_DEFAULTS", providers)
+    with pytest.raises(ConfigurationError, match=message):
+        config_module._check_defaults()
 
 
 def test_env_overrides(clean_env, monkeypatch):
@@ -103,8 +155,6 @@ def test_out_of_range_values_are_rejected_at_construction(kwargs, message):
 
 
 def test_config_is_frozen_and_replace_revalidates():
-    import dataclasses
-
     config = Config()
     with pytest.raises(dataclasses.FrozenInstanceError):
         config.enable_semgrep = False  # type: ignore[misc]

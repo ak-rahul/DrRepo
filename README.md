@@ -29,6 +29,7 @@ Requires [uv](https://docs.astral.sh/uv/) and `git`.
 git clone https://github.com/ak-rahul/DrRepo && cd DrRepo
 uv tool install --editable .   # puts `drrepo` on your PATH (tracks this checkout)
 cp .env.example .env           # optional: GROQ_API_KEY, GH_TOKEN (a .env.local next to it wins)
+                               # every other setting: src/drrepo/defaults.toml, overridable in .env
 ```
 
 | Command | Does |

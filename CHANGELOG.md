@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- Every setting and its default now lives in one file, `src/drrepo/defaults.toml`, with a comment on each. Environment variables, `.env.local` and `.env` override it, as before; API keys stay environment-only. `.env.example` now lists only the keys and a few common overrides.
+- Groq runs with free-tier limits by default (`[providers.groq]`): investigations one at a time, 7,000 tokens per request, 240 seconds per investigation. This stops the bursts of 429 responses on the 8,000-tokens-per-minute free tier. On a paid tier, raise `LLM_MAX_PARALLEL_INVESTIGATIONS`, `INVESTIGATION_CONTEXT_TOKENS` and `INVESTIGATOR_TIMEOUT_SECONDS` in `.env.local`.
+
 ## [4.0.0] - 2026-11-28
 
 **Upgrading from 3.x.** Breaking changes:

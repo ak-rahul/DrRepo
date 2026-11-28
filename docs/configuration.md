@@ -1,6 +1,8 @@
 # Configuration
 
-All settings come from environment variables, optionally loaded from `.env.local` (machine-specific, never committed) and `.env`; the first that sets a variable wins, and real environment variables beat both. `--env-file` names another file, and its `.local` sibling is read too. `Config.from_env()` is the only code that reads the environment. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`. Values are also range-checked however `Config` is built (from the environment or in code): timeouts, limits and the breaker threshold must be at least 1, the token budget and breaker timeout must not be negative, `TEMPERATURE` must be 0–2, and `LOG_LEVEL` must be a standard level name. `Config` is immutable; derive variants with `dataclasses.replace`.
+Every setting and its default is in one file, [`src/drrepo/defaults.toml`](../src/drrepo/defaults.toml), grouped into sections with a comment on each. Its `[providers.<name>]` tables hold per-provider defaults, applied when `MODEL_PROVIDER` is that provider (today only `groq`, for its free tier). Don't edit the file to change a setting; override it with an environment variable named after the key in upper case (`max_tokens` becomes `MAX_TOKENS`), set in the shell, `.env.local` (machine-specific, never committed) or `.env`. The order, each layer winning over the next: real environment variables, `.env.local`, `.env`, the provider's table, the file. API keys are never in the file; they come from the environment only. `--env-file` names another `.env` file, and its `.local` sibling is read too. `Config.from_env()` is the only code that reads the environment, and `Config()` built in code gets the file's defaults without any provider table.
+
+The tables below list each variable with its default. Invalid values (`ENABLE_SEMGREP=maybe`, `MAX_TOKENS=lots`, an unknown provider) fail at startup with a `ConfigurationError` that names the variable. Booleans accept `true/false/1/0/yes/no/on/off`. Values are also range-checked however `Config` is built (from the environment or in code): timeouts, limits and the breaker threshold must be at least 1, the token budget and breaker timeout must not be negative, `TEMPERATURE` must be 0–2, and `LOG_LEVEL` must be a standard level name. `Config` is immutable; derive variants with `dataclasses.replace`.
 
 ## LLM provider
 
@@ -67,9 +69,9 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 | `ENABLE_MCP_TOOLS` | `true` | investigators call their tools through DrRepo's in-memory MCP tool server; `false` calls the same tools in-process |
 | `ENABLE_AGENT_CRITIC` | `true` | re-check grounded high/critical agent findings; the critic can lower a severity or mark a finding disputed, never raise or remove one |
 | `MAX_TOOL_CALLS_PER_INVESTIGATOR` | `8` | step budget per investigation |
-| `INVESTIGATOR_TIMEOUT_SECONDS` | `90` | wall-clock budget per investigation |
-| `INVESTIGATION_CONTEXT_TOKENS` | `32000` | most tokens one investigator request may use (system prompt, tool schemas, conversation, plus `MAX_TOKENS` for the reply). Older tool results are cleared and long ones cut to stay under it |
-| `LLM_MAX_PARALLEL_INVESTIGATIONS` | `0` | investigations allowed at once (`0` = unlimited); `1` runs them one after another |
+| `INVESTIGATOR_TIMEOUT_SECONDS` | `90` (`240` on Groq) | wall-clock budget per investigation |
+| `INVESTIGATION_CONTEXT_TOKENS` | `32000` (`7000` on Groq) | most tokens one investigator request may use (system prompt, tool schemas, conversation, plus `MAX_TOKENS` for the reply). Older tool results are cleared and long ones cut to stay under it |
+| `LLM_MAX_PARALLEL_INVESTIGATIONS` | `0` (`1` on Groq) | investigations allowed at once (`0` = unlimited); `1` runs them one after another |
 
 ## Resilience and cost
 
@@ -105,5 +107,5 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 ## Tuning recipes
 
 - **Fast and cheap:** `ENABLE_DEEP_INVESTIGATION=false ENABLE_SEMGREP=false` gives a typical run in under 30 seconds.
-- **Free-tier Groq** (8,000 tokens per minute per model): `LLM_MAX_PARALLEL_INVESTIGATIONS=1 INVESTIGATION_CONTEXT_TOKENS=7000 INVESTIGATOR_TIMEOUT_SECONDS=240`. Investigations then run one at a time, each request fits the per-minute limit, and rate-limit waits (the provider's `retry-after`) fit in the time budget. A run takes several minutes. If the provider keeps failing, the breaker opens after 3 failures and the rest of the run finishes deterministically.
+- **Free-tier Groq** (8,000 tokens per minute per model) is the default: `[providers.groq]` sets `LLM_MAX_PARALLEL_INVESTIGATIONS=1`, `INVESTIGATION_CONTEXT_TOKENS=7000` and `INVESTIGATOR_TIMEOUT_SECONDS=240`. Investigations then run one at a time, each request fits the per-minute limit, and rate-limit waits (the provider's `retry-after`) fit in the time budget. A run takes several minutes. If the provider keeps failing, the breaker opens after 3 failures and the rest of the run finishes deterministically. On a paid Groq tier, raise the three in `.env.local` (for example `0`, `32000` and `90`).
 - **Thorough:** raise `LLM_TOKEN_BUDGET_PER_RUN` to `150000` and `MAX_TOOL_CALLS_PER_INVESTIGATOR` to `15`.

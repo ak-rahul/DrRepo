@@ -1,9 +1,16 @@
 """Configuration for DrRepo.
 
+Every setting and its default lives in `defaults.toml` (next to this module),
+with per-provider defaults in its `[providers.<name>]` tables. `Config.from_env()`
+layers the environment on top: real environment variables, then `.env.local`,
+then `.env`, then the provider's table, then the file's defaults. API keys are
+not in the file; they come from the environment only.
+
 Deliberately NOT a module-level singleton. Every collector/agent takes a
 `Config` instance via constructor injection, so tests can build one with fake
 values and never touch `os.environ` or real credentials. Call `Config.from_env()`
-exactly once at a real entrypoint (CLI, Streamlit app, health API).
+exactly once at a real entrypoint (CLI, Streamlit app, local API). `Config()`
+alone gives the file's defaults without any provider table.
 
 `Config` is frozen (one instance is shared by concurrent runs) and validated on
 construction, however it is built. Derive per-run variants with
@@ -13,8 +20,11 @@ construction, however it is built. Derive per-run variants with
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass, field, fields
+from importlib import resources
 from pathlib import Path
+from typing import Any
 
 from drrepo.errors import ConfigurationError
 
@@ -32,9 +42,62 @@ DEFAULT_MODELS = {
 # runs the tool-calling deep investigations.
 LLM_ROLES = ("planner", "narrative", "investigation", "critic")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+DEFAULTS_FILE = "defaults.toml"
+
+# Secrets: environment only, never in defaults.toml. Field -> variables, first set wins.
+_SECRETS = {
+    "groq_api_key": ("GROQ_API_KEY",),
+    "openai_api_key": ("OPENAI_API_KEY",),
+    "anthropic_api_key": ("ANTHROPIC_API_KEY",),
+    "github_token": ("GH_TOKEN", "GITHUB_TOKEN"),
+}
+# Values normalized after reading, so `MODEL_PROVIDER=OpenAI` works.
+_NORMALIZE = {
+    "model_provider": str.lower,
+    "log_level": str.upper,
+    "log_format": str.lower,
+    "store_backend": str.lower,
+}
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
+
+
+def _plain(value: Any) -> Any:
+    return tuple(value) if isinstance(value, list) else value
+
+
+def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """The file's settings (sections flattened) and its per-provider tables."""
+    text = resources.files("drrepo").joinpath(DEFAULTS_FILE).read_text(encoding="utf-8")
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigurationError(f"{DEFAULTS_FILE}: {e}") from e
+    providers = data.pop("providers", {})
+    settings: dict[str, Any] = {}
+    for section, table in data.items():
+        if not isinstance(table, dict):
+            raise ConfigurationError(f"{DEFAULTS_FILE}: {section!r} must be a [section]")
+        for key, value in table.items():
+            if key in settings:
+                raise ConfigurationError(f"{DEFAULTS_FILE}: {key!r} is set twice")
+            settings[key] = _plain(value)
+    profiles = {
+        name: {key: _plain(value) for key, value in table.items()}
+        for name, table in providers.items()
+    }
+    return settings, profiles
+
+
+_DEFAULTS, _PROVIDER_DEFAULTS = _load_defaults()
+
+
+def _default(name: str) -> Any:
+    try:
+        return _DEFAULTS[name]
+    except KeyError:
+        raise ConfigurationError(f"{DEFAULTS_FILE} has no {name!r} setting") from None
 
 
 def _env_str(name: str, default: str) -> str:
@@ -63,11 +126,6 @@ def _env_int(name: str, default: int) -> int:
         raise ConfigurationError(f"{name}={raw!r} is not an integer") from e
 
 
-def _env_list(name: str) -> tuple[str, ...]:
-    """Comma-separated values, stripped; empty entries dropped."""
-    return tuple(v.strip() for v in os.getenv(name, "").split(",") if v.strip())
-
-
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -78,9 +136,32 @@ def _env_float(name: str, default: float) -> float:
         raise ConfigurationError(f"{name}={raw!r} is not a number") from e
 
 
+def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Comma-separated values, stripped; empty entries dropped."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return tuple(v.strip() for v in raw.split(",") if v.strip())
+
+
+def _env_value(name: str, default: Any) -> Any:
+    """`name` from the environment, parsed like `default` (bool before int: bool is an int)."""
+    if isinstance(default, bool):
+        return _env_bool(name, default)
+    if isinstance(default, int):
+        return _env_int(name, default)
+    if isinstance(default, float):
+        return _env_float(name, default)
+    if isinstance(default, tuple):
+        return _env_list(name, default)
+    return _env_str(name, default)
+
+
 @dataclass(frozen=True)
 class Config:
-    """Application configuration. Build via `Config.from_env()` or directly for tests."""
+    """Application configuration. Build via `Config.from_env()` or directly for tests.
+
+    Defaults (and what each setting does) are in `defaults.toml`."""
 
     # API keys (kept out of repr, so a logged or printed Config never shows them)
     groq_api_key: str = field(default="", repr=False)
@@ -88,112 +169,86 @@ class Config:
     anthropic_api_key: str = field(default="", repr=False)
     github_token: str = field(default="", repr=False)
 
-    # Model configuration. Empty model names fall back: role -> MODEL_NAME -> provider default.
-    model_provider: str = "groq"
-    model_name: str = ""
-    model_name_planner: str = ""
-    model_name_narrative: str = ""
-    model_name_investigation: str = ""
-    model_name_critic: str = ""
-    ollama_base_url: str = "http://localhost:11434"
-    temperature: float = 0.3
-    max_tokens: int = 2000
-    llm_request_timeout_seconds: int = 60
+    # [llm]
+    model_provider: str = _default("model_provider")
+    model_name: str = _default("model_name")
+    model_name_planner: str = _default("model_name_planner")
+    model_name_narrative: str = _default("model_name_narrative")
+    model_name_investigation: str = _default("model_name_investigation")
+    model_name_critic: str = _default("model_name_critic")
+    ollama_base_url: str = _default("ollama_base_url")
+    temperature: float = _default("temperature")
+    max_tokens: int = _default("max_tokens")
+    llm_request_timeout_seconds: int = _default("llm_request_timeout_seconds")
 
-    # Application settings
-    log_level: str = "INFO"
-    log_format: str = "text"  # "json": one JSON object per line
+    # [logging]
+    log_level: str = _default("log_level")
+    log_format: str = _default("log_format")
 
-    # Clone/collector limits
-    clone_timeout_seconds: int = 60
-    clone_max_size_mb: int = 300
-    # Reuse a clone of the same commit for this long (0 = off; recon/clone_cache.py).
-    clone_cache_ttl_seconds: int = 0
-    clone_cache_max_mb: int = 2000
-    clone_cache_dir: str = ""
-    # Caps on scanner and git subprocesses, via prlimit on Linux (recon/limits.py).
-    enable_scanner_limits: bool = True
-    scanner_file_size_mb: int = 512
-    scanner_memory_mb: int = 0  # 0 = no address-space cap
-    collector_timeout_seconds: int = 120
+    # [clone]
+    clone_timeout_seconds: int = _default("clone_timeout_seconds")
+    clone_max_size_mb: int = _default("clone_max_size_mb")
+    clone_cache_ttl_seconds: int = _default("clone_cache_ttl_seconds")
+    clone_cache_max_mb: int = _default("clone_cache_max_mb")
+    clone_cache_dir: str = _default("clone_cache_dir")
 
-    # Feature toggles (let a deployment disable a heavy/optional collector)
-    enable_semgrep: bool = True
-    enable_bandit: bool = True
-    enable_dependency_audit: bool = True
-    enable_license_audit: bool = True
-    # Opt-in: scan the lines the last N commits added for secrets (0 = off;
-    # recon/secret_history.py). The clone then fetches N+1 commits.
-    scan_history_commits: int = 0
-    # lizard complexity and copy-paste detection (recon/complexity.py).
-    enable_complexity_metrics: bool = True
-    # deps.dev: deprecated runtime packages and ones with no release in two years.
-    enable_maintenance_audit: bool = True
-    # License policy (SPDX ids, case-insensitive). When either is set it replaces the
-    # built-in copyleft heuristic: deny-listed licenses are violations, and with an
-    # allow-list every other known license is too.
-    license_deny: tuple[str, ...] = ()
-    license_allow: tuple[str, ...] = ()
-    enable_workflow_audit: bool = True  # zizmor over .github/workflows
-    enable_dockerfile_audit: bool = True  # hadolint + root-user check over Dockerfiles
-    enable_scorecard: bool = True  # OpenSSF Scorecard checks a shallow clone can't see
+    # [scanners]
+    enable_scanner_limits: bool = _default("enable_scanner_limits")
+    scanner_file_size_mb: int = _default("scanner_file_size_mb")
+    scanner_memory_mb: int = _default("scanner_memory_mb")
+    collector_timeout_seconds: int = _default("collector_timeout_seconds")
 
-    # Agentic investigation: bounds on the tool-calling investigator loops.
-    max_tool_calls_per_investigator: int = 8
-    investigator_timeout_seconds: int = 90
-    # Investigations allowed to run at once (0 = unlimited). Set 1 on providers
-    # with small per-minute token limits, such as Groq's free tier.
-    llm_max_parallel_investigations: int = 0
-    # Most tokens one investigator request may use: system prompt, tool schemas,
-    # conversation and MAX_TOKENS for the reply. Older tool results are cleared and
-    # long ones cut to stay under it. Set it below a provider's per-request limit
-    # (e.g. 7000 on Groq's free tier, which allows 8000 tokens per minute).
-    investigation_context_tokens: int = 32000
-    # Kill switch: force every category "shallow" -- a regression safety net
-    # and a cost control for anyone who wants the fast/cheap mode.
-    enable_deep_investigation: bool = True
-    # Bounded LLM judgment that can adjust a score (today: the documentation rubric).
-    enable_llm_judgment: bool = True
-    # Second look at high/critical agent findings (agents/critic.py). It can lower
-    # or dispute a severity, never raise one or remove a finding.
-    enable_agent_critic: bool = True
-    # Investigators call their tools through DrRepo's own MCP tool server
-    # (agents/tool_server.py, in memory). False = call the same tools in-process.
-    enable_mcp_tools: bool = True
+    # [collectors]
+    enable_semgrep: bool = _default("enable_semgrep")
+    enable_bandit: bool = _default("enable_bandit")
+    enable_dependency_audit: bool = _default("enable_dependency_audit")
+    enable_license_audit: bool = _default("enable_license_audit")
+    enable_maintenance_audit: bool = _default("enable_maintenance_audit")
+    enable_complexity_metrics: bool = _default("enable_complexity_metrics")
+    enable_workflow_audit: bool = _default("enable_workflow_audit")
+    enable_dockerfile_audit: bool = _default("enable_dockerfile_audit")
+    enable_scorecard: bool = _default("enable_scorecard")
+    scan_history_commits: int = _default("scan_history_commits")
+    license_deny: tuple[str, ...] = _default("license_deny")
+    license_allow: tuple[str, ...] = _default("license_allow")
 
-    # LLM circuit breaker: opens after repeated LLM-call failures so parallel
-    # category nodes fail fast instead of each retrying an exhausted quota.
-    enable_llm_circuit_breaker: bool = True
-    llm_circuit_breaker_threshold: int = 3
-    llm_circuit_breaker_timeout_seconds: int = 300
+    # [investigation]
+    enable_deep_investigation: bool = _default("enable_deep_investigation")
+    enable_llm_judgment: bool = _default("enable_llm_judgment")
+    enable_agent_critic: bool = _default("enable_agent_critic")
+    enable_mcp_tools: bool = _default("enable_mcp_tools")
+    max_tool_calls_per_investigator: int = _default("max_tool_calls_per_investigator")
+    investigator_timeout_seconds: int = _default("investigator_timeout_seconds")
+    llm_max_parallel_investigations: int = _default("llm_max_parallel_investigations")
+    investigation_context_tokens: int = _default("investigation_context_tokens")
 
-    # LLM token budget: a rough, per-run cap so the planner's shallow/deep
-    # decisions are cost-aware. A "deep" category falls back to shallow if
-    # the run can't afford another investigation.
-    enable_llm_budget_tracking: bool = True
-    llm_token_budget_per_run: int = 60000
-    estimated_tokens_per_deep_investigation: int = 12000
+    # [circuit_breaker]
+    enable_llm_circuit_breaker: bool = _default("enable_llm_circuit_breaker")
+    llm_circuit_breaker_threshold: int = _default("llm_circuit_breaker_threshold")
+    llm_circuit_breaker_timeout_seconds: int = _default("llm_circuit_breaker_timeout_seconds")
 
-    # Per-package OSV/deps.dev lookup cache (shared across runs in one
-    # process, such as the Streamlit app -- see service.py).
-    enable_dependency_lookup_cache: bool = True
+    # [budget]
+    enable_llm_budget_tracking: bool = _default("enable_llm_budget_tracking")
+    llm_token_budget_per_run: int = _default("llm_token_budget_per_run")
+    estimated_tokens_per_deep_investigation: int = _default(
+        "estimated_tokens_per_deep_investigation"
+    )
 
-    # Suppressions (report/suppressions.py). A file you pass always applies; the
-    # analyzed repository's own .drrepo.toml only when explicitly trusted.
-    suppressions_file: str = ""
-    trust_repo_suppressions: bool = False
+    # [cache]
+    enable_dependency_lookup_cache: bool = _default("enable_dependency_lookup_cache")
 
-    # Score history: record each run so a later run can report a delta against
-    # the previous analysis. Where: report/store.py. "json" keeps scores in
-    # reports/history.json; "sqlite" keeps scores, full reports and API jobs in
-    # reports/drrepo.db. STORE_PATH overrides the file.
-    enable_score_history: bool = True
-    store_backend: str = "json"
-    store_path: str = ""
+    # [suppressions]
+    suppressions_file: str = _default("suppressions_file")
+    trust_repo_suppressions: bool = _default("trust_repo_suppressions")
 
-    # Local REST API (`drrepo serve`, interfaces/api.py): this machine only.
-    api_workers: int = 2
-    api_max_queued: int = 50
+    # [store]
+    enable_score_history: bool = _default("enable_score_history")
+    store_backend: str = _default("store_backend")
+    store_path: str = _default("store_path")
+
+    # [api]
+    api_workers: int = _default("api_workers")
+    api_max_queued: int = _default("api_max_queued")
 
     def __post_init__(self) -> None:
         """Reject values that would only fail later, deep inside a run.
@@ -228,7 +283,8 @@ class Config:
 
     @classmethod
     def from_env(cls, env_file: str | None = ".env") -> Config:
-        """Load configuration from environment variables (and `env_file` if present).
+        """Load configuration from environment variables (and `env_file` if present)
+        over the defaults in `defaults.toml`.
 
         This is the ONE place that touches `os.environ` -- call it once at a
         real entrypoint, then pass the resulting `Config` down explicitly.
@@ -247,103 +303,18 @@ class Config:
                 load_dotenv(local)
             load_dotenv(env_file)
 
-        d = cls()  # defaults, so each default lives in exactly one place
-        config = cls(
-            groq_api_key=_env_str("GROQ_API_KEY", ""),
-            openai_api_key=_env_str("OPENAI_API_KEY", ""),
-            anthropic_api_key=_env_str("ANTHROPIC_API_KEY", ""),
-            github_token=_env_str("GH_TOKEN", "") or _env_str("GITHUB_TOKEN", ""),
-            model_provider=_env_str("MODEL_PROVIDER", d.model_provider).lower(),
-            model_name=_env_str("MODEL_NAME", d.model_name),
-            model_name_planner=_env_str("MODEL_NAME_PLANNER", d.model_name_planner),
-            model_name_narrative=_env_str("MODEL_NAME_NARRATIVE", d.model_name_narrative),
-            model_name_investigation=_env_str(
-                "MODEL_NAME_INVESTIGATION", d.model_name_investigation
-            ),
-            model_name_critic=_env_str("MODEL_NAME_CRITIC", d.model_name_critic),
-            ollama_base_url=_env_str("OLLAMA_BASE_URL", d.ollama_base_url),
-            temperature=_env_float("TEMPERATURE", d.temperature),
-            max_tokens=_env_int("MAX_TOKENS", d.max_tokens),
-            llm_request_timeout_seconds=_env_int(
-                "LLM_REQUEST_TIMEOUT_SECONDS", d.llm_request_timeout_seconds
-            ),
-            log_level=_env_str("LOG_LEVEL", d.log_level).upper(),
-            log_format=_env_str("LOG_FORMAT", d.log_format).lower(),
-            clone_timeout_seconds=_env_int("CLONE_TIMEOUT_SECONDS", d.clone_timeout_seconds),
-            clone_max_size_mb=_env_int("CLONE_MAX_SIZE_MB", d.clone_max_size_mb),
-            clone_cache_ttl_seconds=_env_int("CLONE_CACHE_TTL_SECONDS", d.clone_cache_ttl_seconds),
-            clone_cache_max_mb=_env_int("CLONE_CACHE_MAX_MB", d.clone_cache_max_mb),
-            clone_cache_dir=_env_str("CLONE_CACHE_DIR", d.clone_cache_dir),
-            enable_scanner_limits=_env_bool("ENABLE_SCANNER_LIMITS", d.enable_scanner_limits),
-            scanner_file_size_mb=_env_int("SCANNER_FILE_SIZE_MB", d.scanner_file_size_mb),
-            scanner_memory_mb=_env_int("SCANNER_MEMORY_MB", d.scanner_memory_mb),
-            collector_timeout_seconds=_env_int(
-                "COLLECTOR_TIMEOUT_SECONDS", d.collector_timeout_seconds
-            ),
-            enable_semgrep=_env_bool("ENABLE_SEMGREP", d.enable_semgrep),
-            enable_bandit=_env_bool("ENABLE_BANDIT", d.enable_bandit),
-            enable_dependency_audit=_env_bool("ENABLE_DEPENDENCY_AUDIT", d.enable_dependency_audit),
-            enable_license_audit=_env_bool("ENABLE_LICENSE_AUDIT", d.enable_license_audit),
-            scan_history_commits=_env_int("SCAN_HISTORY_COMMITS", d.scan_history_commits),
-            enable_complexity_metrics=_env_bool(
-                "ENABLE_COMPLEXITY_METRICS", d.enable_complexity_metrics
-            ),
-            enable_maintenance_audit=_env_bool(
-                "ENABLE_MAINTENANCE_AUDIT", d.enable_maintenance_audit
-            ),
-            license_deny=_env_list("LICENSE_DENY"),
-            license_allow=_env_list("LICENSE_ALLOW"),
-            enable_workflow_audit=_env_bool("ENABLE_WORKFLOW_AUDIT", d.enable_workflow_audit),
-            enable_dockerfile_audit=_env_bool("ENABLE_DOCKERFILE_AUDIT", d.enable_dockerfile_audit),
-            enable_scorecard=_env_bool("ENABLE_SCORECARD", d.enable_scorecard),
-            max_tool_calls_per_investigator=_env_int(
-                "MAX_TOOL_CALLS_PER_INVESTIGATOR", d.max_tool_calls_per_investigator
-            ),
-            investigator_timeout_seconds=_env_int(
-                "INVESTIGATOR_TIMEOUT_SECONDS", d.investigator_timeout_seconds
-            ),
-            llm_max_parallel_investigations=_env_int(
-                "LLM_MAX_PARALLEL_INVESTIGATIONS", d.llm_max_parallel_investigations
-            ),
-            investigation_context_tokens=_env_int(
-                "INVESTIGATION_CONTEXT_TOKENS", d.investigation_context_tokens
-            ),
-            enable_deep_investigation=_env_bool(
-                "ENABLE_DEEP_INVESTIGATION", d.enable_deep_investigation
-            ),
-            enable_llm_judgment=_env_bool("ENABLE_LLM_JUDGMENT", d.enable_llm_judgment),
-            enable_agent_critic=_env_bool("ENABLE_AGENT_CRITIC", d.enable_agent_critic),
-            enable_mcp_tools=_env_bool("ENABLE_MCP_TOOLS", d.enable_mcp_tools),
-            enable_llm_circuit_breaker=_env_bool(
-                "ENABLE_LLM_CIRCUIT_BREAKER", d.enable_llm_circuit_breaker
-            ),
-            llm_circuit_breaker_threshold=_env_int(
-                "LLM_CIRCUIT_BREAKER_THRESHOLD", d.llm_circuit_breaker_threshold
-            ),
-            llm_circuit_breaker_timeout_seconds=_env_int(
-                "LLM_CIRCUIT_BREAKER_TIMEOUT_SECONDS", d.llm_circuit_breaker_timeout_seconds
-            ),
-            enable_llm_budget_tracking=_env_bool(
-                "ENABLE_LLM_BUDGET_TRACKING", d.enable_llm_budget_tracking
-            ),
-            llm_token_budget_per_run=_env_int(
-                "LLM_TOKEN_BUDGET_PER_RUN", d.llm_token_budget_per_run
-            ),
-            estimated_tokens_per_deep_investigation=_env_int(
-                "ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION", d.estimated_tokens_per_deep_investigation
-            ),
-            enable_dependency_lookup_cache=_env_bool(
-                "ENABLE_DEPENDENCY_LOOKUP_CACHE", d.enable_dependency_lookup_cache
-            ),
-            enable_score_history=_env_bool("ENABLE_SCORE_HISTORY", d.enable_score_history),
-            store_backend=_env_str("STORE_BACKEND", d.store_backend).lower(),
-            store_path=_env_str("STORE_PATH", d.store_path),
-            api_workers=_env_int("API_WORKERS", d.api_workers),
-            api_max_queued=_env_int("API_MAX_QUEUED", d.api_max_queued),
-            suppressions_file=_env_str("SUPPRESSIONS_FILE", d.suppressions_file),
-            trust_repo_suppressions=_env_bool("TRUST_REPO_SUPPRESSIONS", d.trust_repo_suppressions),
-        )
-        return config
+        provider = _env_str("MODEL_PROVIDER", _DEFAULTS["model_provider"]).lower()
+        defaults = {**_DEFAULTS, **_PROVIDER_DEFAULTS.get(provider, {})}
+        values: dict[str, Any] = {}
+        for f in fields(cls):
+            if f.name in _SECRETS:
+                values[f.name] = next(
+                    (v for name in _SECRETS[f.name] if (v := _env_str(name, ""))), ""
+                )
+                continue
+            value = _env_value(f.name.upper(), defaults[f.name])
+            values[f.name] = _NORMALIZE[f.name](value) if f.name in _NORMALIZE else value
+        return cls(**values)
 
     def model_for(self, role: str | None = None) -> str:
         """The model for `role` (one of LLM_ROLES), else MODEL_NAME, else the provider default."""
@@ -407,3 +378,36 @@ _MUST_BE_NON_NEGATIVE = frozenset(
         "scanner_memory_mb",
     }
 )
+_TYPES: dict[str, tuple[type, ...]] = {
+    "str": (str,),
+    "int": (int,),
+    "float": (int, float),
+    "bool": (bool,),
+    "tuple[str, ...]": (tuple,),
+}
+
+
+def _check_defaults() -> None:
+    """`defaults.toml` sets exactly the non-secret settings, each with the right type,
+    and its provider tables name known providers and settings."""
+    settings = {f.name: str(f.type) for f in fields(Config) if f.name not in _SECRETS}
+    problems = [f"unknown setting {k!r}" for k in _DEFAULTS.keys() - settings.keys()]
+    for name, table in _PROVIDER_DEFAULTS.items():
+        if name not in SUPPORTED_PROVIDERS:
+            problems.append(f"[providers.{name}] is not a supported provider")
+        problems += [
+            f"[providers.{name}] unknown setting {k!r}" for k in table.keys() - settings.keys()
+        ]
+    tables = [("", _DEFAULTS)]
+    tables += [(f"[providers.{p}] ", t) for p, t in _PROVIDER_DEFAULTS.items()]
+    for source, table in tables:
+        for key, value in table.items():
+            expected = _TYPES.get(settings.get(key, ""), ())
+            is_bool = isinstance(value, bool)
+            if expected and (not isinstance(value, expected) or (is_bool and bool not in expected)):
+                problems.append(f"{source}{key} = {value!r} should be {settings[key]}")
+    if problems:
+        raise ConfigurationError(f"{DEFAULTS_FILE}: " + "; ".join(problems))
+
+
+_check_defaults()
