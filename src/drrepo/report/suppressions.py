@@ -200,6 +200,33 @@ def baseline_toml(issues: list[dict[str, Any]], *, reason: str, expires: date | 
     return "\n".join(lines)
 
 
+def suppression_entry(issue: dict[str, Any], *, reason: str, expires: date | None) -> str:
+    """One `[[suppress]]` entry for `issue` (its rule, in its file), with your reason."""
+    if not reason.strip():
+        raise SuppressionError("a suppression needs a reason")
+    lines = [
+        "[[suppress]]",
+        f"rule = {_toml_str(rule_key(issue.get('source') or issue['category'], issue.get('rule_id')))}",
+    ]
+    if issue.get("file"):
+        lines.append(f"path = {_toml_str(str(issue['file']))}")
+    lines.append(f"reason = {_toml_str(reason.strip()[:300])}")
+    if expires:
+        lines.append(f"expires = {expires.isoformat()}")
+    return "\n".join(lines) + "\n"
+
+
+def append_suppression(
+    path: Path, issue: dict[str, Any], *, reason: str, expires: date | None
+) -> None:
+    """Add an entry to a suppression file, creating it if needed; the result must still parse."""
+    entry = suppression_entry(issue, reason=reason, expires=expires)
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    updated = (existing.rstrip() + "\n\n" if existing.strip() else "") + entry
+    parse(updated, origin="local", source_name=str(path))  # never write a file that won't load
+    path.write_text(updated, encoding="utf-8")
+
+
 def _toml_str(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
     return f'"{escaped}"'

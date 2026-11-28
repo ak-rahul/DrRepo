@@ -1,11 +1,12 @@
-"""Connectivity checks (LLM provider, GitHub, OSV.dev) and the FastAPI health app.
+"""Connectivity checks (LLM provider, GitHub, OSV.dev) and the health endpoints.
 
 No check spends LLM tokens: provider health is probed via the `/models` listing
 endpoint, which validates the key without running a completion. Checks take an
 explicit `Config` and an injectable `httpx.Client`, so tests use fakes.
 
-The FastAPI `app` (served by `drrepo health-api`) never runs an analysis: it
-exposes liveness, readiness (config valid), and these checks. Endpoints are
+The health `router` (part of `drrepo serve`, see `interfaces/api.py`) never
+runs an analysis: it exposes liveness, readiness (config valid), and these
+checks, without authentication. Endpoints are
 plain `def` so FastAPI runs the blocking checks in its threadpool instead of
 stalling the event loop. Config loads on first request, not at import.
 """
@@ -20,7 +21,7 @@ from functools import lru_cache
 from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from drrepo import __version__
@@ -169,38 +170,22 @@ def check_all(config: Config, client: httpx.Client | None = None) -> dict[str, A
 
 # ------------------------------------------------------------- FastAPI ---
 
-app = FastAPI(
-    title="DrRepo Health API",
-    description="Liveness, readiness, and dependency connectivity for DrRepo deployments.",
-    version=__version__,
-)
+# Mounted by the REST API (`interfaces/api.py`, served by `drrepo serve`).
+router = APIRouter(tags=["health"])
 
 
 @lru_cache(maxsize=1)
 def get_config() -> Config:
-    """Loaded on first request (not at import), so importing the app has no side effects."""
+    """Loaded on first request (not at import), so importing the router has no side effects."""
     return Config.from_env()
 
 
-@app.get("/")
-def root() -> dict[str, object]:
-    return {
-        "service": "DrRepo Health API",
-        "version": __version__,
-        "endpoints": {
-            "/health": "Full dependency check (LLM provider, GitHub, OSV.dev)",
-            "/health/live": "Process is alive",
-            "/health/ready": "Configuration is valid for running analyses",
-        },
-    }
-
-
-@app.get("/health/live", response_class=PlainTextResponse)
+@router.get("/health/live", response_class=PlainTextResponse)
 def live() -> str:
     return "alive"
 
 
-@app.get("/health/ready")
+@router.get("/health/ready")
 def ready() -> JSONResponse:
     try:
         missing = get_config().validate_for_llm()
@@ -211,7 +196,7 @@ def ready() -> JSONResponse:
     return JSONResponse({"ready": True})
 
 
-@app.get("/health")
+@router.get("/health")
 def health() -> JSONResponse:
     try:
         status = check_all(get_config())

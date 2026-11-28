@@ -278,3 +278,28 @@ def test_start_compare_job_calls_the_service():
         "done",
         {"base": "main", "head": None, "deep": True},
     )
+
+
+def test_mark_as_false_positive_writes_a_suppression(monkeypatch, tmp_path):
+    from drrepo.report.suppressions import load_file
+    from drrepo.service import AnalysisService
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setattr(AnalysisService, "list_reports", lambda self: [{"repository": "octo/demo"}])
+    monkeypatch.setattr(AnalysisService, "latest_report", lambda self, repo: REPORT)
+    at = AppTest.from_file(str(APP), default_timeout=30)
+    at.run()
+    at.sidebar.selectbox[0].set_value("octo/demo").run()
+    reason = next(t for t in at.text_input if t.key and t.key.endswith("-issue-1-0-reason"))
+    reason.input("Launches the pager by design")
+    submit = next(b for b in at.button if b.label == "Add suppression")
+    submit.click().run()
+    assert not at.exception
+    assert any(".drrepo.toml" in s.value for s in at.success)
+    [entry] = load_file(tmp_path / ".drrepo.toml")
+    assert (entry.rule, entry.path, entry.reason) == (
+        "bandit/B602",
+        "a.py",
+        "Launches the pager by design",
+    )

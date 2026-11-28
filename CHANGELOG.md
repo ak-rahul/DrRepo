@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
+- `Config` no longer shows API keys or tokens in its `repr`.
 - The web UI rendered text from the analyzed repository (issue titles and descriptions, summaries, notes, file names) as Markdown, so a planted `![](https://...)` could load a remote image (a tracking pixel) and `$...$` rendered as LaTeX. All such text is now escaped (`interfaces/ui_data.escape_markdown`); tables and code blocks show it as plain text.
 - `search_code` (an investigator tool whose regex the LLM chooses) could be stalled forever by a catastrophic-backtracking pattern, for example one planted by prompt injection in an analyzed repository. Matching now uses `regex` with a per-line timeout and a total time budget.
 - Four README patterns were quadratic in attacker-controlled input (7 s for 30k newlines). They are now linear, and README text is capped at 100k characters everywhere, including the GitHub API path.
@@ -32,9 +33,17 @@ All notable changes to this project are documented here. The format follows [Kee
 - Coverage now includes the Streamlit app. It used to report 0% because the app runs as `__main__`.
 
 ### Removed
+- `drrepo.interfaces.health.app`: the health endpoints are now a router inside the REST API (`drrepo serve`).
 - The external MCP server (`drrepo mcp`, its Docker Compose profile and the MCP client examples). MCP is now used only inside DrRepo: each investigator calls its tools through the in-memory tool server. Assistants can run the CLI (`drrepo audit --json`) instead.
 
 ### Added
+- Organization batch mode: `drrepo org <owner>` audits an organization's (or user's) newest-pushed public repositories on a bounded pool, and writes a Markdown/JSON leaderboard with each repository's change since the previous run, plus one SARIF log with a run per repository.
+- Observability: Prometheus metrics at `/metrics` (analyses, durations, collector results, tokens, jobs, breaker state), `LOG_FORMAT=json`, and OpenTelemetry traces (the `otel` extra and `OTEL_EXPORTER_OTLP_ENDPOINT`) with a span per collector and category in one trace per analysis.
+- Clone cache by commit (`CLONE_CACHE_TTL_SECONDS`, off by default): `git ls-remote` resolves the commit, and a cached clone of it is copied out instead of cloning again.
+- Scanner resource limits: on Linux, scanners and `git log` run under `prlimit` (a file-size cap by default, an opt-in memory cap).
+- Web UI: "mark as false positive" on every issue appends a suppression with your reason and an expiry, and each agent finding shows the tool calls that read the cited file.
+- REST API: `drrepo serve` replaces `drrepo health-api` (still accepted as an alias) and keeps its health endpoints. `POST /analyses` queues an analysis as a background job on a bounded worker pool; `GET /analyses/{id}` reports status and progress, `/analyses/{id}/report?format=` exports it, and `/repos/{owner}/{name}/history`, `/repos/{owner}/{name}/report` and `/badge/{owner}/{name}` (shields.io) serve history. API keys (`API_KEYS`) with per-key job isolation and rate limits (`API_RATE_LIMIT_PER_HOUR`), a queue cap (`API_MAX_QUEUED`), and without keys only same-machine callers that carry no proxy headers. The Compose `api` profile runs it.
+- Persistent store: `STORE_BACKEND=sqlite` keeps scores, full reports and API jobs in `reports/drrepo.db` (WAL mode, safe across processes), so queued jobs resume after a restart. The JSON history stays the default. `AnalysisService(store=...)` replaces `history_path=`.
 - Investigations fit small rate limits. Each investigator sees only its own collectors' data, as compact JSON without the README: first requests dropped from about 7,200 tokens to 2,000-3,700. `INVESTIGATION_CONTEXT_TOKENS` caps a whole request by clearing older tool results and cutting long ones, `LLM_MAX_PARALLEL_INVESTIGATIONS` runs investigations one at a time, and each model call in the agent loop waits out the provider's `retry-after` within the time budget. A malformed tool call the model generated (Groq `tool_use_failed`) is now retried instead of failing the call, and a daily quota fails at once instead of being retried.
 - An investigation that uses up its tool calls now submits what it found: further tool calls are answered "budget used up" without running. Before, it ended with a `GraphRecursionError` and its findings were lost.
 - Complexity and duplication metrics (`recon/complexity.py`): lizard cyclomatic complexity and function length in 20 languages, and a copy-paste detector, over product code only. They feed Code Quality as aggregated issues (`high-complexity`, `very-high-complexity`, `long-function`, `duplicated-code`), so repositories without Python now get a Code Quality score. Toggle: `ENABLE_COMPLEXITY_METRICS`.

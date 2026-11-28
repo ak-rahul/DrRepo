@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # DrRepo image: Streamlit UI by default; the same image runs the CLI or the
-# health API by overriding the command (see docker-compose.yml).
+# REST API (`drrepo serve`) by overriding the command (see docker-compose.yml).
 
 # ---- build stage: resolve and install dependencies with uv -------------------
 FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
@@ -52,7 +52,7 @@ ENV PATH="/app/.venv/bin:/opt/uv-tools/bin:$PATH"     PYTHONUNBUFFERED=1     PYT
 
 USER 1000:1000
 
-# 8501 Streamlit UI · 8000 health API
+# 8501 Streamlit UI · 8000 REST API
 EXPOSE 8501 8000
 
 # Python instead of curl: one less package (and CVE surface) in the image.

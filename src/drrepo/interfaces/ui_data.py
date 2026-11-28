@@ -11,6 +11,7 @@ no escaping.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -190,4 +191,25 @@ def category_delta_rows(diff: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {"category": label(name), "base": c["base"], "head": c["head"], "change": c["delta"]}
         for name, c in diff.get("category_deltas", {}).items()
+    ]
+
+
+def is_agent_finding(issue: dict[str, Any]) -> bool:
+    return str(issue.get("source", "")).startswith("investigator:")
+
+
+def evidence_steps(issue: dict[str, Any], report: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tool calls of the issue's investigation that touched the cited file, in order:
+    what the agent actually read before it reported the finding."""
+    if not is_agent_finding(issue) or not issue.get("file"):
+        return []
+    trace = (report.get("category_scores", {}).get(issue["category"]) or {}).get(
+        "investigation_trace", []
+    )
+    cited = str(issue["file"])
+    return [
+        step
+        for step in trace
+        if cited in json.dumps(step.get("tool_input", {}))
+        or cited in str(step.get("observation", ""))
     ]

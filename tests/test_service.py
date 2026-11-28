@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from drrepo.config import Config
+from drrepo.report.store import JsonFileStore
 from drrepo.service import AnalysisService, save_report
 from tests.interfaces.test_cli import REPORT
 
@@ -16,7 +17,7 @@ class TestService:
             Config(groq_api_key="k"),
             llm_client=client,
             workflow=workflow,
-            history_path=tmp_path / "h.json",
+            store=JsonFileStore(tmp_path / "h.json"),
         )
         service.analyze("https://github.com/octo/demo", deep=False)
         service.analyze("github.com/octo/demo.git")
@@ -46,7 +47,7 @@ class TestService:
 def test_ref_is_validated_and_forwarded(tmp_path):
     workflow = MagicMock()
     workflow.run.return_value = dict(REPORT)
-    service = AnalysisService(Config(), workflow=workflow, history_path=tmp_path / "h.json")
+    service = AnalysisService(Config(), workflow=workflow, store=JsonFileStore(tmp_path / "h.json"))
     service.analyze("https://github.com/octo/demo", ref="v1.0", record_history=False)
     assert workflow.run.call_args.args[3] == "v1.0"
     with pytest.raises(ValueError, match="not a valid"):
@@ -60,7 +61,9 @@ def test_deep_estimate_comes_from_history_within_bounds(tmp_path):
     workflow = MagicMock()
     workflow.run.return_value = dict(REPORT)
     service = AnalysisService(
-        Config(estimated_tokens_per_deep_investigation=10_000), workflow=workflow, history_path=path
+        Config(estimated_tokens_per_deep_investigation=10_000),
+        workflow=workflow,
+        store=JsonFileStore(path),
     )
 
     def estimate_after(tokens: list[int]) -> int | None:
@@ -100,7 +103,10 @@ def test_compare_runs_both_commits_and_goes_deep_only_where_worse(tmp_path):
     workflow = MagicMock()
     workflow.run.side_effect = lambda *_a: next(runs)
     service = AnalysisService(
-        Config(), llm_client=MagicMock(), workflow=workflow, history_path=tmp_path / "h.json"
+        Config(),
+        llm_client=MagicMock(),
+        workflow=workflow,
+        store=JsonFileStore(tmp_path / "h.json"),
     )
     diff = service.compare("https://github.com/octo/demo", "main", "b" * 40, deep=True)
 
@@ -122,7 +128,10 @@ def test_compare_skips_the_deep_run_when_nothing_got_worse(tmp_path):
     workflow = MagicMock()
     workflow.run.side_effect = lambda *_a: _scored(80)
     service = AnalysisService(
-        Config(), llm_client=MagicMock(), workflow=workflow, history_path=tmp_path / "h.json"
+        Config(),
+        llm_client=MagicMock(),
+        workflow=workflow,
+        store=JsonFileStore(tmp_path / "h.json"),
     )
     diff = service.compare("https://github.com/octo/demo", "main", deep=True)
     assert workflow.run.call_count == 2 and diff["deep_categories"] == []

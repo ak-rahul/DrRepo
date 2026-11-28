@@ -186,15 +186,19 @@ def test_version(capsys):
     assert capsys.readouterr().out.startswith("drrepo ")
 
 
-def test_health_api_command_starts_uvicorn(monkeypatch):
+def test_serve_starts_the_api_and_health_api_is_an_alias(monkeypatch, tmp_path):
     import uvicorn
+    from fastapi import FastAPI
 
     calls = []
-    monkeypatch.setattr(cli, "_load_config", lambda _e: Config())
+    store = str(tmp_path / "h.json")
+    monkeypatch.setattr(cli, "_load_config", lambda _e: Config(store_path=store))
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: calls.append((app, kwargs)))
-    assert cli.main(["health-api", "--port", "8001", "--log-file", ""]) == cli.EXIT_OK
-    app, kwargs = calls[0]
-    assert app == "drrepo.interfaces.health:app" and kwargs["port"] == 8001
+    assert cli.main(["serve", "--port", "8001", "--log-file", ""]) == cli.EXIT_OK
+    assert cli.main(["health-api", "--log-file", ""]) == cli.EXIT_OK
+    (app, kwargs), (_, alias_kwargs) = calls
+    assert isinstance(app, FastAPI) and kwargs["port"] == 8001
+    assert alias_kwargs["host"] == "127.0.0.1" and alias_kwargs["port"] == 8000
 
 
 def test_doctor_reports_missing_semgrep_with_install_hint(monkeypatch, capsys, tmp_path):

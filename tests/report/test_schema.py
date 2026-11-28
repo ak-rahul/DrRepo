@@ -9,8 +9,8 @@ from drrepo.agents.llm import LLMRuntime, TokenBudget
 from drrepo.config import Config
 from drrepo.models import REPORT_SCHEMA_VERSION, RepoRef
 from drrepo.pipeline import RunContext, Workflow
-from drrepo.report import history
 from drrepo.report.schema import load_schema, validate
+from drrepo.report.store import JsonFileStore, attach_history
 from drrepo.report.suppressions import Suppression
 
 
@@ -40,8 +40,8 @@ def test_full_pipeline_reports_are_valid(pipeline, tmp_path):
     assert with_extras["suppressed"] and "llm_usage" in with_extras
     validate(with_extras)
     path = tmp_path / "history.json"
-    history.attach_and_record_history(copy.deepcopy(with_extras), path)
-    second = history.attach_and_record_history(copy.deepcopy(with_extras), path)
+    attach_history(copy.deepcopy(with_extras), JsonFileStore(path))
+    second = attach_history(copy.deepcopy(with_extras), JsonFileStore(path))
     assert "score_history" in second
     validate(second)
 

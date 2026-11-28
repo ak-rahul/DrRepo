@@ -163,3 +163,19 @@ def test_exports_mark_suppressed_issues(report_dict):
         "justification": "by design (local)",
     }
     assert "## Suppressed (1)" in to_markdown(report)
+
+
+def test_append_suppression_round_trips_and_refuses_an_empty_reason(tmp_path):
+    from datetime import date
+
+    from drrepo.report.suppressions import append_suppression, load_file
+
+    path = tmp_path / ".drrepo.toml"
+    issue = {"source": "bandit", "category": "security", "rule_id": "B602", "file": "a.py"}
+    append_suppression(path, issue, reason='Uses "shell" on purpose', expires=date(2027, 1, 1))
+    append_suppression(path, {**issue, "file": None}, reason="all of them", expires=None)
+    first, second = load_file(path)
+    assert (first.rule, first.path, first.expires) == ("bandit/B602", "a.py", date(2027, 1, 1))
+    assert first.reason == 'Uses "shell" on purpose' and second.path is None
+    with pytest.raises(SuppressionError, match="reason"):
+        append_suppression(path, issue, reason="  ", expires=None)

@@ -97,7 +97,7 @@ class TestScanTool:
     def test_runs_scanner_on_subpath(self, repo, monkeypatch):
         calls = []
 
-        def fake(root, target, timeout):
+        def fake(root, target, timeout, config=None):
             calls.append((root, target))
             return ScanResult(
                 "ruff",

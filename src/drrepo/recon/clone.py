@@ -25,15 +25,15 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus, RepoRef
+from drrepo.recon.clone_cache import CloneCache, resolve_commit
+from drrepo.recon.files import dir_size_mb, remove_tree
 
 NAME = "repo_clone"
 
@@ -61,35 +61,7 @@ class ClonedRepo:
     repo_url: str
 
     def cleanup(self) -> None:
-        _rmtree(self.path)
-
-
-def _rmtree(path: Path) -> None:
-    def _on_error(func: Callable[[str], object], p: str, _exc: object) -> None:
-        # Git marks pack files read-only; Windows refuses to delete those.
-        try:
-            Path(p).chmod(0o700)
-            func(p)
-        except OSError:
-            pass
-
-    if not path.exists():
-        return
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=_on_error)
-    else:  # pragma: no cover - 3.11 only
-        shutil.rmtree(path, onerror=_on_error)
-
-
-def _dir_size_mb(path: Path) -> float:
-    total = 0
-    for dirpath, _dirnames, filenames in os.walk(path):
-        for name in filenames:
-            try:
-                total += (Path(dirpath) / name).lstat().st_size
-            except OSError:
-                continue
-    return total / (1024 * 1024)
+        remove_tree(self.path)
 
 
 def git_env() -> dict[str, str]:
@@ -191,11 +163,31 @@ def clone_repo(
 
     dest = Path(tempfile.mkdtemp(prefix="drrepo_clone_"))
     target = f"{repo.full_name}@{ref}" if ref else repo.full_name
-    for args in _clone_commands(repo.clone_url, dest, ref, clone_depth(config)):
+    depth = clone_depth(config)
+    cache = CloneCache.from_config(config)
+    cached_sha = (
+        resolve_commit(repo.clone_url, ref, config.clone_timeout_seconds) if cache else None
+    )
+    if cache and cached_sha:
+        dest.rmdir()  # copytree creates it
+        if cache.checkout(repo.full_name, cached_sha, depth, dest):
+            return ClonedRepo(path=dest, repo_url=repo.html_url), CollectorResult(
+                name=NAME,
+                status=CollectorStatus.OK,
+                data={
+                    "size_mb": round(dir_size_mb(dest), 1),
+                    "full_name": repo.full_name,
+                    "commit_sha": cached_sha,
+                    "ref": ref,
+                    "cached": True,
+                },
+            )
+        dest.mkdir()
+    for args in _clone_commands(repo.clone_url, dest, ref, depth):
         try:
             result = _git(args, cwd=None, timeout=config.clone_timeout_seconds)
         except subprocess.TimeoutExpired:
-            _rmtree(dest)
+            remove_tree(dest)
             logger.warning(f"Clone of {target} timed out after {config.clone_timeout_seconds}s")
             return None, CollectorResult(
                 name=NAME,
@@ -203,12 +195,12 @@ def clone_repo(
                 detail=f"Clone timed out after {config.clone_timeout_seconds}s",
             )
         except OSError as e:
-            _rmtree(dest)
+            remove_tree(dest)
             return None, CollectorResult(
                 name=NAME, status=CollectorStatus.ERROR, detail=f"Could not run git: {e}"
             )
         if result.returncode != 0:
-            _rmtree(dest)
+            remove_tree(dest)
             stderr = result.stderr.strip()
             logger.warning(f"Clone of {target} failed: {stderr[:300]}")
             if "could not read Username" in stderr or "not found" in stderr.lower():
@@ -230,9 +222,9 @@ def clone_repo(
     head = _git(["-C", str(dest), "rev-parse", "HEAD"], cwd=None, timeout=30)
     commit_sha = head.stdout.strip() if head.returncode == 0 else None
 
-    size_mb = _dir_size_mb(dest)
+    size_mb = dir_size_mb(dest)
     if size_mb > config.clone_max_size_mb:
-        _rmtree(dest)
+        remove_tree(dest)
         logger.warning(f"Clone of {target} exceeded size cap: {size_mb:.0f}MB")
         return None, CollectorResult(
             name=NAME,
@@ -244,6 +236,8 @@ def clone_repo(
         )
 
     logger.info(f"Cloned {target} at {(commit_sha or '?')[:12]} ({size_mb:.1f}MB)")
+    if cache and commit_sha:
+        cache.store(repo.full_name, commit_sha, depth, dest)
     return ClonedRepo(path=dest, repo_url=repo.html_url), CollectorResult(
         name=NAME,
         status=CollectorStatus.OK,

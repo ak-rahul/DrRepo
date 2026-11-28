@@ -133,7 +133,7 @@ class TestClone:
             "run",
             lambda *_a, **_k: SimpleNamespace(returncode=0, stderr="", stdout="f" * 40),
         )
-        monkeypatch.setattr(clone, "_dir_size_mb", lambda _p: 999.0)
+        monkeypatch.setattr(clone, "dir_size_mb", lambda _p: 999.0)
         cloned, result = clone_repo("https://github.com/a/b", Config(clone_max_size_mb=10))
         assert cloned is None and result.status.value == "skipped" and "999MB" in result.detail
 

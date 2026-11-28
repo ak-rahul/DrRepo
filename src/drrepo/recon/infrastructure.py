@@ -34,6 +34,7 @@ from typing import Any
 from drrepo.config import Config
 from drrepo.models import CollectorResult, CollectorStatus
 from drrepo.recon.files import iter_repo_files, read_text_file, relative_posix
+from drrepo.recon.limits import limited
 from drrepo.recon.scanners import find_executable
 
 NAME = "infrastructure"
@@ -71,12 +72,14 @@ def is_dockerfile(name: str) -> bool:
     return name.lower() == "dockerfile" or bool(_DOCKERFILE_RE.search(name))
 
 
-def _run_json(argv: list[str], cwd: Path, timeout: int) -> tuple[Any | None, str | None]:
+def _run_json(
+    argv: list[str], cwd: Path, timeout: int, config: Config | None = None
+) -> tuple[Any | None, str | None]:
     """Run a linter that prints JSON; returns (parsed, error_reason). Non-zero exits are fine:
     both tools exit non-zero when they find something."""
     try:
         proc = subprocess.run(
-            argv,
+            limited(argv, config or Config()),  # resource caps: recon/limits.py
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -96,12 +99,14 @@ def _run_json(argv: list[str], cwd: Path, timeout: int) -> tuple[Any | None, str
         return None, f"unparseable output (exit {proc.returncode}): {proc.stderr.strip()[:200]}"
 
 
-def run_zizmor(root: Path, timeout: int) -> tuple[list[dict[str, Any]], str]:
+def run_zizmor(
+    root: Path, timeout: int, config: Config | None = None
+) -> tuple[list[dict[str, Any]], str]:
     exe = find_executable("zizmor")
     if exe is None:
         return [], "skipped: zizmor not installed"
     argv = [exe, "--offline", "--no-config", "--no-ignores", "--format", "json", "--", str(root)]
-    parsed, error = _run_json(argv, cwd=root, timeout=timeout)
+    parsed, error = _run_json(argv, cwd=root, timeout=timeout, config=config)
     if error:
         return [], f"skipped: {error}"
     findings = []
@@ -141,7 +146,7 @@ def run_zizmor(root: Path, timeout: int) -> tuple[list[dict[str, Any]], str]:
 
 
 def run_hadolint(
-    root: Path, dockerfiles: list[Path], timeout: int
+    root: Path, dockerfiles: list[Path], timeout: int, config: Config | None = None
 ) -> tuple[list[dict[str, Any]], str]:
     exe = find_executable("hadolint")
     if exe is None:
@@ -150,7 +155,7 @@ def run_hadolint(
     # A neutral working directory: hadolint would otherwise pick up a repo's .hadolint.yaml.
     with tempfile.TemporaryDirectory(prefix="drrepo_hadolint_") as neutral:
         argv = [exe, "--no-fail", "--disable-ignore-pragma", "-f", "json", *map(str, dockerfiles)]
-        parsed, error = _run_json(argv, cwd=Path(neutral), timeout=timeout)
+        parsed, error = _run_json(argv, cwd=Path(neutral), timeout=timeout, config=config)
     if error:
         return [], f"skipped: {error}"
     for raw in parsed or []:
@@ -228,7 +233,7 @@ def collect_infrastructure(clone_path: str, config: Config) -> CollectorResult:
     elif not workflow_files and not (root / "action.yml").is_file():
         status["zizmor"] = "skipped: no GitHub Actions workflows"
     else:
-        found, status["zizmor"] = run_zizmor(root, config.collector_timeout_seconds)
+        found, status["zizmor"] = run_zizmor(root, config.collector_timeout_seconds, config)
         findings += found
 
     if not config.enable_dockerfile_audit:
@@ -237,7 +242,7 @@ def collect_infrastructure(clone_path: str, config: Config) -> CollectorResult:
         status["hadolint"] = status["dockerfile_checks"] = "skipped: no Dockerfiles"
     else:
         found, status["hadolint"] = run_hadolint(
-            root, dockerfiles, config.collector_timeout_seconds
+            root, dockerfiles, config.collector_timeout_seconds, config
         )
         findings += found
         findings += [f for d in dockerfiles if (f := check_dockerfile_user(root, d))]

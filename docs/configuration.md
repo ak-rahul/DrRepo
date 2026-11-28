@@ -36,6 +36,12 @@ If the provider's key is missing, DrRepo runs without an LLM: findings and score
 |---|---|---|
 | `CLONE_TIMEOUT_SECONDS` | `60` | |
 | `CLONE_MAX_SIZE_MB` | `300` | larger clones are deleted and clone-based collectors are skipped |
+| `CLONE_CACHE_TTL_SECONDS` | `0` | reuse a clone of the same commit for this long (`0` = off). Worth it for `drrepo serve`, the UI and `drrepo diff --deep` |
+| `CLONE_CACHE_MAX_MB` | `2000` | the cache's size cap; the oldest entries go first |
+| `CLONE_CACHE_DIR` | system temp `drrepo-clone-cache` | where cached clones live |
+| `ENABLE_SCANNER_LIMITS` | `true` | on Linux, run scanners and `git log` under `prlimit` caps |
+| `SCANNER_FILE_SIZE_MB` | `512` | largest file a scanner process may write |
+| `SCANNER_MEMORY_MB` | `0` | address-space cap per scanner process (`0` = off; tools like hadolint reserve far more virtual memory than they use) |
 | `COLLECTOR_TIMEOUT_SECONDS` | `120` | per scanner subprocess and HTTP client |
 | `ENABLE_SEMGREP` | `true` | semgrep is the slowest scanner and downloads its ruleset. It runs only if installed (`uv tool install semgrep`) |
 | `ENABLE_BANDIT` | `true` | |
@@ -76,7 +82,18 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 | `LLM_TOKEN_BUDGET_PER_RUN` | `60000` | reset at the start of every run |
 | `ESTIMATED_TOKENS_PER_DEEP_INVESTIGATION` | `12000` | expected cost of one deep investigation (a lite one costs half) until score history has measurements; measured estimates stay within ¼× and 4× of this |
 | `ENABLE_DEPENDENCY_LOOKUP_CACHE` | `true` | in-memory, per process |
-| `ENABLE_SCORE_HISTORY` | `true` | appends to `reports/history.json` (20 runs per repository) |
+| `ENABLE_SCORE_HISTORY` | `true` | records each run so the next one shows deltas |
+| `STORE_BACKEND` | `json` | `json`: scores in `reports/history.json` (20 runs per repository; API jobs in memory). `sqlite`: scores, full reports (200 runs per repository) and API jobs in `reports/drrepo.db`, safe for several processes |
+| `STORE_PATH` | backend default | another file for the store |
+
+## REST API (`drrepo serve`)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `API_KEYS` | — | comma-separated keys. Without any, only clients on the same machine are served |
+| `API_WORKERS` | `2` | analyses running at once |
+| `API_MAX_QUEUED` | `50` | waiting analyses before `POST /analyses` returns 503 |
+| `API_RATE_LIMIT_PER_HOUR` | `30` | analyses per client per hour (sliding window) |
 | `SUPPRESSIONS_FILE` | empty | suppression file (`.drrepo.toml` format) applied to every analysis |
 | `TRUST_REPO_SUPPRESSIONS` | `false` | also honor the analyzed repository's own `.drrepo.toml`. Enable only for your own repositories: otherwise a repository could hide its own findings |
 
@@ -84,6 +101,8 @@ Setting either license variable replaces the built-in heuristic (copyleft depend
 
 | Variable | Default | Notes |
 |---|---|---|
+| `LOG_FORMAT` | `text` | `json`: one JSON object per line (`timestamp`, `level`, `logger`, `message`, `exception`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | with the `otel` extra (`uv sync --extra otel`), export traces over OTLP/HTTP, e.g. `http://localhost:4318` |
 | `LOG_LEVEL` | `INFO` | applies to the log file (`logs/app.log`, override with `--log-file`; `--log-file ''` disables it). The CLI console shows only warnings unless `-v` is passed |
 
 ## Tuning recipes

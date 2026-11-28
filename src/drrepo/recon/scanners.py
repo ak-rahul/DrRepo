@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus
 from drrepo.recon.files import SKIP_DIRS, language_file_counts, relative_posix
+from drrepo.recon.limits import limited
 from drrepo.recon.secrets import scan_secrets
 
 # Ruff runs `--isolated` (ignoring the analyzed repo's own config, which could
@@ -75,14 +77,16 @@ def find_executable(name: str) -> str | None:
     return shutil.which(name)
 
 
-def _run(tool: str, args: list[str], cwd: Path, timeout: int) -> tuple[str | None, str | None]:
-    """Run a scanner; return (stdout, error_reason)."""
+def _run(
+    tool: str, args: list[str], cwd: Path, timeout: int, config: Config | None = None
+) -> tuple[str | None, str | None]:
+    """Run a scanner under the resource caps (`recon/limits.py`); return (stdout, error_reason)."""
     exe = find_executable(tool)
     if exe is None:
         return None, f"{tool} not installed"
     try:
         proc = subprocess.run(
-            [exe, *args],
+            limited([exe, *args], config or Config()),
             check=False,  # scanners exit non-zero when they find something
             cwd=cwd,
             capture_output=True,
@@ -104,7 +108,9 @@ def _target_arg(root: Path, target: Path) -> str:
     return "." if rel in ("", ".") else rel
 
 
-def run_ruff(root: Path, target: Path | None = None, timeout: int = 120) -> ScanResult:
+def run_ruff(
+    root: Path, target: Path | None = None, timeout: int = 120, config: Config | None = None
+) -> ScanResult:
     target_arg = _target_arg(root, target or root)
     stdout, err = _run(
         "ruff",
@@ -123,6 +129,7 @@ def run_ruff(root: Path, target: Path | None = None, timeout: int = 120) -> Scan
         ],
         root,
         timeout,
+        config,
     )
     if err:
         return ScanResult("ruff", False, reason=err)
@@ -145,11 +152,13 @@ def run_ruff(root: Path, target: Path | None = None, timeout: int = 120) -> Scan
     return ScanResult("ruff", True, findings)
 
 
-def run_bandit(root: Path, target: Path | None = None, timeout: int = 120) -> ScanResult:
+def run_bandit(
+    root: Path, target: Path | None = None, timeout: int = 120, config: Config | None = None
+) -> ScanResult:
     target_arg = _target_arg(root, target or root)
     args = ["-f", "json", "-q", "--skip", "B101", "-x", _BANDIT_EXCLUDES]
     args += ["-r", target_arg] if (target or root).is_dir() else [target_arg]
-    stdout, err = _run("bandit", args, root, timeout)
+    stdout, err = _run("bandit", args, root, timeout, config)
     if err:
         return ScanResult("bandit", False, reason=err)
     try:
@@ -187,6 +196,7 @@ def run_semgrep(
     target: Path | None = None,
     timeout: int = 120,
     rulesets: tuple[str, ...] | list[str] = (),
+    config: Config | None = None,
 ) -> ScanResult:
     target_arg = _target_arg(root, target or root)
     configs = [f"--config={c}" for c in dict.fromkeys([SEMGREP_CONFIG, *rulesets])]
@@ -204,6 +214,7 @@ def run_semgrep(
         ],
         root,
         timeout,
+        config,
     )
     if err:
         return ScanResult("semgrep", False, reason=err)
@@ -225,7 +236,11 @@ def run_semgrep(
     return ScanResult("semgrep", True, findings)
 
 
-SCANNERS = {"ruff": run_ruff, "bandit": run_bandit, "semgrep": run_semgrep}
+SCANNERS: dict[str, Callable[..., ScanResult]] = {
+    "ruff": run_ruff,
+    "bandit": run_bandit,
+    "semgrep": run_semgrep,
+}
 
 # ---------------------------------------------------------- collectors ---
 
@@ -235,7 +250,7 @@ def collect_static_analysis(clone_path: str, config: Config) -> CollectorResult:
     root = Path(clone_path)
     if not root.is_dir():
         return CollectorResult.skipped("static_analysis", "No local clone available")
-    ruff = run_ruff(root, timeout=config.collector_timeout_seconds)
+    ruff = run_ruff(root, timeout=config.collector_timeout_seconds, config=config)
     if not ruff.available:
         logger.info(f"ruff skipped: {ruff.reason}")
         return CollectorResult(
@@ -270,7 +285,7 @@ def collect_security(clone_path: str, config: Config) -> CollectorResult:
         if not enabled:
             tool_status[tool] = "disabled by config"
             continue
-        result = runner(root, timeout=timeout)
+        result = runner(root, timeout=timeout, config=config)
         if result.available:
             tool_status[tool] = "ok"
             findings.extend(result.findings)

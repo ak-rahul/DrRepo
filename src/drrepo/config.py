@@ -13,12 +13,13 @@ construction, however it is built. Derive per-run variants with
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from drrepo.errors import ConfigurationError
 
 SUPPORTED_PROVIDERS = ("groq", "openai", "anthropic", "ollama")
+STORE_BACKENDS = ("json", "sqlite")
 # Used when MODEL_NAME is unset. Override any of them with MODEL_NAME / MODEL_NAME_<ROLE>.
 DEFAULT_MODELS = {
     "groq": "openai/gpt-oss-120b",
@@ -81,11 +82,11 @@ def _env_float(name: str, default: float) -> float:
 class Config:
     """Application configuration. Build via `Config.from_env()` or directly for tests."""
 
-    # API keys
-    groq_api_key: str = ""
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    github_token: str = ""
+    # API keys (kept out of repr, so a logged or printed Config never shows them)
+    groq_api_key: str = field(default="", repr=False)
+    openai_api_key: str = field(default="", repr=False)
+    anthropic_api_key: str = field(default="", repr=False)
+    github_token: str = field(default="", repr=False)
 
     # Model configuration. Empty model names fall back: role -> MODEL_NAME -> provider default.
     model_provider: str = "groq"
@@ -101,10 +102,21 @@ class Config:
 
     # Application settings
     log_level: str = "INFO"
+    log_format: str = "text"  # "json": one JSON object per line
+    # OpenTelemetry traces over OTLP/HTTP (needs the otel extra; telemetry.py).
+    otel_endpoint: str = ""
 
     # Clone/collector limits
     clone_timeout_seconds: int = 60
     clone_max_size_mb: int = 300
+    # Reuse a clone of the same commit for this long (0 = off; recon/clone_cache.py).
+    clone_cache_ttl_seconds: int = 0
+    clone_cache_max_mb: int = 2000
+    clone_cache_dir: str = ""
+    # Caps on scanner and git subprocesses, via prlimit on Linux (recon/limits.py).
+    enable_scanner_limits: bool = True
+    scanner_file_size_mb: int = 512
+    scanner_memory_mb: int = 0  # 0 = no address-space cap
     collector_timeout_seconds: int = 120
 
     # Feature toggles (let a deployment disable a heavy/optional collector)
@@ -173,9 +185,20 @@ class Config:
     suppressions_file: str = ""
     trust_repo_suppressions: bool = False
 
-    # Score history: append each run's scores to reports/history.json so a
-    # later run can report a delta against the previous analysis.
+    # Score history: record each run so a later run can report a delta against
+    # the previous analysis. Where: report/store.py. "json" keeps scores in
+    # reports/history.json; "sqlite" keeps scores, full reports and API jobs in
+    # reports/drrepo.db. STORE_PATH overrides the file.
     enable_score_history: bool = True
+    store_backend: str = "json"
+    store_path: str = ""
+
+    # REST API (`drrepo serve`, interfaces/api.py). With no API keys, only
+    # clients on this machine may use the analysis endpoints.
+    api_keys: tuple[str, ...] = field(default=(), repr=False)
+    api_workers: int = 2
+    api_max_queued: int = 50
+    api_rate_limit_per_hour: int = 30
 
     def __post_init__(self) -> None:
         """Reject values that would only fail later, deep inside a run.
@@ -189,6 +212,12 @@ class Config:
                 f"MODEL_PROVIDER={self.model_provider!r} is not supported "
                 f"(choose one of: {', '.join(SUPPORTED_PROVIDERS)})"
             )
+        if self.store_backend not in STORE_BACKENDS:
+            problems.append(
+                f"STORE_BACKEND={self.store_backend!r} is not one of {', '.join(STORE_BACKENDS)}"
+            )
+        if self.log_format not in ("text", "json"):
+            problems.append(f"LOG_FORMAT={self.log_format!r} is not text or json")
         if self.log_level not in LOG_LEVELS:
             problems.append(f"LOG_LEVEL={self.log_level!r} is not one of {', '.join(LOG_LEVELS)}")
         if not 0.0 <= self.temperature <= 2.0:
@@ -244,8 +273,16 @@ class Config:
                 "LLM_REQUEST_TIMEOUT_SECONDS", d.llm_request_timeout_seconds
             ),
             log_level=_env_str("LOG_LEVEL", d.log_level).upper(),
+            log_format=_env_str("LOG_FORMAT", d.log_format).lower(),
+            otel_endpoint=_env_str("OTEL_EXPORTER_OTLP_ENDPOINT", d.otel_endpoint),
             clone_timeout_seconds=_env_int("CLONE_TIMEOUT_SECONDS", d.clone_timeout_seconds),
             clone_max_size_mb=_env_int("CLONE_MAX_SIZE_MB", d.clone_max_size_mb),
+            clone_cache_ttl_seconds=_env_int("CLONE_CACHE_TTL_SECONDS", d.clone_cache_ttl_seconds),
+            clone_cache_max_mb=_env_int("CLONE_CACHE_MAX_MB", d.clone_cache_max_mb),
+            clone_cache_dir=_env_str("CLONE_CACHE_DIR", d.clone_cache_dir),
+            enable_scanner_limits=_env_bool("ENABLE_SCANNER_LIMITS", d.enable_scanner_limits),
+            scanner_file_size_mb=_env_int("SCANNER_FILE_SIZE_MB", d.scanner_file_size_mb),
+            scanner_memory_mb=_env_int("SCANNER_MEMORY_MB", d.scanner_memory_mb),
             collector_timeout_seconds=_env_int(
                 "COLLECTOR_TIMEOUT_SECONDS", d.collector_timeout_seconds
             ),
@@ -305,6 +342,12 @@ class Config:
                 "ENABLE_DEPENDENCY_LOOKUP_CACHE", d.enable_dependency_lookup_cache
             ),
             enable_score_history=_env_bool("ENABLE_SCORE_HISTORY", d.enable_score_history),
+            store_backend=_env_str("STORE_BACKEND", d.store_backend).lower(),
+            store_path=_env_str("STORE_PATH", d.store_path),
+            api_keys=_env_list("API_KEYS"),
+            api_workers=_env_int("API_WORKERS", d.api_workers),
+            api_max_queued=_env_int("API_MAX_QUEUED", d.api_max_queued),
+            api_rate_limit_per_hour=_env_int("API_RATE_LIMIT_PER_HOUR", d.api_rate_limit_per_hour),
             suppressions_file=_env_str("SUPPRESSIONS_FILE", d.suppressions_file),
             trust_repo_suppressions=_env_bool("TRUST_REPO_SUPPRESSIONS", d.trust_repo_suppressions),
         )
@@ -356,6 +399,10 @@ _MUST_BE_POSITIVE = frozenset(
         "llm_circuit_breaker_threshold",
         "estimated_tokens_per_deep_investigation",
         "investigation_context_tokens",
+        "api_workers",
+        "api_max_queued",
+        "api_rate_limit_per_hour",
+        "clone_cache_max_mb",
     }
 )
 _MUST_BE_NON_NEGATIVE = frozenset(
@@ -364,5 +411,8 @@ _MUST_BE_NON_NEGATIVE = frozenset(
         "llm_token_budget_per_run",
         "scan_history_commits",
         "llm_max_parallel_investigations",
+        "clone_cache_ttl_seconds",
+        "scanner_file_size_mb",
+        "scanner_memory_mb",
     }
 )

@@ -18,10 +18,13 @@ and code blocks show it as plain text.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -41,7 +44,8 @@ from drrepo.report.exporters import (
     to_sarif,
     to_summary,
 )
-from drrepo.report.history import load_history, runs_for
+from drrepo.report.history import repo_key
+from drrepo.report.suppressions import REPOSITORY_FILE, SuppressionError, append_suppression
 from drrepo.report.synthesis import grade
 from drrepo.service import AnalysisService
 
@@ -63,7 +67,7 @@ class AnalysisJob:
 @st.cache_resource
 def get_service() -> AnalysisService:
     config = Config.from_env()
-    configure_logging(config.log_level)
+    configure_logging(config.log_level, fmt=config.log_format)
     return AnalysisService(config)
 
 
@@ -197,7 +201,14 @@ def render_progress() -> None:
 # ----------------------------------------------------------------- report ---
 
 
-def render_issue(issue: dict[str, Any]) -> None:
+def render_issue(
+    issue: dict[str, Any],
+    report: dict[str, Any] | None = None,
+    suppress_to: Path | None = None,
+    key: str = "",
+) -> None:
+    """One issue. With `report`, an agent finding shows what the agent read; with
+    `suppress_to`, a form marks the issue as a false positive in that file."""
     with st.expander(ui.issue_heading(issue)):
         st.markdown(ui.escape_markdown(issue.get("description", "")))
         st.markdown(f"**Fix:** {ui.escape_markdown(issue.get('recommendation', ''))}")
@@ -211,9 +222,38 @@ def render_issue(issue: dict[str, Any]) -> None:
         if extra:
             also = ", ".join(f"{loc['file']}:{loc.get('line')}" for loc in extra[:10])
             st.caption("Also at: " + ui.escape_markdown(also))
+        steps = ui.evidence_steps(issue, report) if report else []
+        if steps:
+            st.markdown("**What the agent read before reporting this**")
+            for step in steps[:3]:
+                st.caption(
+                    ui.escape_markdown(f"{step['tool']} {json.dumps(step['tool_input'])[:200]}")
+                )
+                st.code(step["observation"], language="text")
+        if suppress_to is not None:
+            render_suppress_form(issue, suppress_to, key)
 
 
-def render_issues_tab(result: dict[str, Any], key: str) -> None:
+def render_suppress_form(issue: dict[str, Any], path: Path, key: str) -> None:
+    with st.form(f"{key}-suppress", clear_on_submit=True, border=False):
+        st.caption(f"Mark as a false positive: adds a suppression to `{path}`")
+        c1, c2 = st.columns([3, 1])
+        reason = c1.text_input(
+            "Reason", placeholder="why this finding doesn't apply", key=f"{key}-reason"
+        )
+        expires = c2.date_input(
+            "Expires", value=datetime.now(UTC).date() + timedelta(days=90), key=f"{key}-expires"
+        )
+        if st.form_submit_button("Add suppression"):
+            try:
+                append_suppression(path, issue, reason=reason, expires=expires)
+            except (SuppressionError, OSError) as e:
+                st.error(f"Not added: {e}")
+            else:
+                st.success(f"Added to {path}. It applies from the next analysis.")
+
+
+def render_issues_tab(result: dict[str, Any], key: str, suppress_to: Path | None = None) -> None:
     issues = result.get("issues", [])
     categories = list(result.get("category_scores", {}))
     sources = sorted({i.get("source", "") for i in issues})
@@ -255,8 +295,8 @@ def render_issues_tab(result: dict[str, Any], key: str) -> None:
         )
     visible, pages = ui.page(shown, number, ISSUES_PER_PAGE)
     st.caption(f"{len(shown)} matching issue(s) of {len(issues)}; page {number} of {pages}")
-    for issue in visible:
-        render_issue(issue)
+    for index, issue in enumerate(visible):
+        render_issue(issue, result, suppress_to, key=f"{key}-issue-{number}-{index}")
 
 
 def render_dependencies_tab(result: dict[str, Any], key: str) -> None:
@@ -345,7 +385,11 @@ def render_details_tab(result: dict[str, Any]) -> None:
 
 
 def render_trend(service: AnalysisService, repo: dict[str, Any]) -> None:
-    points = ui.history_points(runs_for(repo, load_history(service.history_path)))
+    try:
+        runs = service.store.runs(repo_key(repo))
+    except (OSError, sqlite3.Error):  # history is a convenience; the report still renders
+        runs = []
+    points = ui.history_points(runs)
     if len(points) >= 2:
         st.markdown("#### Score over time")
         st.line_chart(points, x="run", y="overall", height=200)
@@ -439,7 +483,13 @@ def render_report(
                 st.markdown(f"- {ui.escape_markdown(win)}")
 
     with tabs["Issues"]:
-        render_issues_tab(result, key)
+        render_issues_tab(
+            result,
+            key,
+            suppress_to=Path(service.config.suppressions_file or REPOSITORY_FILE)
+            if service is not None
+            else None,
+        )
     if suppressed:
         with tabs[f"Suppressed ({len(suppressed)})"]:
             st.caption("Excluded from scores and quick wins by a suppression file.")

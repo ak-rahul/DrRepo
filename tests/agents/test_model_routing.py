@@ -8,6 +8,7 @@ import pytest
 from drrepo.agents.llm import LLMRuntime, TokenBudget, build_chat_model
 from drrepo.config import DEFAULT_MODELS, Config
 from drrepo.errors import ConfigurationError
+from drrepo.report.store import JsonFileStore
 from drrepo.resilience import CircuitBreaker
 from drrepo.service import AnalysisService
 
@@ -58,7 +59,7 @@ def test_service_builds_one_client_per_distinct_model(monkeypatch, tmp_path):
 
     monkeypatch.setattr("drrepo.service.build_chat_model", fake_build)
     config = Config(groq_api_key="k", model_name="base", model_name_investigation="big")
-    service = AnalysisService(config, history_path=tmp_path / "h.json")
+    service = AnalysisService(config, store=JsonFileStore(tmp_path / "h.json"))
     assert sorted(built) == ["base", "big"]
     assert service.role_clients["planner"] is service.role_clients["narrative"]
     assert service.role_clients["investigation"].model == "big"

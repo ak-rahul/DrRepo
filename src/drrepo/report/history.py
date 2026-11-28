@@ -1,8 +1,8 @@
-"""Score history: compare a report with the previous run of the same repository.
+"""Score history: run records, deltas against the previous run, and the JSON file.
 
-The one place a report touches disk other than export: an append-only JSON
-file (`reports/history.json`), capped per repository. History is a
-convenience, so failing to write it never fails an analysis.
+A run record (`run_record`) is the same dict in every store (`report/store.py`).
+This module also implements the default store's file: an append-only JSON file
+(`reports/history.json`), capped per repository.
 
 Each run also records what its deep investigations really cost (`deep_tokens`),
 so the next run can size its budget from measurements instead of a fixed guess
@@ -21,8 +21,6 @@ from typing import Any
 
 from filelock import FileLock
 
-from drrepo.log import logger
-
 DEFAULT_HISTORY_PATH = Path("reports") / "history.json"
 _MAX_RUNS_PER_REPO = 20
 _ESTIMATE_SAMPLES_PER_REPO = 10
@@ -37,7 +35,8 @@ _LOCK_TIMEOUT_SECONDS = 10.0
 _history_lock = threading.Lock()
 
 
-def _repo_key(repository: dict[str, Any]) -> str:
+def repo_key(repository: dict[str, Any]) -> str:
+    """The key runs of one repository share: its URL (`report["repository"]["url"]`)."""
     return str(repository.get("url") or repository.get("name", "unknown"))
 
 
@@ -53,18 +52,20 @@ def load_history(history_path: Path = DEFAULT_HISTORY_PATH) -> list[dict[str, An
         return []
 
 
-def runs_for(repository: dict[str, Any], history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every recorded run of this repository, oldest first."""
-    key = _repo_key(repository)
-    return [r for r in history if r.get("repo_key") == key]
-
-
-def previous_run_for(
-    repository: dict[str, Any], history: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    """Return the most recent prior run recorded for this repository, or None."""
-    matches = runs_for(repository, history)
-    return matches[-1] if matches else None
+def run_record(report: dict[str, Any]) -> dict[str, Any]:
+    """What a store keeps about one finished run, besides the report itself."""
+    return {
+        "repo_key": repo_key(report["repository"]),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "commit_sha": report["repository"].get("commit_sha"),
+        "overall_score": report["overall_score"],
+        "category_scores": {
+            name: cs["score"]
+            for name, cs in report["category_scores"].items()
+            if cs.get("assessed", True)
+        },
+        "deep_tokens": deep_tokens(report),
+    }
 
 
 def deep_tokens(report: dict[str, Any]) -> list[int]:
@@ -89,7 +90,7 @@ def deep_investigation_estimate(
     """Mean recorded cost of a deep investigation: this repository's recent runs
     first (cost grows with repository size), else recent runs of any repository.
     None when nothing has been measured yet."""
-    key = _repo_key(repository)
+    key = repo_key(repository)
     own = [t for r in history if r.get("repo_key") == key for t in r.get("deep_tokens", [])]
     sample = (
         own[-_ESTIMATE_SAMPLES_PER_REPO:]
@@ -126,22 +127,9 @@ def record_run(report: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH
     lock = FileLock(f"{history_path}.lock", timeout=_LOCK_TIMEOUT_SECONDS)
     with _history_lock, lock:
         history = load_history(history_path)
-        key = _repo_key(report["repository"])
-
-        history.append(
-            {
-                "repo_key": key,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "commit_sha": report["repository"].get("commit_sha"),
-                "overall_score": report["overall_score"],
-                "category_scores": {
-                    name: cs["score"]
-                    for name, cs in report["category_scores"].items()
-                    if cs.get("assessed", True)
-                },
-                "deep_tokens": deep_tokens(report),
-            }
-        )
+        entry = run_record(report)
+        key = entry["repo_key"]
+        history.append(entry)
 
         this_repo_runs = [r for r in history if r.get("repo_key") == key]
         if len(this_repo_runs) > _MAX_RUNS_PER_REPO:
@@ -160,26 +148,3 @@ def record_run(report: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
-
-
-def attach_and_record_history(
-    report: dict[str, Any], history_path: Path = DEFAULT_HISTORY_PATH
-) -> dict[str, Any]:
-    """Compute score deltas vs. the previous run for this repo (if any), attach
-    them under `report["score_history"]`, then append this run to the history
-    file. Mutates and returns `report`. Call once per completed run, before
-    the report is displayed or exported.
-
-    History is a convenience: if it can't be written (read-only volume, lock
-    timeout, a file held open on Windows), the finished report is still returned.
-    """
-    history = load_history(history_path)
-    previous = previous_run_for(report["repository"], history)
-    if previous is not None:
-        report["score_history"] = compute_deltas(report, previous)
-
-    try:
-        record_run(report, history_path)
-    except OSError as e:
-        logger.warning(f"Score history not recorded ({type(e).__name__}: {e})")
-    return report

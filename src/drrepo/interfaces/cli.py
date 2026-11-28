@@ -4,11 +4,12 @@
     drrepo quick <url>                        fast deterministic audit (no LLM)
     drrepo diff  <url> <base> [head]          new, worse and fixed issues between commits
     drrepo ui          [--port 8501]          Streamlit web UI
+    drrepo org   <owner> [--limit 20]         audit an organization's repositories, write a leaderboard
     drrepo health      [--json]               connectivity of LLM provider, GitHub, OSV.dev
     drrepo doctor                             full local diagnostics
     drrepo eval        [--deep] [--update-baseline]   run the evaluation set vs. its baseline
     drrepo baseline    <url> [-o .drrepo.toml]         accept current findings as suppressions
-    drrepo health-api  [--port 8000]          FastAPI health endpoint
+    drrepo serve       [--port 8000]          REST API: analysis jobs, history, badges, health
 
 `drrepo <url>` is shorthand for `drrepo audit <url>`; `analyze` is an alias of `audit`.
 
@@ -45,9 +46,11 @@ SUBCOMMANDS = {
     "ui",
     "health",
     "doctor",
+    "serve",
     "health-api",
     "eval",
     "baseline",
+    "org",
 }
 
 
@@ -140,6 +143,7 @@ def _run_config(args: argparse.Namespace) -> Config:
         config.log_level,
         log_file=args.log_file,
         console_level="DEBUG" if args.verbose else "WARNING" if not args.quiet else "ERROR",
+        fmt=config.log_format,
     )
     missing = config.validate_for_llm()
     if missing:
@@ -401,6 +405,63 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return EXIT_OK if ok else EXIT_ERROR
 
 
+def cmd_org(args: argparse.Namespace) -> int:
+    """Audit an organization's (or user's) public repositories and write a leaderboard."""
+    from drrepo.batch import (
+        RepositoryListError,
+        aggregate_sarif,
+        leaderboard,
+        leaderboard_markdown,
+        list_repositories,
+        run_batch,
+    )
+    from drrepo.service import AnalysisService
+
+    config = _load_config(args.env_file)
+    if args.no_history:
+        config = dataclasses.replace(config, enable_score_history=False)
+    configure_logging(
+        config.log_level, log_file=args.log_file, console_level="WARNING", fmt=config.log_format
+    )
+    try:
+        urls = list_repositories(
+            args.owner,
+            config,
+            limit=args.limit,
+            include_forks=args.include_forks,
+            include_archived=args.include_archived,
+        )
+    except RepositoryListError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_ERROR
+    if not urls:
+        print(f"{args.owner} has no public repositories to audit", file=sys.stderr)
+        return EXIT_OK
+    print(f"Auditing {len(urls)} repositories of {args.owner}", file=sys.stderr)
+    results = run_batch(
+        AnalysisService(config),
+        urls,
+        workers=args.workers,
+        deep=args.deep,
+        progress=_progress(args),
+    )
+    rows = leaderboard(results)
+    output = Path(args.output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    stem = output / f"{args.owner}_leaderboard"
+    markdown = leaderboard_markdown(args.owner, rows)
+    stem.with_suffix(".md").write_text(markdown, encoding="utf-8")
+    stem.with_suffix(".json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    reports = [r.report for r in results if r.report]
+    if reports:
+        (output / f"{args.owner}.sarif").write_text(aggregate_sarif(reports), encoding="utf-8")
+    if not args.quiet:
+        print(markdown)
+    print(f"Leaderboard written: {stem.with_suffix('.md')}", file=sys.stderr)
+    failed = sum(r.report is None for r in results)
+    return EXIT_ERROR if failed == len(results) else EXIT_OK
+
+
 def cmd_baseline(args: argparse.Namespace) -> int:
     """Analyze (deterministically) and write every current finding as a suppression."""
     from datetime import UTC, datetime, timedelta
@@ -411,7 +472,9 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     config = dataclasses.replace(
         _load_config(args.env_file), enable_deep_investigation=False, enable_score_history=False
     )
-    configure_logging(config.log_level, log_file=args.log_file, console_level="WARNING")
+    configure_logging(
+        config.log_level, log_file=args.log_file, console_level="WARNING", fmt=config.log_format
+    )
     output = Path(args.output)
     if output.exists() and not args.force:
         print(f"error: {output} exists; pass --force to overwrite it", file=sys.stderr)
@@ -457,7 +520,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         enable_deep_investigation=args.deep,
         enable_score_history=False,
     )
-    configure_logging(config.log_level, log_file=args.log_file, console_level="WARNING")
+    configure_logging(
+        config.log_level, log_file=args.log_file, console_level="WARNING", fmt=config.log_format
+    )
     try:
         cases = load_cases(Path(args.manifest))
         labels = load_labels(Path(args.labels))
@@ -495,11 +560,14 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return EXIT_FAIL_UNDER if comparison.regressed else EXIT_OK
 
 
-def cmd_health_api(args: argparse.Namespace) -> int:
+def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
-    configure_logging(_load_config(args.env_file).log_level, log_file=args.log_file)
-    uvicorn.run("drrepo.interfaces.health:app", host=args.host, port=args.port, log_level="info")
+    from drrepo.interfaces.api import create_app
+
+    config = _load_config(args.env_file)
+    configure_logging(config.log_level, log_file=args.log_file, fmt=config.log_format)
+    uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
     return EXIT_OK
 
 
@@ -635,6 +703,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser(
+        "org", parents=[common], help="audit an organization's public repositories (leaderboard)"
+    )
+    p.add_argument("owner", help="GitHub organization or user")
+    p.add_argument("--limit", type=int, default=20, help="repositories to audit, newest push first")
+    p.add_argument("--workers", type=int, default=2, help="analyses at once")
+    p.add_argument("--deep", action="store_true", help="allow LLM investigations (costs tokens)")
+    p.add_argument("--include-forks", action="store_true")
+    p.add_argument("--include-archived", action="store_true")
+    p.add_argument("-o", "--output-dir", default="reports", help="where to write the leaderboard")
+    p.add_argument("--no-history", action="store_true", help="don't record or compare history")
+    p.add_argument("-q", "--quiet", action="store_true", help="no progress or leaderboard output")
+    p.set_defaults(func=cmd_org)
+
+    p = sub.add_parser(
         "baseline", parents=[common], help="write current findings as a suppression file"
     )
     p.add_argument("repo_url", help="https://github.com/<owner>/<repo>")
@@ -666,10 +748,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", help="also write the Markdown table to this file")
     p.set_defaults(func=cmd_eval)
 
-    p = sub.add_parser("health-api", parents=[common], help="serve the FastAPI health endpoint")
+    p = sub.add_parser(
+        "serve",
+        aliases=["health-api"],
+        parents=[common],
+        help="REST API: analysis jobs, history, badges and health endpoints",
+    )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
-    p.set_defaults(func=cmd_health_api)
+    p.set_defaults(func=cmd_serve)
     return parser
 
 

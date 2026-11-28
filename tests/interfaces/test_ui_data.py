@@ -147,3 +147,16 @@ def test_history_and_diff_rows():
     assert ui.category_delta_rows(diff) == [
         {"category": "Code Quality", "base": 90.0, "head": 80.0, "change": -10.0}
     ]
+
+
+def test_evidence_steps_are_the_calls_that_touched_the_cited_file():
+    trace = [
+        {"tool": "list_directory", "tool_input": {"path": "."}, "observation": "app.py\nlib.py"},
+        {"tool": "read_file", "tool_input": {"path": "app.py"}, "observation": "DEBUG = True"},
+        {"tool": "read_file", "tool_input": {"path": "lib.py"}, "observation": "x = 1"},
+    ]
+    report = {"category_scores": {"security": {"investigation_trace": trace}}}
+    agent = {"source": "investigator:security", "category": "security", "file": "app.py"}
+    assert [s["tool"] for s in ui.evidence_steps(agent, report)] == ["list_directory", "read_file"]
+    assert ui.evidence_steps({**agent, "source": "bandit"}, report) == []  # scanners need no trace
+    assert ui.evidence_steps({**agent, "file": None}, report) == []

@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from drrepo.config import Config
@@ -58,12 +59,13 @@ def test_network_error_is_down():
 def api(monkeypatch):
     health_api.get_config.cache_clear()
     monkeypatch.setattr(health_api, "get_config", lambda: Config(groq_api_key="k"))
-    return TestClient(health_api.app)
+    app = FastAPI()
+    app.include_router(health_api.router)
+    return TestClient(app)
 
 
-def test_live_and_root(api):
+def test_live(api):
     assert api.get("/health/live").text == "alive"
-    assert "/health" in api.get("/").json()["endpoints"]
 
 
 def test_ready(api, monkeypatch):

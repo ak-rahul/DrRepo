@@ -29,6 +29,7 @@ from drrepo.config import Config
 from drrepo.log import logger
 from drrepo.models import CollectorResult, CollectorStatus
 from drrepo.recon.clone import git_env
+from drrepo.recon.limits import limited
 from drrepo.recon.secrets import is_fixture_path, is_scannable, match_secret, secret_severity
 
 NAME = "secret_history"
@@ -100,11 +101,17 @@ def _stream(process: subprocess.Popen[str], cap: int, commits: list[str]) -> Ite
 
 
 def scan_history(
-    root: Path, commits: int, *, present: set[tuple[str, str]], timeout: float
+    root: Path,
+    commits: int,
+    *,
+    present: set[tuple[str, str]],
+    timeout: float,
+    config: Config | None = None,
 ) -> dict[str, Any]:
     """Secrets added in the last `commits` commits that the tree no longer has."""
+    config = config or Config()
     process = subprocess.Popen(
-        git_log_command(root, commits),
+        limited(git_log_command(root, commits), config),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
@@ -170,7 +177,11 @@ def collect_secret_history(
         return CollectorResult.skipped(NAME, "No local clone available")
     try:
         data = scan_history(
-            root, commits, present=present, timeout=float(config.collector_timeout_seconds)
+            root,
+            commits,
+            present=present,
+            timeout=float(config.collector_timeout_seconds),
+            config=config,
         )
     except OSError as e:
         logger.warning(f"git log failed: {e}")

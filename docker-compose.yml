@@ -1,5 +1,5 @@
 # docker compose up            -> Streamlit UI on http://localhost:8501
-# docker compose --profile api up    -> also the health API on :8000
+# docker compose --profile api up    -> also the REST API on :8000 (set API_KEYS in .env)
 # One-off CLI run:
 #   docker compose run --rm ui drrepo audit https://github.com/psf/requests
 #
@@ -24,11 +24,18 @@ services:
     ports:
       - "127.0.0.1:8501:8501"
 
-  health-api:
+  api:
     <<: *drrepo
     profiles: [api]
-    container_name: drrepo-health-api
-    command: ["drrepo", "health-api", "--host", "0.0.0.0", "--port", "8000"]
+    container_name: drrepo-api
+    command: ["drrepo", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      # Jobs and full reports in reports/drrepo.db, so queued work survives a restart.
+      STORE_BACKEND: sqlite
+      # Reuse clones of the same commit for an hour (repeat audits, diff --deep).
+      CLONE_CACHE_TTL_SECONDS: "3600"
+      # Requests from the host arrive from the Docker bridge, not loopback, so the
+      # analysis endpoints need API_KEYS (in .env); health and badges are public.
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:

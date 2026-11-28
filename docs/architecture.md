@@ -40,7 +40,8 @@ src/drrepo/
                     tools (all investigator tools + build_tools), analysts/ (one per category),
                     prompts (loader) + instructions/*.md (every agent's job, as documents)
   report/           synthesis (pure scoring), history (disk, locked), exporters (JSON/MD/SARIF/CycloneDX), diff (two reports compared)
-  interfaces/       cli, streamlit_app, ui_data, health (checks + FastAPI app)
+  interfaces/       cli, streamlit_app, ui_data, api (REST API), health (checks + router)
+  jobs.py           background analysis jobs for the API
 ```
 
 Package `__init__.py` files contain only a docstring (`agents/analysts/__init__.py` also has `default_analysts()`). Import from the submodule you need, so importing `drrepo.models` doesn't load LangChain or Streamlit.
@@ -59,7 +60,7 @@ Each collector is a plain function returning `CollectorResult(name, status, data
 
 | Collector | Module | Produces |
 |---|---|---|
-| clone | `recon/clone.py` | temp dir; shallow (one commit, or N+1 with `--scan-history N`), size-capped, hardened (see Security model) |
+| clone | `recon/clone.py` + `recon/clone_cache.py` | temp dir; shallow (one commit, or N+1 with `--scan-history N`), size-capped, hardened (see Security model). With `CLONE_CACHE_TTL_SECONDS`, `git ls-remote` resolves the commit first and a cached clone of it is copied out instead |
 | `repo_layout` | `recon/files.py` | nested tests/CI/docs/license/policies, lockfile presence, lines per language, README fallback |
 | `github_metadata` | `recon/github.py` | stars, license SPDX id, activity, archived flag, README, root structure |
 | `readme` | `pipeline._readme` → `recon/readme.py` | heading-based sections, examples, badges, 0–100 score; reads the API README first, then the clone |
@@ -113,7 +114,7 @@ The `Analyst` contract (`analysts/base.py`):
 
 ## Stage 4: synthesis (`report/`)
 
-`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records score history: append-only, 20 runs per repository, written to a temp file and renamed into place. A thread lock and a lock file (`history.json.lock`) serialize writers, so the UI and CLI can share one `reports/` directory. If history can't be written, the report is still returned and a warning is logged. See [report-format.md](report-format.md) for the scoring math and output schema.
+`synthesize_report` is pure. It computes the weighted mean over assessed categories (security 0.30, code quality 0.25, others 0.15, renormalized), sorts issues, and builds deduplicated quick wins. The service then records the run in its `ReportStore` (`report/store.py`). The default `JsonFileStore` keeps scores in `reports/history.json`: append-only, 20 runs per repository, written to a temp file and renamed into place, with a thread lock and a lock file (`history.json.lock`) serializing writers so the UI and CLI can share one `reports/` directory. `SQLiteStore` (`STORE_BACKEND=sqlite`) keeps scores, full reports and API jobs in one WAL-mode database, a connection per call, so threads and processes share it safely. If history can't be read or written, the report is still returned and a warning is logged. See [report-format.md](report-format.md) for the scoring math and output schema.
 
 ## Resilience (`resilience.py`, `agents/llm.py`)
 
@@ -150,7 +151,9 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 **Data that leaves the machine:** public repository metadata to GitHub, package names and versions to OSV.dev and deps.dev, and trimmed recon data plus tool outputs to the configured LLM provider. Secrets are never reported by value.
 
-**Exposed services:** the web UI and the health API have no authentication. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
+**Exposed services:** the web UI has no authentication. The REST API needs an `API_KEYS` key, or without keys serves only loopback callers that carry no proxy headers; it rate-limits and caps its queue per `API_*`. They bind to localhost by default, and `docker-compose.yml` publishes their ports on `127.0.0.1` only. Put an authenticating proxy in front before exposing them.
+
+**Scanner limits:** besides its timeout, each scanner and `git log` runs under `prlimit` on Linux (`recon/limits.py`): a file-size cap, and an opt-in address-space cap. The prefix replaces `preexec_fn`, which is unsafe in the threaded collector fan-out.
 
 **Container:** non-root (uid 1000), with code and tools root-owned and read-only to the app user; only `reports/` and `logs/` are writable. No curl in the image (healthchecks use Python), and the build context is an allow-list (`.dockerignore`), so local `.env` files never reach the build.
 
@@ -158,4 +161,7 @@ A node whose predecessors sit at different depths fires once per superstep in wh
 
 - **cli**: argparse subcommands. Progress goes to stderr and the report to stdout, so `--json` can be piped.
 - **streamlit_app**: runs the analysis on a worker thread that writes to a plain `AnalysisJob` object. `st.fragment(run_every=1)` shows progress and reruns once when the job finishes. `main()` runs only under `__main__`.
-- **health**: token-free connectivity checks plus the FastAPI app (sync endpoints, lazy config).
+- **api**: the REST API (`drrepo serve`, FastAPI). `POST /analyses` validates the URL and ref, then hands the job to `jobs.JobQueue`: a bounded thread pool whose job state (status, progress, summary, report) lives in the store, so a SQLite-backed queue resumes after a restart. Authentication, the per-client `RateLimiter` and the queue cap run before any work is queued.
+- **health**: token-free connectivity checks and the health `router` the API mounts (sync endpoints, lazy config).
+
+**Operations.** `metrics.Metrics` counts analyses, durations, collector results and tokens in `AnalysisService`; the API serves them at `/metrics`. `telemetry.py` makes OpenTelemetry spans (a no-op without the `otel` extra); because LangGraph runs nodes on worker threads, the analysis span's context travels in `RunContext.trace_parent`. `batch.py` (`drrepo org`) lists an owner's repositories and runs them on a bounded pool over one service.

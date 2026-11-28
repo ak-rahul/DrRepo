@@ -4,7 +4,7 @@
 
 Please report vulnerabilities privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability**. Do not open a public issue.
 
-Include the DrRepo version (`uv run drrepo --version`), the interface involved (CLI, web UI, GitHub Action, health API), and steps to reproduce. If a specific repository triggers the problem, link it. You should get a first response within 7 days.
+Include the DrRepo version (`uv run drrepo --version`), the interface involved (CLI, web UI, GitHub Action, REST API), and steps to reproduce. If a specific repository triggers the problem, link it. You should get a first response within 7 days.
 
 ## Supported versions
 
@@ -21,6 +21,6 @@ DrRepo processes untrusted input by design: it clones arbitrary public repositor
 
 Out of scope:
 
-- The web UI and the health API have no authentication of their own. This is documented. Run them behind your own authentication or on a trusted network only.
+- The web UI has no authentication of its own. This is documented. Run it behind your own authentication or on a trusted network only. (The REST API's own key check, rate limit and loopback rule are in scope.)
 - Scores and findings that are wrong without any of the effects above. Report those as normal bugs.
 - Vulnerabilities in dependencies that DrRepo doesn't reach. CI runs `pip-audit` on every change, and Dependabot proposes updates weekly.

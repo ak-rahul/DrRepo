@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import sqlite3
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -25,21 +27,20 @@ from typing import Any
 
 from drrepo.agents.llm import LLMRuntime, TokenBudget, build_chat_model
 from drrepo.config import Config
+from drrepo.log import logger
+from drrepo.metrics import Metrics
 from drrepo.models import RepoRef
 from drrepo.pipeline import ProgressCallback, RunContext, Workflow
 from drrepo.recon.clone import validate_ref
 from drrepo.recon.dependencies import DependencyLookupCache
 from drrepo.report.diff import diff_reports, worsened_categories
 from drrepo.report.exporters import EXPORTERS, EXTENSIONS, diff_to_markdown
-from drrepo.report.history import (
-    DEFAULT_HISTORY_PATH,
-    attach_and_record_history,
-    deep_investigation_estimate,
-    load_history,
-)
+from drrepo.report.history import deep_investigation_estimate
+from drrepo.report.store import ReportStore, attach_history, open_store
 from drrepo.report.suppressions import Suppression
 from drrepo.report.suppressions import load_file as load_suppression_file
 from drrepo.resilience import CircuitBreaker
+from drrepo.telemetry import configure_tracing, current_context, set_attributes, span
 
 MAX_REPORTS_IN_MEMORY = 20
 _UNSET: Any = object()
@@ -52,12 +53,15 @@ class AnalysisService:
         *,
         llm_client: Any = _UNSET,
         workflow: Workflow | None = None,
-        history_path: Path = DEFAULT_HISTORY_PATH,
+        store: ReportStore | None = None,
     ):
         """`llm_client` defaults to the configured provider's chat model, or None
         (deterministic, no-LLM mode) when its API key is missing."""
         self.config = config
-        self.history_path = history_path
+        # Score history, full reports where the backend keeps them, and API jobs.
+        self.store = store if store is not None else open_store(config)
+        self.metrics = Metrics()
+        configure_tracing(config)  # once per process; a no-op without an OTLP endpoint
         self.workflow = workflow or Workflow()
         self.role_clients: dict[str, Any] = {}
         if llm_client is _UNSET:
@@ -154,10 +158,23 @@ class AnalysisService:
             context.deep_allowed = frozenset(deep_categories)
         if use_history:
             context.deep_investigation_tokens = self._deep_estimate(repo, config)
-        report = self.workflow.run(repo, context, description, ref)
+        started = time.monotonic()
+        with span("drrepo.analysis", repo=repo.full_name, ref=ref or "") as current:
+            context.trace_parent = current_context()
+            try:
+                report = self.workflow.run(repo, context, description, ref)
+            except Exception:
+                self.metrics.inc("drrepo_analyses_total", outcome="error")
+                raise
+            set_attributes(
+                current,
+                commit=(report.get("repository") or {}).get("commit_sha") or "",
+                overall_score=report.get("overall_score", 0.0),
+            )
+        self.metrics.record_analysis(report, time.monotonic() - started)
 
         if use_history:
-            report = attach_and_record_history(report, self.history_path)
+            report = attach_history(report, self.store)
 
         key = repo.full_name.lower()
         with self._lock:
@@ -229,9 +246,12 @@ class AnalysisService:
     def _deep_estimate(self, repo: RepoRef, config: Config) -> int | None:
         """Measured cost of a deep investigation, kept within 4x of the configured
         estimate so one outlier run can't starve or flood the next budget."""
-        measured = deep_investigation_estimate(
-            {"url": repo.html_url}, load_history(self.history_path)
-        )
+        try:
+            runs = self.store.runs()
+        except (OSError, sqlite3.Error) as e:  # history is a convenience
+            logger.warning(f"Score history not read ({type(e).__name__}: {e})")
+            runs = []
+        measured = deep_investigation_estimate({"url": repo.html_url}, runs)
         if measured is None:
             return None
         default = config.estimated_tokens_per_deep_investigation

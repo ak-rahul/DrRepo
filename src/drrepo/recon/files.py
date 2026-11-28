@@ -27,8 +27,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import sys
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +77,36 @@ def relative_posix(path: str | Path, root: str | Path) -> str:
         return p.resolve().relative_to(root_path).as_posix()
     except (ValueError, OSError):
         return Path(path).as_posix()
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a directory tree, including the read-only files git leaves (Windows)."""
+
+    def _on_error(func: Callable[[str], object], p: str, _exc: object) -> None:
+        # Git marks pack files read-only; Windows refuses to delete those.
+        try:
+            Path(p).chmod(0o700)
+            func(p)
+        except OSError:
+            pass
+
+    if not path.exists():
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_error)
+    else:  # pragma: no cover - 3.11 only
+        shutil.rmtree(path, onerror=_on_error)
+
+
+def dir_size_mb(path: Path) -> float:
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except OSError:
+                continue
+    return total / (1024 * 1024)
 
 
 def iter_repo_files(

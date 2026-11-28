@@ -47,9 +47,10 @@ Providers: Groq (default), OpenAI, Anthropic (`uv sync --extra anthropic`), or l
 
 - **CLI**: `drrepo audit <url> [--format json,md,sarif,cdx,summary] [--fail-under 70]`, or `drrepo quick <url>` without LLM investigations. The exit code makes it usable as a CI gate. `drrepo diff <url> main <sha>` reports what a change made better or worse.
 - **GitHub Action**: `uses: ak-rahul/DrRepo@<sha>` gates on the score or, on pull requests, on what the change made worse; uploads SARIF to code scanning; and keeps a summary comment on pull requests. See [docs/usage.md](docs/usage.md#in-ci-the-github-action).
-- **Web UI**: audit a commit or compare two, with live progress, issue search and filters, dependencies, suppressions, the investigator's tool-call trace and token use, a score trend, and every export.
+- **Web UI**: audit a commit or compare two, with live progress, issue search and filters, one-click "mark as false positive" (writes a suppression), what the agent read for each of its findings, dependencies, suppressions, the tool-call trace and token use, a score trend, and every export.
+- **Organizations**: `drrepo org <owner>` audits an organization's repositories and writes a leaderboard and one SARIF log. See [docs/usage.md](docs/usage.md#auditing-an-organization).
 - **Python**: `AnalysisService(Config.from_env()).analyze(url)`. See [examples/](examples/).
-- **Health API**: `drrepo health-api` serves liveness, readiness, and dependency checks.
+- **REST API**: `drrepo serve` queues analyses as background jobs (API keys, per-key rate limits), serves score history, report exports and shields.io badges, plus health checks. Prometheus metrics at `/metrics`, JSON logs and optional OpenTelemetry traces. See [docs/usage.md](docs/usage.md#rest-api).
 
 ## How it works
 

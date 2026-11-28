@@ -1,15 +1,16 @@
 import pytest
 
 from drrepo.report import history as history
+from drrepo.report.store import JsonFileStore, attach_history
 
 
 class TestHistory:
     def test_attach_and_record(self, tmp_path, report_dict):
         path = tmp_path / "history.json"
-        first = history.attach_and_record_history(dict(report_dict), path)
+        first = attach_history(dict(report_dict), JsonFileStore(path))
         assert "score_history" not in first
         second = dict(report_dict, overall_score=report_dict["overall_score"] + 5)
-        second = history.attach_and_record_history(second, path)
+        second = attach_history(second, JsonFileStore(path))
         assert second["score_history"]["overall_score_delta"] == 5
         assert "code_quality" not in second["score_history"]["category_score_deltas"]  # unassessed
         assert not list(tmp_path.glob("*.tmp"))  # temp files are renamed or removed
@@ -33,8 +34,8 @@ class TestHistory:
         def fail(*_args, **_kwargs):
             raise PermissionError("history.json is locked by another program")
 
-        monkeypatch.setattr(history, "record_run", fail)
-        report = history.attach_and_record_history(dict(report_dict), tmp_path / "h.json")
+        monkeypatch.setattr("drrepo.report.store.record_run", fail)
+        report = attach_history(dict(report_dict), JsonFileStore(tmp_path / "h.json"))
         assert report["overall_score"] == report_dict["overall_score"]
 
     def test_failed_write_leaves_no_temp_file(self, tmp_path, report_dict, monkeypatch):
@@ -64,9 +65,9 @@ class TestHistory:
 def test_history_records_and_compares_commits(tmp_path, report_dict):
     path = tmp_path / "h.json"
     first = dict(report_dict, repository={**report_dict["repository"], "commit_sha": "1" * 40})
-    history.attach_and_record_history(first, path)
+    attach_history(first, JsonFileStore(path))
     second = dict(report_dict, repository={**report_dict["repository"], "commit_sha": "2" * 40})
-    second = history.attach_and_record_history(second, path)
+    second = attach_history(second, JsonFileStore(path))
     assert second["score_history"]["previous_commit_sha"] == "1" * 40
     assert [r["commit_sha"] for r in history.load_history(path)] == ["1" * 40, "2" * 40]
 

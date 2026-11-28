@@ -266,7 +266,9 @@ def make_scan_tools(clone_root: str, config: Config) -> list[Any]:
         if not target.exists():
             return f"ERROR: '{path}' does not exist"
 
-        result = SCANNERS[scanner](root, target, timeout=config.collector_timeout_seconds)
+        result = SCANNERS[scanner](
+            root, target, timeout=config.collector_timeout_seconds, config=config
+        )
         if not result.available:
             return f"{scanner} unavailable: {result.reason}"
         if not result.findings:
